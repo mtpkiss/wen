@@ -1,0 +1,8 @@
+[package]
+  cjc-version = "1.0.0"
+  name = "wen"
+  description = "An Express-like web framework written in the Cangjie programming language."
+  version = "0.1.0"
+  output-type = "static"
+
+[dependencies]

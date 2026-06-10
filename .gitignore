@@ -1,0 +1,5 @@
+# Cangjie build output
+target/
+
+# IDE
+.idea/
