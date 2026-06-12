@@ -3,10 +3,11 @@ package wen
 import std.collection.*
 
 /*
- * Shared helpers used across the framework.
+ * 框架内部各处共用的辅助工具函数。
  */
 
-// Standard reason phrase for an HTTP status code.
+// 返回某个 HTTP 状态码对应的标准原因短语（reason phrase），用于状态行。
+// 仅覆盖框架常用的一批状态码；对未列出的状态码统一回退为通用的 "Status"。
 public func reasonPhrase(code: Int64): String {
     match (code) {
         case 200 => "OK"
@@ -32,8 +33,12 @@ public func reasonPhrase(code: Int64): String {
     }
 }
 
-// Split a string at the first occurrence of `sep`.
-// Returns (head, tail). If `sep` is absent, tail is the empty string.
+// 在字符串中 `sep` 第一次出现的位置把它切成两段。
+// 返回二元组 (head, tail)：head 是分隔符之前的部分，tail 是分隔符之后的部分
+// （tail 不包含分隔符本身）。
+// 如果字符串里根本不含 `sep`，则返回 (原串, "")，即 tail 为空串。
+// 由于只在“第一个”分隔符处切分，因此 tail 中即便再出现 `sep` 也会被原样保留，
+// 适合解析 "key=value"（value 里可能再含 "="）这类场景。
 public func splitOnce(s: String, sep: String): (String, String) {
     let idx = s.indexOf(sep)
     match (idx) {
@@ -45,12 +50,14 @@ public func splitOnce(s: String, sep: String): (String, String) {
     }
 }
 
-// Trim leading/trailing ASCII whitespace.
+// 去除字符串首尾的 ASCII 空白字符。仅对 trimAscii 的一层薄封装，
+// 提供一个语义更直白的名字供框架其它地方调用。
 public func trimWs(s: String): String {
     return s.trimAscii()
 }
 
-// Whether `list` already contains `value`.
+// 判断 `list` 中是否已经包含 `value`（按字符串相等逐个比较）。
+// 命中即返回 true，遍历完仍未找到则返回 false。
 public func listContains(list: ArrayList<String>, value: String): Bool {
     for (item in list) {
         if (item == value) {
@@ -60,7 +67,8 @@ public func listContains(list: ArrayList<String>, value: String): Bool {
     return false
 }
 
-// Split a path into non-empty segments: "/a/b/" -> ["a", "b"].
+// 把一个路径按 "/" 拆分成若干非空的路径段，自动丢弃因前导/末尾/连续斜杠
+// 产生的空段。例如 "/a/b/" 会得到 ["a", "b"]。
 public func pathSegments(path: String): Array<String> {
     let raw = path.split("/")
     let parts = ArrayList<String>()

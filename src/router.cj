@@ -4,17 +4,22 @@ import std.collection.*
 import std.regex.*
 
 /*
- * Routing core.
+ * 路由核心。
  *
- * A compiled path pattern is a list of segments. Each segment is one of:
- *   - Literal("users")  : must match exactly
- *   - Param("id")       : matches any single segment, captured as a parameter
- *   - Wildcard          : "*" matches the remaining path (greedy tail match)
+ * 一个路径模式(pattern)在编译后被拆解成一串「段(segment)」。路径以 "/" 分隔,
+ * 每一段都属于下面三种类型之一:
+ *   - Literal("users") : 字面量段，请求中对应的那一段必须与之逐字符完全相等。
+ *   - Param("id")      : 参数段，可匹配任意一段非空内容，并把该段的值以参数名
+ *                        "id" 为键捕获到 req.params 里。
+ *   - Wildcard         : 通配段，写作 "*"，贪婪地吞掉请求路径中剩余的全部段，
+ *                        因此它只在模式末尾有意义。
  *
- * Patterns support two matching modes:
- *   - exact   : used by route handlers (get/post/...), the whole path must match
- *   - prefix  : used by mounted middleware (use(path, mw)), the pattern must be
- *               a leading prefix of the request path
+ * 编译后的模式支持两种匹配模式:
+ *   - exact(精确匹配) : 供路由处理器(get/post/... 注册的路由)使用，要求整条
+ *                        请求路径与模式逐段一一对应、长度一致，不能多也不能少。
+ *   - prefix(前缀匹配): 供挂载式中间件(use(path, mw))使用，只要求模式是请求
+ *                        路径的「前缀」——模式的所有段都能在请求路径开头依次匹配
+ *                        上即可，请求路径后面可以还有更多段。
  */
 
 enum SegKind {
@@ -25,8 +30,8 @@ enum SegKind {
 
 class Segment {
     let kind: SegKind
-    let value: String           // literal text, or parameter name
-    let constraint: ?Regex      // optional anchored regex for Param segments
+    let value: String           // 对字面量段是其文本内容；对参数段是参数名
+    let constraint: ?Regex      // 仅参数段可能用到：一个已加锚定的可选正则约束
 
     init(kind: SegKind, value: String) {
         this.kind = kind
@@ -58,9 +63,9 @@ public class PathPattern {
                 segs.add(Segment(Wildcard, "*"))
                 wildcard = true
             } else if (raw.startsWith(":")) {
-                // ":name" or ":name(pattern)" — the optional parenthesised regex
-                // constrains that single segment (Express-style). The pattern is
-                // anchored so it must match the whole segment.
+                // 参数段写法为 ":name" 或 ":name(pattern)"。后一种里括号内的正则
+                // 用来约束这一单段必须长成什么样子(Express 风格)。下面会给该正则
+                // 套上 ^(?:...)$ 锚定，使它必须匹配整段、而不是只匹配其中一部分。
                 let spec = raw[1..raw.size]
                 match (spec.indexOf("(")) {
                     case Some(p) =>
@@ -81,12 +86,12 @@ public class PathPattern {
         return PathPattern(segs, wildcard)
     }
 
-    // Exact match. Returns captured params on success, None on failure.
+    // 精确匹配。匹配成功时返回捕获到的参数表(键为参数名)，失败时返回 None。
     public func matchExact(path: String): ?HashMap<String, String> {
         return doMatch(pathSegments(path), false)
     }
 
-    // Prefix match used for mounted middleware.
+    // 前缀匹配，供挂载式中间件使用(只要求模式是请求路径的前缀)。
     public func matchPrefix(path: String): ?HashMap<String, String> {
         return doMatch(pathSegments(path), true)
     }
@@ -98,7 +103,8 @@ public class PathPattern {
             let seg = segments[i]
             match (seg.kind) {
                 case Wildcard =>
-                    // Wildcard consumes everything that remains.
+                    // 通配段:一旦碰到它，就把请求路径剩下的所有段全部吞掉，
+                    // 立即判定匹配成功并返回到目前为止捕获到的参数。
                     return params
                 case _ => ()
             }
@@ -119,17 +125,20 @@ public class PathPattern {
                             }
                         case None => ()
                     }
-                    // Captured params are URL-decoded (e.g. "john%20doe" -> "john doe").
+                    // 捕获到的参数值会做 URL 解码(例如 "john%20doe" -> "john doe")。
                     params[seg.value] = urlDecode(part)
                 case Wildcard => ()
             }
             i += 1
         }
-        // All pattern segments consumed.
+        // 走到这里说明模式里的所有段都已逐一匹配成功(且过程中没有遇到通配段)。
         if (prefix) {
-            // Extra request segments are allowed when mounting middleware.
+            // 前缀匹配模式下:模式全部用完即算成功，请求路径即便还剩多余的段也允许，
+            // 这正是挂载式中间件需要的语义(模式只是请求路径的开头)。
             return params
         }
+        // 精确匹配模式下:还要求请求路径不能有多余的段，即两者段数必须严格相等，
+        // 否则视为不匹配。
         if (parts.size == segments.size) {
             return params
         }
@@ -137,10 +146,11 @@ public class PathPattern {
     }
 }
 
-// One registered routing layer: a method filter, a compiled pattern, the
-// handler to run, and whether it is a mounted (prefix) middleware.
+// 一个已注册的「路由层(layer)」。它打包了一条注册项需要的全部信息:方法过滤
+// 条件、编译好的路径模式、要执行的处理器，以及它是否是挂载式(前缀)中间件。
+// 路由器内部就是按注册顺序维护一串这样的 Layer。
 class Layer {
-    let method: ?String        // None matches any method
+    let method: ?String        // None 表示不限方法，任意请求方法都匹配
     let pattern: PathPattern
     let handler: Middleware
     let isPrefix: Bool
@@ -156,8 +166,8 @@ class Layer {
         this.errorHandler = None
     }
 
-    // Error-handling layer: matches any request but only runs while an error is
-    // in flight (see Router.dispatch).
+    // 错误处理层的构造器:这种层在路径/方法上对任何请求都「匹配」，但它只在链中
+    // 有错误正在传递时才会真正被执行(详见 Router.dispatch 的错误模式处理)。
     init(errorHandler: ErrorHandler) {
         this.method = None
         this.pattern = PathPattern.compile("/")
@@ -167,12 +177,15 @@ class Layer {
         this.errorHandler = Some(errorHandler)
     }
 
-    // If this layer matches the request, return captured params; else None.
+    // 判断本层是否匹配该请求:匹配则返回捕获到的参数表，否则返回 None。
     func tryMatch(req: HttpRequest): ?HashMap<String, String> {
         if (this.isError) {
-            // Error layers are method/path agnostic; selection happens in dispatch.
+            // 错误处理层不看方法、也不看路径，一律视为匹配(返回空参数表);
+            // 它到底跑不跑、何时跑，完全由 dispatch 根据是否处于错误模式决定。
             return Some(HashMap<String, String>())
         }
+        // 方法过滤:若本层限定了方法且既不是 ALL(通配方法)、又与请求方法不同，
+        // 则直接判定不匹配。method 为 None 表示不限方法，跳过此过滤。
         match (this.method) {
             case Some(m) =>
                 if (m != HttpMethod.ALL && m != req.method) {
@@ -180,6 +193,8 @@ class Layer {
                 }
             case None => ()
         }
+        // 路径匹配方式取决于本层是不是挂载式中间件:挂载式用前缀匹配，
+        // 普通路由用精确匹配。
         if (this.isPrefix) {
             return this.pattern.matchPrefix(req.path)
         }
@@ -196,12 +211,13 @@ public class Router {
         layers.add(Layer(method, path, handler, isPrefix))
     }
 
-    // Global middleware (runs for every request).
+    // 全局中间件:对每个请求都执行。以根路径 "/" 作前缀注册，前缀匹配下它能
+    // 命中任意路径，因此等价于「对所有请求生效」。
     public func use(handler: Middleware): Unit {
         add(None, "/", handler, true)
     }
 
-    // Mounted middleware (runs for requests under `path`).
+    // 挂载式中间件:只对路径处于 `path` 之下(以 path 为前缀)的请求执行。
     public func use(path: String, handler: Middleware): Unit {
         add(None, path, handler, true)
     }
@@ -215,7 +231,8 @@ public class Router {
     public func options(path: String, handler: Middleware): Unit { add(Some(HttpMethod.OPTIONS), path, handler, false) }
     public func all(path: String, handler: Middleware): Unit { add(Some(HttpMethod.ALL), path, handler, false) }
 
-    // Terminal Handler form (no `next`), mirroring Application's overloads.
+    // 终结式 Handler 形态(处理器签名里没有 `next`)。与 Application 上的同名重载
+    // 对应，方便直接写「只产生响应、不再向后传递」的处理器。
     public func get(path: String, handler: Handler): Unit { add(Some(HttpMethod.GET), path, wrap(handler), false) }
     public func post(path: String, handler: Handler): Unit { add(Some(HttpMethod.POST), path, wrap(handler), false) }
     public func put(path: String, handler: Handler): Unit { add(Some(HttpMethod.PUT), path, wrap(handler), false) }
@@ -229,16 +246,17 @@ public class Router {
         return { req: HttpRequest, res: HttpResponse, _: Next => handler(req, res) }
     }
 
-    // Register an error-handling middleware. It runs only while an exception is
-    // in flight; register it after the routes whose errors it should catch.
+    // 注册一个错误处理中间件。它只在有异常正在链中传递时才会被调用;由于链是按
+    // 注册顺序执行的，所以要把它注册在「希望被它捕获其错误的那些路由」之后。
     public func useError(handler: ErrorHandler): Unit {
         layers.add(Layer(handler))
     }
 
-    // Run the middleware/route chain for a request. When nothing finishes the
-    // response: a path with no routes at all -> 404; a path that exists for
-    // other methods -> 405 (or 204 for OPTIONS) with an Allow header. A HEAD
-    // request with no HEAD route falls back to the GET route, headers only.
+    // 对一个请求运行整条中间件/路由链。若链跑完仍没有任何层产生响应，则按以下
+    // 规则收尾:该路径压根没有任何路由 -> 返回 404;该路径在别的方法下存在、只是
+    // 不支持当前方法 -> 返回 405(若是 OPTIONS 则返回 204)，并附上列出可用方法的
+    // Allow 头。另外，若是 HEAD 请求但没有对应的 HEAD 路由，则回退去走 GET 路由，
+    // 最终只回头部、不回正文。
     public func handle(req: HttpRequest, res: HttpResponse): Unit {
         if (req.method == HttpMethod.HEAD && !hasMethodForPath(HttpMethod.HEAD, req.path) &&
             hasMethodForPath(HttpMethod.GET, req.path)) {
@@ -281,8 +299,8 @@ public class Router {
         runChain(req, res, onExhausted, onError)
     }
 
-    // Distinct explicit methods of route layers whose path matches (excludes
-    // middleware, error layers and wildcard-method `all` routes).
+    // 收集所有「路径能精确匹配该 path」的路由层上显式声明的、互不重复的方法名。
+    // 会跳过中间件层、错误处理层，以及方法为通配的 `all` 路由(它们不算某个具体方法)。
     func methodsForPath(path: String): ArrayList<String> {
         let out = ArrayList<String>()
         for (layer in layers) {
@@ -326,8 +344,8 @@ public class Router {
         return false
     }
 
-    // Allow header value: registered methods plus implicit OPTIONS (and HEAD
-    // when GET is present).
+    // 构造 Allow 头的值:在已注册的方法基础上，补上隐式支持的 OPTIONS;若注册了
+    // GET 但没显式注册 HEAD，也补上 HEAD(因为 HEAD 会回退到 GET)。最后用 ", " 拼接。
     func allowHeader(path: String): String {
         let methods = methodsForPath(path)
         if (!listContains(methods, HttpMethod.OPTIONS)) {
@@ -349,10 +367,9 @@ public class Router {
         return s
     }
 
-    // Run this router as a piece of mounted middleware (a "mini-app"). If no
-    // internal layer finishes the response, control passes to `next` so the
-    // parent chain continues; an uncaught error is re-thrown so the parent's
-    // error pipeline can handle it.
+    // 把整个路由器当作一段挂载式中间件来运行(即所谓的「子应用 / mini-app」)。
+    // 若内部没有任何层把响应处理完结，就调用 `next` 把控制权交还给父级链，让父链
+    // 继续往下走;而内部未被捕获的错误则被重新抛出，交给父级的错误处理流水线去管。
     func handleAsMiddleware(req: HttpRequest, res: HttpResponse, next: Next): Unit {
         let onError: (Exception) -> Unit = { e: Exception => throw e }
         runChain(req, res, next, onError)
@@ -384,7 +401,7 @@ public class Router {
         let layer = matched[index]
         match (err) {
             case Some(e) =>
-                // Error mode: skip ordinary layers, run only error handlers.
+                // 错误模式:链中正携带着一个异常。此时跳过所有普通层，只让错误处理层运行。
                 if (!layer.isError) {
                     dispatch(matched, index + 1, req, res, onExhausted, onError, err)
                     return
@@ -399,7 +416,7 @@ public class Router {
                     dispatch(matched, index + 1, req, res, onExhausted, onError, Some(e2))
                 }
             case None =>
-                // Normal mode: skip error handlers, run ordinary layers.
+                // 正常模式:链中没有错误。此时跳过所有错误处理层，只让普通层运行。
                 if (layer.isError) {
                     dispatch(matched, index + 1, req, res, onExhausted, onError, None)
                     return
@@ -410,7 +427,8 @@ public class Router {
 
     private func runNormal(matched: ArrayList<Layer>, index: Int64, layer: Layer, req: HttpRequest, res: HttpResponse,
                            onExhausted: Next, onError: (Exception) -> Unit): Unit {
-        // Re-apply this layer's captured params (each layer may capture different ones).
+        // 重新运行本层的匹配以取回它捕获的参数并写入 req.params。之所以要在此重新
+        // 匹配，是因为不同的层可能捕获不同的参数名/值，需在执行该层处理器前对齐。
         match (layer.tryMatch(req)) {
             case Some(params) =>
                 for ((k, v) in params) {
@@ -418,9 +436,10 @@ public class Router {
                 }
             case None => ()
         }
-        // Mounted middleware (use(path, mw)) sees the path with its mount prefix
-        // stripped, mirroring Express. The original path is restored before the
-        // rest of the chain runs, so downstream routes still match in full.
+        // 挂载式中间件(use(path, mw))在执行时，看到的 req.path 是「已剥掉挂载前缀」
+        // 的相对路径，这与 Express 的行为一致。这里先保存原始路径并临时替换为剥掉前缀
+        // 后的路径供该处理器使用;待轮到链的后续部分运行时，会先把原始路径还原回去，
+        // 从而保证下游路由仍按完整路径来匹配。
         if (layer.isPrefix && layer.pattern.segments.size > 0) {
             let savedPath = req.path
             req.path = stripMountPath(req.path, layer.pattern.segments.size)
@@ -446,8 +465,9 @@ public class Router {
         }
     }
 
-    // Drop the first `mountSegments` path segments and rebuild the remainder,
-    // e.g. stripMountPath("/static/css/app.css", 1) -> "/css/app.css".
+    // 丢弃路径开头的前 `mountSegments` 个段，再把剩余的段重新拼成路径，
+    // 例如 stripMountPath("/static/css/app.css", 1) -> "/css/app.css"。
+    // 若剩余段不足(全被剥光)，则返回根路径 "/"。
     func stripMountPath(path: String, mountSegments: Int64): String {
         let parts = pathSegments(path)
         if (parts.size <= mountSegments) {
