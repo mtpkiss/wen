@@ -79,6 +79,28 @@ class AppTest {
         @Assert(urlDecode("a%20b+c"), "a b c")
     }
 
+    // urlDecode reassembles multi-byte UTF-8 sequences rather than decoding each
+    // byte on its own ("中" is %E4%B8%AD in UTF-8).
+    @TestCase
+    func testUrlDecodeUtf8(): Unit {
+        @Assert(urlDecode("%E4%B8%AD"), "中")
+        @Assert(urlDecode("a%E4%B8%ADb"), "a中b")
+        @Assert(urlDecode("%E4%BD%A0%E5%A5%BD"), "你好")
+    }
+
+    // A UTF-8 path param survives capture + decode end to end.
+    @TestCase
+    func testParamUrlDecodedUtf8(): Unit {
+        let app = wen()
+        app.get("/u/:name", { req: HttpRequest, res: HttpResponse =>
+            let n = match (req.param("name")) { case Some(v) => v; case None => "?" }
+            res.send(n)
+        })
+        let req = HttpRequest("GET", "/u/%E4%B8%AD"); req.path = "/u/%E4%B8%AD"
+        let res = HttpResponse(); app.handle(req, res)
+        @Assert(res.body, "中")
+    }
+
     // splitOnce splits at the first separator occurrence.
     @TestCase
     func testSplitOnce(): Unit {

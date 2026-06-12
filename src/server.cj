@@ -537,24 +537,27 @@ func hexVal(b: UInt8): Int64 {
     return 0
 }
 
-// Decode percent-encoding and '+' in URL components.
+// Decode percent-encoding and '+' in URL components. Decoded bytes are
+// accumulated and interpreted as UTF-8 only at the end, so a multi-byte
+// sequence (e.g. "%E4%B8%AD" -> "中") is reassembled intact instead of being
+// corrupted by decoding each byte on its own.
 public func urlDecode(s: String): String {
-    var result = ""
     let bytes = s.toArray()
+    let out = ArrayList<UInt8>()
     var i = 0
     while (i < bytes.size) {
         let c = bytes[i]
         if (c == UInt8(37) && i + 2 < bytes.size) {        // '%'
             let code = hexVal(bytes[i + 1]) * 16 + hexVal(bytes[i + 2])
-            result += String.fromUtf8([UInt8(code)])
+            out.add(UInt8(code))
             i += 3
         } else if (c == UInt8(43)) {                       // '+'
-            result += " "
+            out.add(UInt8(32))                             // space
             i += 1
         } else {
-            result += String.fromUtf8([c])
+            out.add(c)
             i += 1
         }
     }
-    return result
+    return String.fromUtf8(out.toArray())
 }
