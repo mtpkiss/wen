@@ -33,6 +33,11 @@ public class Application {
     // 仅当应用确实部署在可信代理(如 Nginx)之后才开启,否则客户端可伪造这些头。
     public var trustProxy: Bool = false
 
+    // 已注册的视图引擎表:键为扩展名(不含点,如 "html"),值为对应的渲染引擎。
+    // 经 app.engine(ext, fn) 注册;res.render 时按模板扩展名在此查找,缺省回退到
+    // 内置的 simpleViewEngine。
+    let engines: HashMap<String, ViewEngine> = HashMap<String, ViewEngine>()
+
     public init() {}
 
     public func setLocal(key: String, value: Any): Unit {
@@ -85,6 +90,43 @@ public class Application {
     public func register(plugin: Plugin): Application {
         plugin.install(this)
         return this
+    }
+
+    // 为某个模板扩展名注册视图引擎,对应 Express 的 app.engine(ext, fn)。扩展名可带
+    // 或不带前导点("html" 与 ".html" 等价)。注册后,渲染该扩展名的模板时即用此引擎。
+    public func engine(ext: String, fn: ViewEngine): Application {
+        engines[normalizeExt(ext)] = fn
+        return this
+    }
+
+    // 渲染一个视图并返回结果字符串(供 res.render 调用)。流程:
+    //   1. 用 "views" 设置(默认 "views")作为视图根目录;
+    //   2. 若 name 自带扩展名就用它,否则取 "view engine" 设置作为默认扩展名并补全文件名;
+    //   3. 按扩展名查注册的引擎,没有则回退到内置 simpleViewEngine;
+    //   4. 交给引擎读取模板文件并渲染。
+    func renderView(name: String, data: JsonValue): String {
+        let viewsDir = match (this.setting("views")) {
+            case Some(v) => v
+            case None => "views"
+        }
+        var fileName = name
+        let ext = match (fileExt(name)) {
+            case Some(e) => e
+            case None =>
+                match (this.setting("view engine")) {
+                    case Some(e) =>
+                        fileName = name + "." + e
+                        e
+                    case None =>
+                        throw Exception("render: 未设置 view engine,且视图名 '${name}' 不含扩展名")
+                }
+        }
+        let path = joinViewPath(viewsDir, fileName)
+        let eng = match (engines.get(normalizeExt(ext))) {
+            case Some(en) => en
+            case None => simpleViewEngine
+        }
+        return eng(path, data)
     }
 
     // ---- 路由注册（Middleware 形式：处理器带 next）---------------------------

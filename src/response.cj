@@ -283,6 +283,40 @@ public class HttpResponse {
         this.body = ""
         this.finished = true
     }
+
+    // 渲染一个视图模板并作为 HTML 响应发送(对应 Express 的 res.render)。视图定位、
+    // 引擎选择等逻辑都委托给所属 Application.renderView;这里只负责设好 Content-Type、
+    // 写入渲染结果并结束响应。data 为传给模板的数据(用 JsonValue 表示)。
+    // 需要经由 app.handle 派发(从而 res 关联到请求与应用);否则抛异常。
+    public func render(name: String, data: JsonValue): Unit {
+        let app = resolveApp()
+        this.headers["Content-Type"] = "text/html; charset=utf-8"
+        this.body = app.renderView(name, data)
+        this.finished = true
+    }
+
+    // 便捷重载:用 JsonObj 构建器传数据。
+    public func render(name: String, data: JsonObj): Unit {
+        render(name, data.build())
+    }
+
+    // 便捷重载:不传数据(模板中的占位符都将解析为空串)。
+    public func render(name: String): Unit {
+        render(name, JsonObj().build())
+    }
+
+    // 取回本响应所属的 Application(经 req.app)。渲染依赖应用上的视图设置与引擎表,
+    // 因此必须是经 app.handle 派发的响应;直接构造的 res 没有该关联,抛异常提示。
+    private func resolveApp(): Application {
+        match (this.req) {
+            case Some(r) =>
+                match (r.app) {
+                    case Some(a) => return a
+                    case None => throw Exception("render: 响应未关联 Application")
+                }
+            case None => throw Exception("render: 响应未关联请求/Application")
+        }
+    }
 }
 
 // 把内容类型的简写(如 "json"、"html"、"text" 等)展开为完整的 MIME 类型。
