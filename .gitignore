@@ -3,3 +3,8 @@ target/
 
 # IDE
 .idea/
+
+# Local runnable demo / scratch (not part of the library)
+src/main.cj
+demo.exe
+*.cjo
