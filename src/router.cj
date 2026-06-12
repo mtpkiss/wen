@@ -32,17 +32,27 @@ class Segment {
     let kind: SegKind
     let value: String           // 对字面量段是其文本内容；对参数段是参数名
     let constraint: ?Regex      // 仅参数段可能用到：一个已加锚定的可选正则约束
+    let optional: Bool          // 仅参数段可能用到：该段是否可缺省（":name?" 写法）
 
     init(kind: SegKind, value: String) {
         this.kind = kind
         this.value = value
         this.constraint = None
+        this.optional = false
     }
 
     init(kind: SegKind, value: String, constraint: ?Regex) {
         this.kind = kind
         this.value = value
         this.constraint = constraint
+        this.optional = false
+    }
+
+    init(kind: SegKind, value: String, constraint: ?Regex, optional: Bool) {
+        this.kind = kind
+        this.value = value
+        this.constraint = constraint
+        this.optional = optional
     }
 }
 
@@ -63,21 +73,27 @@ public class PathPattern {
                 segs.add(Segment(Wildcard, "*"))
                 wildcard = true
             } else if (raw.startsWith(":")) {
-                // 参数段写法为 ":name" 或 ":name(pattern)"。后一种里括号内的正则
-                // 用来约束这一单段必须长成什么样子(Express 风格)。下面会给该正则
-                // 套上 ^(?:...)$ 锚定，使它必须匹配整段、而不是只匹配其中一部分。
-                let spec = raw[1..raw.size]
+                // 参数段写法为 ":name"、":name(pattern)"，并都可在末尾加 "?" 表示该段
+                // 可缺省(":name?" / ":name(pattern)?")。括号内的正则用来约束这一单段
+                // 必须长成什么样子(Express 风格);下面会给它套上 ^(?:...)$ 锚定，
+                // 使其必须匹配整段、而非只匹配其中一部分。
+                var spec = raw[1..raw.size]
+                var optional = false
+                if (spec.endsWith("?")) {
+                    optional = true
+                    spec = spec[0..(spec.size - 1)]
+                }
                 match (spec.indexOf("(")) {
                     case Some(p) =>
                         if (spec.endsWith(")")) {
                             let name = spec[0..p]
                             let pat = spec[(p + 1)..(spec.size - 1)]
-                            segs.add(Segment(Param, name, Some(Regex("^(?:" + pat + ")$"))))
+                            segs.add(Segment(Param, name, Some(Regex("^(?:" + pat + ")$")), optional))
                         } else {
-                            segs.add(Segment(Param, spec))
+                            segs.add(Segment(Param, spec, None, optional))
                         }
                     case None =>
-                        segs.add(Segment(Param, spec))
+                        segs.add(Segment(Param, spec, None, optional))
                 }
             } else {
                 segs.add(Segment(Literal, raw))
@@ -98,51 +114,70 @@ public class PathPattern {
 
     private func doMatch(parts: Array<String>, prefix: Bool): ?HashMap<String, String> {
         let params = HashMap<String, String>()
-        var i = 0
-        while (i < segments.size) {
-            let seg = segments[i]
-            match (seg.kind) {
-                case Wildcard =>
-                    // 通配段:一旦碰到它，就把请求路径剩下的所有段全部吞掉，
-                    // 立即判定匹配成功并返回到目前为止捕获到的参数。
-                    return params
-                case _ => ()
-            }
-            if (i >= parts.size) {
-                return None
-            }
-            let part = parts[i]
-            match (seg.kind) {
-                case Literal =>
-                    if (seg.value != part) {
-                        return None
-                    }
-                case Param =>
-                    match (seg.constraint) {
-                        case Some(rx) =>
-                            if (!rx.matches(part)) {
-                                return None
-                            }
-                        case None => ()
-                    }
-                    // 捕获到的参数值会做 URL 解码(例如 "john%20doe" -> "john doe")。
-                    params[seg.value] = urlDecode(part)
-                case Wildcard => ()
-            }
-            i += 1
-        }
-        // 走到这里说明模式里的所有段都已逐一匹配成功(且过程中没有遇到通配段)。
-        if (prefix) {
-            // 前缀匹配模式下:模式全部用完即算成功，请求路径即便还剩多余的段也允许，
-            // 这正是挂载式中间件需要的语义(模式只是请求路径的开头)。
-            return params
-        }
-        // 精确匹配模式下:还要求请求路径不能有多余的段，即两者段数必须严格相等，
-        // 否则视为不匹配。
-        if (parts.size == segments.size) {
+        if (matchFrom(0, parts, 0, prefix, params)) {
             return params
         }
         return None
+    }
+
+    // 回溯式匹配:尝试让模式从第 si 段、请求路径从第 pi 段起对齐。成功返回 true，
+    // 并把沿途捕获的参数写入 params;失败返回 false。
+    // 之所以用回溯而非简单的线性扫描，是为了正确处理可缺省参数(":name?"):碰到
+    // 可缺省段时，先试「消费一段」，若后续匹配不下去再回退试「跳过该段」。
+    private func matchFrom(si: Int64, parts: Array<String>, pi: Int64, prefix: Bool,
+                          params: HashMap<String, String>): Bool {
+        if (si >= segments.size) {
+            // 模式已全部用完。前缀匹配:请求路径还剩多余段也算成功;精确匹配:
+            // 请求路径必须正好也用完。
+            if (prefix) {
+                return true
+            }
+            return pi >= parts.size
+        }
+        let seg = segments[si]
+        match (seg.kind) {
+            case Wildcard =>
+                // 通配段:吞掉请求路径剩余的全部段，直接判定成功。
+                return true
+            case Param =>
+                if (seg.optional) {
+                    // 先尝试消费当前这一段(需有可用段且满足正则约束)。
+                    if (pi < parts.size && constraintOk(seg, parts[pi])) {
+                        params[seg.value] = urlDecode(parts[pi])
+                        if (matchFrom(si + 1, parts, pi + 1, prefix, params)) {
+                            return true
+                        }
+                        // 走不通则回退:撤销本段的捕获，改为「跳过该可缺省段」。
+                        params.remove(seg.value)
+                    }
+                    return matchFrom(si + 1, parts, pi, prefix, params)
+                }
+                if (pi >= parts.size) {
+                    return false
+                }
+                if (!constraintOk(seg, parts[pi])) {
+                    return false
+                }
+                // 捕获到的参数值会做 URL 解码(例如 "john%20doe" -> "john doe")。
+                params[seg.value] = urlDecode(parts[pi])
+                return matchFrom(si + 1, parts, pi + 1, prefix, params)
+            case Literal =>
+                if (pi >= parts.size) {
+                    return false
+                }
+                if (seg.value != parts[pi]) {
+                    return false
+                }
+                return matchFrom(si + 1, parts, pi + 1, prefix, params)
+        }
+    }
+
+    // 参数段的正则约束是否放行:无约束恒为 true;有约束时要求整段匹配该锚定正则。
+    func constraintOk(seg: Segment, part: String): Bool {
+        match (seg.constraint) {
+            case Some(rx) => return rx.matches(part)
+            case None => return true
+        }
     }
 }
 
@@ -156,14 +191,18 @@ class Layer {
     let isPrefix: Bool
     let isError: Bool
     let errorHandler: ?ErrorHandler
+    // 同一次注册产生的若干处理器(多处理器路由)共享同一个 routeId，供 next("route")
+    // 据此跳过「当前这条路由」剩余的处理器。错误层用 0。
+    let routeId: Int64
 
-    init(method: ?String, path: String, handler: Middleware, isPrefix: Bool) {
+    init(method: ?String, path: String, handler: Middleware, isPrefix: Bool, routeId: Int64) {
         this.method = method
         this.pattern = PathPattern.compile(path)
         this.handler = handler
         this.isPrefix = isPrefix
         this.isError = false
         this.errorHandler = None
+        this.routeId = routeId
     }
 
     // 错误处理层的构造器:这种层在路径/方法上对任何请求都「匹配」，但它只在链中
@@ -175,6 +214,7 @@ class Layer {
         this.isPrefix = false
         this.isError = true
         this.errorHandler = Some(errorHandler)
+        this.routeId = 0
     }
 
     // 判断本层是否匹配该请求:匹配则返回捕获到的参数表，否则返回 None。
@@ -204,11 +244,37 @@ class Layer {
 
 public class Router {
     let layers: ArrayList<Layer> = ArrayList<Layer>()
+    // 已注册路由数的递增计数器,用于给每次注册分配唯一的 routeId(多处理器路由
+    // 的各处理器共享同一个 id)。
+    var routeCounter: Int64 = 0
+    // app.param 注册的参数预处理回调表,键为参数名。
+    let paramCallbacks: HashMap<String, ParamHandler> = HashMap<String, ParamHandler>()
 
     public init() {}
 
+    func freshRouteId(): Int64 {
+        routeCounter += 1
+        return routeCounter
+    }
+
     func add(method: ?String, path: String, handler: Middleware, isPrefix: Bool): Unit {
-        layers.add(Layer(method, path, handler, isPrefix))
+        layers.add(Layer(method, path, handler, isPrefix, freshRouteId()))
+    }
+
+    // 一次注册多个处理器到同一方法/路径:它们按顺序排成相邻的多个 Layer，共享同一个
+    // routeId。前一个处理器调用 next() 即推进到下一个;调用 req.nextRoute() 则跳过
+    // 本组剩余处理器,直达下一条路由。
+    func addAll(method: ?String, path: String, handlers: Array<Middleware>, isPrefix: Bool): Unit {
+        let id = freshRouteId()
+        for (h in handlers) {
+            layers.add(Layer(method, path, h, isPrefix, id))
+        }
+    }
+
+    // 注册一个参数预处理回调(对应 Express 的 app.param)。当匹配到的路由捕获了名为
+    // `name` 的参数时,会在该路由处理器执行前触发此回调(每个请求每个参数名只触发一次)。
+    public func param(name: String, handler: ParamHandler): Unit {
+        paramCallbacks[name] = handler
     }
 
     // 全局中间件:对每个请求都执行。以根路径 "/" 作前缀注册，前缀匹配下它能
@@ -241,6 +307,21 @@ public class Router {
     public func head(path: String, handler: Handler): Unit { add(Some(HttpMethod.HEAD), path, wrap(handler), false) }
     public func options(path: String, handler: Handler): Unit { add(Some(HttpMethod.OPTIONS), path, wrap(handler), false) }
     public func all(path: String, handler: Handler): Unit { add(Some(HttpMethod.ALL), path, wrap(handler), false) }
+
+    // 多处理器形态:一次给同一方法/路径挂多个中间件,按数组顺序依次执行(前者
+    // 调用 next() 推进到后者)。常用于「前置校验 + 业务处理」这类组合。
+    public func get(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.GET), path, handlers, false) }
+    public func post(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.POST), path, handlers, false) }
+    public func put(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.PUT), path, handlers, false) }
+    public func delete(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.DELETE), path, handlers, false) }
+    public func patch(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.PATCH), path, handlers, false) }
+    public func head(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.HEAD), path, handlers, false) }
+    public func options(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.OPTIONS), path, handlers, false) }
+    public func all(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.ALL), path, handlers, false) }
+
+    // 一次挂载多个全局/前缀中间件。
+    public func use(handlers: Array<Middleware>): Unit { addAll(None, "/", handlers, true) }
+    public func use(path: String, handlers: Array<Middleware>): Unit { addAll(None, path, handlers, true) }
 
     private func wrap(handler: Handler): Middleware {
         return { req: HttpRequest, res: HttpResponse, _: Next => handler(req, res) }
@@ -429,12 +510,46 @@ public class Router {
                            onExhausted: Next, onError: (Exception) -> Unit): Unit {
         // 重新运行本层的匹配以取回它捕获的参数并写入 req.params。之所以要在此重新
         // 匹配，是因为不同的层可能捕获不同的参数名/值，需在执行该层处理器前对齐。
+        var captured = HashMap<String, String>()
         match (layer.tryMatch(req)) {
             case Some(params) =>
+                captured = params
                 for ((k, v) in params) {
                     req.params[k] = v
                 }
             case None => ()
+        }
+        // 参数预处理回调(app.param):对本层新捕获、注册了回调、且本请求尚未处理过的
+        // 参数依次触发。回调抛异常则转入错误流水线;直接结束响应则就此短路。
+        if (paramCallbacks.size > 0) {
+            for ((k, v) in captured) {
+                if (req.paramProcessed(k)) {
+                    continue
+                }
+                match (paramCallbacks.get(k)) {
+                    case Some(cb) =>
+                        req.markParamProcessed(k)
+                        try {
+                            cb(req, res, v)
+                        } catch (ex: Exception) {
+                            dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
+                            return
+                        }
+                        if (res.finished) {
+                            return
+                        }
+                    case None => ()
+                }
+            }
+        }
+        // 处理 next("route"):跳过与本层 routeId 相同的后续层(即本条路由的其余
+        // 处理器),从下一条不同的路由继续。
+        let skipRoute: Next = { =>
+            var j = index + 1
+            while (j < matched.size && matched[j].routeId == layer.routeId) {
+                j += 1
+            }
+            dispatch(matched, j, req, res, onExhausted, onError, None)
         }
         // 挂载式中间件(use(path, mw))在执行时，看到的 req.path 是「已剥掉挂载前缀」
         // 的相对路径，这与 Express 的行为一致。这里先保存原始路径并临时替换为剥掉前缀
@@ -455,12 +570,19 @@ public class Router {
                 return
             }
             req.path = savedPath
+            if (req.consumeSkipRoute()) {
+                skipRoute()
+            }
         } else {
             let next: Next = { => dispatch(matched, index + 1, req, res, onExhausted, onError, None) }
             try {
                 layer.handler(req, res, next)
             } catch (ex: Exception) {
                 dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
+                return
+            }
+            if (req.consumeSkipRoute()) {
+                skipRoute()
             }
         }
     }

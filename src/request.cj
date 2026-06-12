@@ -58,6 +58,12 @@ public class HttpRequest {
     // 直接构造请求(未经应用派发)时为 None,此时 setting() 会返回 None。
     public var app: ?Application = None
 
+    // 内部状态:next("route") 信号。处理器调用 nextRoute() 置位后,调度器会跳过
+    // 当前路由的剩余处理器。
+    var skipRouteFlag: Bool = false
+    // 内部状态:本请求已触发过 param 预处理回调的参数名,确保每个参数名只触发一次。
+    let processedParamNames: ArrayList<String> = ArrayList<String>()
+
     public init(method: String, url: String) {
         this.method = method
         this.url = url
@@ -316,6 +322,32 @@ public class HttpRequest {
             case Some(v) => return v.toAsciiLower() == "xmlhttprequest"
             case None => return false
         }
+    }
+
+    // 跳过当前路由的剩余处理器,直接进入下一条匹配的路由(对应 Express 的
+    // next("route"))。仅在「一条路由挂多个处理器」时有意义:某个处理器据此放弃
+    // 本路由、把机会让给后面的路由。调用后应立即 return,不要再调用 next。
+    public func nextRoute(): Unit {
+        this.skipRouteFlag = true
+    }
+
+    // 内部:读取并清除 next("route") 信号,返回它本次是否被置位。
+    func consumeSkipRoute(): Bool {
+        if (this.skipRouteFlag) {
+            this.skipRouteFlag = false
+            return true
+        }
+        return false
+    }
+
+    // 内部:某参数名的预处理回调本请求是否已触发过。
+    func paramProcessed(name: String): Bool {
+        return listContains(this.processedParamNames, name)
+    }
+
+    // 内部:标记某参数名的预处理回调本请求已触发。
+    func markParamProcessed(name: String): Unit {
+        this.processedParamNames.add(name)
     }
 }
 

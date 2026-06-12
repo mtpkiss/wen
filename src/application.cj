@@ -109,6 +109,24 @@ public class Application {
     public func options(path: String, handler: Handler): Application { router.options(path, wrap(handler)); return this }
     public func all(path: String, handler: Handler): Application { router.all(path, wrap(handler)); return this }
 
+    // ---- 路由注册（多处理器形式：同一路径挂多个中间件，按数组顺序执行）-------
+
+    public func get(path: String, handlers: Array<Middleware>): Application { router.get(path, handlers); return this }
+    public func post(path: String, handlers: Array<Middleware>): Application { router.post(path, handlers); return this }
+    public func put(path: String, handlers: Array<Middleware>): Application { router.put(path, handlers); return this }
+    public func delete(path: String, handlers: Array<Middleware>): Application { router.delete(path, handlers); return this }
+    public func patch(path: String, handlers: Array<Middleware>): Application { router.patch(path, handlers); return this }
+    public func head(path: String, handlers: Array<Middleware>): Application { router.head(path, handlers); return this }
+    public func options(path: String, handlers: Array<Middleware>): Application { router.options(path, handlers); return this }
+    public func all(path: String, handlers: Array<Middleware>): Application { router.all(path, handlers); return this }
+
+    // 一次挂载多个全局 / 前缀中间件。
+    public func use(handlers: Array<Middleware>): Application { router.use(handlers); return this }
+    public func use(path: String, handlers: Array<Middleware>): Application { router.use(path, handlers); return this }
+
+    // 注册参数预处理回调，对应 Express 的 app.param(name, fn)。
+    public func param(name: String, handler: ParamHandler): Application { router.param(name, handler); return this }
+
     private func wrap(handler: Handler): Middleware {
         return { req: HttpRequest, res: HttpResponse, _: Next => handler(req, res) }
     }

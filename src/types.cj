@@ -32,3 +32,9 @@ public type Handler = (HttpRequest, HttpResponse) -> Unit
 // 异常继续交给链上的下一个错误处理器；若后面再没有错误处理器，则落到框架
 // 默认的 500 响应兜底。借此可以串联多个错误处理器，实现分级 / 兜底的错误处理。
 public type ErrorHandler = (Exception, HttpRequest, HttpResponse, Next) -> Unit
+
+// 「参数预处理」回调,对应 Express 的 `app.param(name, fn)`。当某条匹配的路由捕获
+// 到同名参数时,会在执行该路由处理器之前触发一次(同一请求、同一参数名只触发一次),
+// 拿到 (请求, 响应, 该参数的值)。常用于集中校验参数、按参数加载资源并存入 req.locals
+// 等;回调内可直接结束响应来短路后续处理,或抛出异常交给错误处理流水线。
+public type ParamHandler = (HttpRequest, HttpResponse, String) -> Unit
