@@ -51,9 +51,9 @@ public func staticFiles(root: String): Middleware {
             return
         }
 
-        // Read the whole file as UTF-8 text.
-        let content = String.fromUtf8(File.readFrom(path))
-        res.contentType(mimeFor(rel)).send(content)
+        // Send the file's raw bytes so binary assets (images, fonts, ...) are
+        // served verbatim instead of being corrupted by a UTF-8 round-trip.
+        res.contentType(mimeFor(rel)).sendBytes(File.readFrom(path))
     }
 }
 

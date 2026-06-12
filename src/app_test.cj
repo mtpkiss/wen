@@ -463,6 +463,64 @@ class AppTest {
         remove(path)
     }
 
+    // res.sendFile serves binary content byte-for-byte (no UTF-8 round-trip).
+    @TestCase
+    func testSendFileBinary(): Unit {
+        let path = "._cjx_sendfile_bin_test.png"
+        // PNG signature + bytes that are NOT valid UTF-8; must survive intact.
+        let data: Array<UInt8> = [UInt8(137), UInt8(80), UInt8(78), UInt8(71),
+                                  UInt8(13), UInt8(10), UInt8(26), UInt8(10), UInt8(255), UInt8(200)]
+        File.writeTo(path, data)
+        let res = HttpResponse()
+        res.sendFile(path)
+        @Assert(res.finished)
+        match (res.bodyBytes) {
+            case Some(b) =>
+                @Assert(b.size == data.size)
+                var same = true
+                var i = 0
+                while (i < b.size) {
+                    if (b[i] != data[i]) {
+                        same = false
+                    }
+                    i += 1
+                }
+                @Assert(same)
+            case None => @Assert(false)
+        }
+        let ct = match (res.headers.get("Content-Type")) { case Some(v) => v; case None => "" }
+        @Expect(ct.contains("image/png"))
+        remove(path)
+    }
+
+    // staticFiles serves binary files byte-for-byte (no UTF-8 round-trip).
+    @TestCase
+    func testStaticFilesBinary(): Unit {
+        let name = "._cjx_static_bin_test.png"
+        let data: Array<UInt8> = [UInt8(137), UInt8(80), UInt8(78), UInt8(71), UInt8(0), UInt8(255), UInt8(200)]
+        File.writeTo(name, data)
+        let mw = staticFiles(".")
+        let req = HttpRequest("GET", "/${name}"); req.path = "/${name}"
+        let res = HttpResponse()
+        mw(req, res, { => () })
+        @Assert(res.finished)
+        match (res.bodyBytes) {
+            case Some(b) =>
+                @Assert(b.size == data.size)
+                var same = true
+                var i = 0
+                while (i < b.size) {
+                    if (b[i] != data[i]) {
+                        same = false
+                    }
+                    i += 1
+                }
+                @Assert(same)
+            case None => @Assert(false)
+        }
+        remove(name)
+    }
+
     // res.sendFile on a missing file throws, feeding the error pipeline.
     @TestCase
     func testSendFileMissingThrows(): Unit {

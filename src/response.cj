@@ -130,7 +130,9 @@ public class HttpResponse {
 
     // Read a file from disk and send it, guessing Content-Type from the
     // extension. Throws if the file is missing so the error pipeline can handle
-    // it (register an error middleware to convert that into a response).
+    // it (register an error middleware to convert that into a response). The
+    // file is sent as raw bytes so binary assets (images, fonts, ...) survive
+    // intact rather than being mangled by a UTF-8 round-trip.
     public func sendFile(path: String): Unit {
         let p = if (path.startsWith("./")) {
             path[2..path.size]
@@ -140,9 +142,8 @@ public class HttpResponse {
         if (!exists(p)) {
             throw Exception("sendFile: file not found: ${path}")
         }
-        let content = String.fromUtf8(File.readFrom(p))
         this.headers["Content-Type"] = mimeFor(p)
-        this.body = content
+        this.bodyBytes = Some(File.readFrom(p))
         this.finished = true
     }
 
