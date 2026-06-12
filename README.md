@@ -320,13 +320,15 @@ main(): Int64 {
   (带 q 值的最佳匹配);代理感知 `protocol()/secure()/ips()/clientIp()/subdomains()/xhr()`
   (配合 `app.trustProxy`)。
 - **响应**:`send/json/sendBytes/sendStatus/redirect/end`;`json` 支持字符串与类型化
-  `JsonValue/JsonObj`;`cookie`(可 `signed` 签名)/`clearCookie`、`set` 批量、
+  `JsonValue/JsonObj`;`cookie`(支持 `signed` 签名、`domain`/`expires`/`maxAge`/
+  `httpOnly`/`secure`/`sameSite`)/`clearCookie`、`set` 批量、
   `mimeType/contentType/append/location`;`render`(视图渲染)、`format`(内容协商)、
   `attachment/download`(附件下载);流式 `stream` 与 Server-Sent Events `sse`。
 - **文件与缓存**:`sendFile / download / staticFiles` 均**二进制安全**(原始字节,不经
   UTF-8 往返);自动 `ETag` + `If-None-Match` → 304、`Last-Modified` + `If-Modified-Since`
   → 304、`Range` 分片下载(206 / 416)。动态响应(`send/json`)经 `etag()` 中间件也能
-  获得 `ETag` 与条件 GET(304)。
+  获得 `ETag` 与条件 GET(304)。`staticFiles` 支持 `index`(目录默认页)、
+  `maxAge`(Cache-Control)、`dotfiles`(隐藏文件 ignore/deny/allow)等选项。
 - **JSON**:内置零依赖 `JsonValue`(对象保序)+ `parseJson` + `toJsonString` + `JsonObj`
   链式构建器,访问器 `asString/asInt/asFloat/asBool/get/at/size/keys`;正确处理转义、
   `\u` 与代理对。

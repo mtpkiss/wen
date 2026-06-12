@@ -14,8 +14,14 @@ import std.fs.*
  * 目录、去读取服务目录之外的文件。
  */
 
-// 构造一个从 `root` 目录提供文件服务的中间件。
-public func staticFiles(root: String): Middleware {
+// 构造一个从 `root` 目录提供文件服务的中间件。可选具名参数:
+//   index    —— 目录默认文件名(默认 "index.html");请求路径为空或以 "/" 结尾时,
+//               自动在其后补上该文件名。
+//   maxAge   —— 缓存秒数;>=0 时为响应加上 Cache-Control: public, max-age=N。
+//   dotfiles —— 隐藏文件(路径段以 "." 开头,如 .env/.git)的策略:"ignore"(默认,
+//               当作不存在、放行)/"deny"(回 403)/"allow"(照常提供)。
+public func staticFiles(root: String, index!: String = "index.html", maxAge!: Int64 = -1,
+                        dotfiles!: String = "ignore"): Middleware {
     // 仓颉的 std.fs 不会处理路径开头的 "./"，因此这里把它去掉，这样调用方
     // 无论传 "public" 还是 "./public" 都能正常工作。
     let base = if (root.startsWith("./")) {
@@ -35,14 +41,25 @@ public func staticFiles(root: String): Middleware {
         } else {
             req.path
         }
-        if (rel.isEmpty()) {
-            rel = "index.html"
+        // 目录请求(空路径或以 "/" 结尾)补上默认索引文件。
+        if (rel.isEmpty() || rel.endsWith("/")) {
+            rel += index
         }
 
         // 安全：绝不允许通过 ".." 进行目录穿越、逃出所服务的 root 目录。
         // 一旦相对路径里出现 ".."，直接放行（next）而不去读文件。
         if (rel.contains("..")) {
             next()
+            return
+        }
+
+        // 隐藏文件(任一路径段以 "." 开头)按 dotfiles 策略处理。
+        if (dotfiles != "allow" && hasDotSegment(rel)) {
+            if (dotfiles == "deny") {
+                res.status(403).send("Forbidden")
+            } else {
+                next()
+            }
             return
         }
 
@@ -55,10 +72,25 @@ public func staticFiles(root: String): Middleware {
             return
         }
 
+        // 可选的缓存头。
+        if (maxAge >= 0) {
+            res.headers["Cache-Control"] = "public, max-age=${maxAge}"
+        }
+
         // 经 applyFileResponse 发送文件：原始字节（二进制安全），并统一附带 ETag
         // 与 Accept-Ranges，支持 If-None-Match 命中回 304、Range 请求回 206 分片。
         applyFileResponse(res, File.readFrom(path), mimeFor(rel), httpDateForFile(path))
     }
+}
+
+// 相对路径中是否存在以 "." 开头的路径段(隐藏文件/目录,如 ".env"、".git/..")。
+func hasDotSegment(rel: String): Bool {
+    for (seg in pathSegments(rel)) {
+        if (seg.startsWith(".")) {
+            return true
+        }
+    }
+    return false
 }
 
 // 根据文件名的扩展名推断 Content-Type；对识别不出的扩展名，回退到通用的

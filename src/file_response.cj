@@ -148,6 +148,11 @@ func nowUnixSeconds(): Int64 {
     return DateTime.now().toUnixTimeStamp().toSeconds()
 }
 
+// 「此刻起 seconds 秒后」的 HTTP 日期字符串(用于 Cookie 的 Expires 等)。
+func httpDateAfter(seconds: Int64): String {
+    return formatHttpDate(DateTime.nowUTC() + Duration.second * seconds)
+}
+
 // 若响应尚未设置 Date 头,则补上当前时间(HTTP/1.1 建议服务器发送 Date)。
 func ensureDateHeader(res: HttpResponse): Unit {
     match (res.headers.get("Date")) {

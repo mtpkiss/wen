@@ -124,12 +124,16 @@ public class HttpResponse {
     //   httpOnly —— 为 true 时附加 HttpOnly,禁止脚本读取该 Cookie。
     //   secure   —— 为 true 时附加 Secure,仅在 HTTPS 下回传。
     //   sameSite —— SameSite 策略(如 "Lax"/"Strict"/"None");为空串时不输出。
+    //   domain   —— Domain 属性(跨子域共享 Cookie 时用);为空串时不输出。
+    //   expires  —— Expires 属性(HTTP 日期字符串)。为空串时:若设了 maxAge(>=0),
+    //               则据 maxAge 自动推导一个 Expires(兼容不识别 Max-Age 的旧浏览器),
+    //               与 Express 行为一致。
     //   signed   —— 为 true 时对值做 HMAC 签名(形如 "<value>.<sig>"),使客户端无法
     //               篡改;需先设置 app.cookieSecret,否则抛异常。读取时用
     //               req.signedCookie(name) 验签。
     public func cookie(name: String, value: String, path!: String = "/", maxAge!: Int64 = -1,
                        httpOnly!: Bool = false, secure!: Bool = false, sameSite!: String = "",
-                       signed!: Bool = false): HttpResponse {
+                       domain!: String = "", expires!: String = "", signed!: Bool = false): HttpResponse {
         let actualValue = if (signed) {
             let secret = cookieSecretOrThrow()
             "${value}.${hmacSha256Hex(secret, value)}"
@@ -140,8 +144,22 @@ public class HttpResponse {
         if (!path.isEmpty()) {
             c += "; Path=${path}"
         }
+        if (!domain.isEmpty()) {
+            c += "; Domain=${domain}"
+        }
         if (maxAge >= 0) {
             c += "; Max-Age=${maxAge}"
+        }
+        // Expires:显式传入优先;否则若设了 maxAge,则据此自动推导。
+        let exp = if (!expires.isEmpty()) {
+            expires
+        } else if (maxAge >= 0) {
+            httpDateAfter(maxAge)
+        } else {
+            ""
+        }
+        if (!exp.isEmpty()) {
+            c += "; Expires=${exp}"
         }
         if (httpOnly) {
             c += "; HttpOnly"

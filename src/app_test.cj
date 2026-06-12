@@ -608,7 +608,8 @@ class AppTest {
         let name = "._cjx_static_bin_test.png"
         let data: Array<UInt8> = [UInt8(137), UInt8(80), UInt8(78), UInt8(71), UInt8(0), UInt8(255), UInt8(200)]
         File.writeTo(name, data)
-        let mw = staticFiles(".")
+        // 临时文件名以 "." 开头(便于 gitignore),故显式允许 dotfiles 以验证二进制传输。
+        let mw = staticFiles(".", dotfiles: "allow")
         let req = HttpRequest("GET", "/${name}"); req.path = "/${name}"
         let res = HttpResponse()
         mw(req, res, { => () })
