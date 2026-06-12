@@ -311,7 +311,8 @@ main(): Int64 {
   `app.use(path, Router)`(含 mergeParams);自动 `HEAD`/`OPTIONS`、`405 + Allow`。
 - **中间件**:中间件链 `(req, res, next)`、全局/路径挂载、数组批量挂载、错误处理中间件
   `(err, req, res, next)`、`Plugin` 系统。内置:`logger / cors / helmet(安全头) /
-  jsonParser / urlencodedParser / multipart(文件上传) / cookieParser / staticFiles / session`。
+  compression(gzip 压缩) / jsonParser / urlencodedParser / multipart(文件上传) /
+  cookieParser / staticFiles / session`。
 - **请求**:`headers/query/params/cookies`、字符串 `attributes` 与类型化 `locals`、
   `body/bodyBytes`、`json()`(解析后的 `JsonValue`)、`file(name)/files`(上传)、
   `signedCookie(name)`、`session`;`hostname()/isType()`、`accepts()` 与 `accepts([...])`
