@@ -363,12 +363,21 @@ main(): Int64 {
 | `session(store?)` | 会话(签名 sid;默认内存 store,可自定义 `SessionStore`) |
 | `staticFiles(root, ...)` | 静态文件(二进制安全 + ETag/Range/Cache-Control/dotfiles) |
 
+## 文档
+
+- [快速上手](docs/getting-started.md)
+- [内置中间件参考](docs/middleware.md)
+- [API 参考](docs/api.md)
+- [更新日志](CHANGELOG.md)
+
 ## 构建与测试
 
 ```bash
 cjpm build
 cjpm test
 ```
+
+需要 Cangjie 编译器 **cjc 1.1.3+**。
 
 ## License
 
