@@ -138,6 +138,24 @@ func pad2(n: Int64): String {
     return n.toString()
 }
 
+// 当前 UTC 时间的 HTTP 日期字符串(用于 Date 响应头)。
+func httpDateNow(): String {
+    return formatHttpDate(DateTime.nowUTC())
+}
+
+// 当前 Unix 时间戳(秒),用于限流等按时间窗口的逻辑。
+func nowUnixSeconds(): Int64 {
+    return DateTime.now().toUnixTimeStamp().toSeconds()
+}
+
+// 若响应尚未设置 Date 头,则补上当前时间(HTTP/1.1 建议服务器发送 Date)。
+func ensureDateHeader(res: HttpResponse): Unit {
+    match (res.headers.get("Date")) {
+        case Some(_) => ()
+        case None => res.headers["Date"] = httpDateNow()
+    }
+}
+
 // 依据内容算出一个强 ETag(形如 "<size>-<h1>-<h2>")。这里用两个不同质数/模数的
 // 多项式滚动哈希拼接以降低碰撞;中间量始终落在 Int64 安全范围内,不会溢出。
 // 不是加密级强度,但作为缓存校验「内容是否变化」足够。

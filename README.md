@@ -311,8 +311,8 @@ main(): Int64 {
   `app.use(path, Router)`(含 mergeParams);自动 `HEAD`/`OPTIONS`、`405 + Allow`。
 - **中间件**:中间件链 `(req, res, next)`、全局/路径挂载、数组批量挂载、错误处理中间件
   `(err, req, res, next)`、`Plugin` 系统。内置:`logger / cors / helmet(安全头) /
-  compression(gzip 压缩) / jsonParser / urlencodedParser / multipart(文件上传) /
-  cookieParser / staticFiles / session`。
+  compression(gzip 压缩) / rateLimit(限流) / jsonParser / urlencodedParser /
+  multipart(文件上传) / cookieParser / staticFiles / session`。
 - **请求**:`headers/query/params/cookies`、字符串 `attributes` 与类型化 `locals`、
   `body/bodyBytes`、`json()`(解析后的 `JsonValue`)、`file(name)/files`(上传)、
   `signedCookie(name)`、`session`;`hostname()/isType()`、`accepts()` 与 `accepts([...])`
@@ -337,7 +337,7 @@ main(): Int64 {
 - **服务器**:基于标准库 `std.net`,**零第三方依赖**;HTTP/1.1 keep-alive、chunked
   请求体、并发连接上限(信号量背压)、请求体大小上限与读超时;请求走私防护
   (同时带 Content-Length 与 Transfer-Encoding → 400)、`204/304` 不带响应体与
-  Content-Length。
+  Content-Length、自动 `Date` 响应头。
 
 ## 构建与测试
 
