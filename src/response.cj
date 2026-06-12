@@ -124,9 +124,19 @@ public class HttpResponse {
     //   httpOnly —— 为 true 时附加 HttpOnly,禁止脚本读取该 Cookie。
     //   secure   —— 为 true 时附加 Secure,仅在 HTTPS 下回传。
     //   sameSite —— SameSite 策略(如 "Lax"/"Strict"/"None");为空串时不输出。
+    //   signed   —— 为 true 时对值做 HMAC 签名(形如 "<value>.<sig>"),使客户端无法
+    //               篡改;需先设置 app.cookieSecret,否则抛异常。读取时用
+    //               req.signedCookie(name) 验签。
     public func cookie(name: String, value: String, path!: String = "/", maxAge!: Int64 = -1,
-                       httpOnly!: Bool = false, secure!: Bool = false, sameSite!: String = ""): HttpResponse {
-        var c = "${name}=${value}"
+                       httpOnly!: Bool = false, secure!: Bool = false, sameSite!: String = "",
+                       signed!: Bool = false): HttpResponse {
+        let actualValue = if (signed) {
+            let secret = cookieSecretOrThrow()
+            "${value}.${hmacSha256Hex(secret, value)}"
+        } else {
+            value
+        }
+        var c = "${name}=${actualValue}"
         if (!path.isEmpty()) {
             c += "; Path=${path}"
         }
@@ -376,6 +386,15 @@ public class HttpResponse {
                 }
             case None => throw Exception("render: 响应未关联请求/Application")
         }
+    }
+
+    // 取签名 Cookie 用的密钥(app.cookieSecret);未设置则抛异常。
+    private func cookieSecretOrThrow(): String {
+        let app = resolveApp()
+        if (app.cookieSecret.isEmpty()) {
+            throw Exception("签名 Cookie 需要先设置 app.cookieSecret")
+        }
+        return app.cookieSecret
     }
 }
 

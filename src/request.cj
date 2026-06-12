@@ -62,6 +62,9 @@ public class HttpRequest {
     // 或非文件上传请求时为空。用 file(name) 按字段名取单个文件。
     public let files: ArrayList<UploadedFile> = ArrayList<UploadedFile>()
 
+    // 当前请求的会话对象,由 session() 中间件设置;未启用时为 None。
+    public var session: ?Session = None
+
     // 内部状态:next("route") 信号。处理器调用 nextRoute() 置位后,调度器会跳过
     // 当前路由的剩余处理器。
     var skipRouteFlag: Bool = false
@@ -394,6 +397,35 @@ public class HttpRequest {
             return true
         }
         return false
+    }
+
+    // 读取并验签一个签名 Cookie(对应 res.cookie(..., signed: true) 写入的值)。
+    // 流程:从 cookies 取原始值(形如 "<value>.<sig>"),用 app.cookieSecret 重新计算
+    // HMAC 并定长时间比对;一致才返回原值,否则(无该 Cookie / 无密钥 / 验签失败)
+    // 返回 None。需先经 cookieParser 解析出 cookies。
+    public func signedCookie(name: String): ?String {
+        let raw = match (this.cookies.get(name)) {
+            case Some(v) => v
+            case None => return None
+        }
+        let secret = match (this.app) {
+            case Some(a) => a.cookieSecret
+            case None => return None
+        }
+        if (secret.isEmpty()) {
+            return None
+        }
+        // 以最后一个 "." 分隔出 value 与签名(value 自身可包含 ".")。
+        let idx = lastIndexOfDot(raw)
+        if (idx < 0) {
+            return None
+        }
+        let value = raw[0..idx]
+        let sig = raw[(idx + 1)..raw.size]
+        if (constantTimeEquals(sig, hmacSha256Hex(secret, value))) {
+            return Some(value)
+        }
+        return None
     }
 
     // 取某个字段名的上传文件(同名多文件时返回第一个);不存在则返回 None。

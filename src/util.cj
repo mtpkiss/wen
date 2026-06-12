@@ -71,6 +71,20 @@ public func listContains(list: ArrayList<String>, value: String): Bool {
     return false
 }
 
+// 返回字符串中最后一个 "." 的下标;不存在则返回 -1。用于在 "<value>.<sig>" 形式
+// 的签名 Cookie 中,从右侧切出签名部分(value 自身可以包含 ".")。
+public func lastIndexOfDot(s: String): Int64 {
+    let bytes = s.toArray()
+    var i = bytes.size - 1
+    while (i >= 0) {
+        if (bytes[i] == UInt8(46)) {
+            return i
+        }
+        i -= 1
+    }
+    return -1
+}
+
 // 把一个路径按 "/" 拆分成若干非空的路径段，自动丢弃因前导/末尾/连续斜杠
 // 产生的空段。例如 "/a/b/" 会得到 ["a", "b"]。
 public func pathSegments(path: String): Array<String> {

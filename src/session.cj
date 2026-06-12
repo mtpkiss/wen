@@ -1,0 +1,164 @@
+package wen
+
+import std.collection.*
+import std.sync.*
+import std.random.*
+
+/*
+ * 会话(session)支持。
+ *
+ * session() 中间件为每个请求关联一个 Session(以字符串键值存放会话数据),并用一个
+ * 签名的 "sid" Cookie 把浏览器与服务端的会话挂钩:
+ *   - 进入时:从签名 Cookie 读出 sid 并验签,据此从 SessionStore 载入既有会话;
+ *     没有有效会话则新建一个(分配随机 sid,标记为 new)。
+ *   - 处理后:把会话数据回存到 store;若是新会话,则下发签名的 sid Cookie。
+ *
+ * 前置条件:必须先注册 cookieParser(以便解析出 cookies),并设置 app.cookieSecret
+ * (sid Cookie 经 HMAC 签名,客户端无法伪造)。否则签名/验签无法进行。
+ *
+ * 默认的 MemorySessionStore 把会话存在进程内存里(重启即失),仅适合单实例/开发场景;
+ * 生产可自行实现 SessionStore 接口接入 Redis、数据库等。内存实现用 Mutex 保护,
+ * 因为服务器是多线程处理连接的,会话表会被并发读写。
+ */
+
+// 一次请求对应的会话对象:带一个 id 和一组字符串键值数据。
+public class Session {
+    public let id: String
+    let values: HashMap<String, String>
+    let isNew: Bool
+
+    init(id: String, values: HashMap<String, String>, isNew: Bool) {
+        this.id = id
+        this.values = values
+        this.isNew = isNew
+    }
+
+    // 读取会话中某个键的值;不存在返回 None。
+    public func get(key: String): ?String {
+        return values.get(key)
+    }
+
+    // 写入/覆盖会话中某个键的值。
+    public func set(key: String, value: String): Unit {
+        values[key] = value
+    }
+
+    // 删除会话中某个键。
+    public func remove(key: String): Unit {
+        values.remove(key)
+    }
+}
+
+// 会话存储后端的抽象接口。自定义存储(Redis/DB 等)实现此接口即可接入 session()。
+public interface SessionStore {
+    // 按 id 载入会话数据;不存在返回 None。
+    func load(id: String): ?HashMap<String, String>
+    // 按 id 保存会话数据(覆盖)。
+    func save(id: String, values: HashMap<String, String>): Unit
+    // 销毁某个会话。
+    func destroy(id: String): Unit
+    // 生成一个新的、唯一的会话 id。
+    func newId(): String
+}
+
+// 进程内存实现的会话存储(线程安全,用 Mutex 保护)。
+public class MemorySessionStore <: SessionStore {
+    let data = HashMap<String, HashMap<String, String>>()
+    let lock = Mutex()
+    let rng = Random()
+
+    public init() {}
+
+    public func load(id: String): ?HashMap<String, String> {
+        lock.lock()
+        try {
+            match (data.get(id)) {
+                case Some(v) => return Some(copyMap(v))
+                case None => return None
+            }
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    public func save(id: String, values: HashMap<String, String>): Unit {
+        lock.lock()
+        try {
+            data[id] = copyMap(values)
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    public func destroy(id: String): Unit {
+        lock.lock()
+        try {
+            data.remove(id)
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    public func newId(): String {
+        lock.lock()
+        try {
+            // 128 位随机 id(两个 64 位随机数拼成十六进制)。
+            return toHex64(rng.nextUInt64()) + toHex64(rng.nextUInt64())
+        } finally {
+            lock.unlock()
+        }
+    }
+}
+
+// 构造 session 中间件,使用指定的存储后端。
+public func session(store: SessionStore): Middleware {
+    return { req: HttpRequest, res: HttpResponse, next: Next =>
+        let sess = loadOrCreateSession(req, store)
+        req.session = Some(sess)
+        next()
+        // 请求处理完毕后回存会话;新会话再下发一枚签名的 sid Cookie。
+        store.save(sess.id, sess.values)
+        if (sess.isNew) {
+            res.cookie("sid", sess.id, httpOnly: true, path: "/", signed: true)
+        }
+    }
+}
+
+// 构造 session 中间件,使用默认的进程内存存储。
+public func session(): Middleware {
+    return session(MemorySessionStore())
+}
+
+// 依据签名 sid Cookie 载入既有会话,或新建一个会话。
+func loadOrCreateSession(req: HttpRequest, store: SessionStore): Session {
+    match (req.signedCookie("sid")) {
+        case Some(id) =>
+            match (store.load(id)) {
+                case Some(vals) => return Session(id, vals, false)
+                case None => return Session(store.newId(), HashMap<String, String>(), true)
+            }
+        case None => return Session(store.newId(), HashMap<String, String>(), true)
+    }
+}
+
+// 复制一份键值表(避免会话对象与存储内部共享同一引用,在多线程下更安全)。
+func copyMap(src: HashMap<String, String>): HashMap<String, String> {
+    let out = HashMap<String, String>()
+    for ((k, v) in src) {
+        out[k] = v
+    }
+    return out
+}
+
+// 把一个 UInt64 转成 16 位小写十六进制字符串(大端,固定宽度)。
+func toHex64(v: UInt64): String {
+    let digits = "0123456789abcdef"
+    var s = ""
+    var i = 60
+    while (i >= 0) {
+        let nib = Int64((v >> UInt64(i)) & UInt64(0xF))
+        s += digits[nib..(nib + 1)]
+        i -= 4
+    }
+    return s
+}

@@ -33,6 +33,11 @@ public class Application {
     // 仅当应用确实部署在可信代理(如 Nginx)之后才开启,否则客户端可伪造这些头。
     public var trustProxy: Bool = false
 
+    // 签名 Cookie / session 所用的 HMAC 密钥。设为非空后,res.cookie(..., signed: true)
+    // 会对值签名、req.signedCookie 会验签;session() 中间件也依赖它来保护 sid。
+    // 生产环境请设为足够随机的长字符串,且妥善保管、不要硬编码进版本库。
+    public var cookieSecret: String = ""
+
     // 已注册的视图引擎表:键为扩展名(不含点,如 "html"),值为对应的渲染引擎。
     // 经 app.engine(ext, fn) 注册;res.render 时按模板扩展名在此查找,缺省回退到
     // 内置的 simpleViewEngine。
