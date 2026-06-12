@@ -27,6 +27,12 @@ public class Application {
     // 所有请求都可见。
     public let locals: HashMap<String, Any> = HashMap<String, Any>()
 
+    // 是否信任反向代理设置的 X-Forwarded-* 头(对应 Express 的 'trust proxy')。
+    // 置为 true 后,req.protocol/secure/hostname/ips/clientIp 会采信
+    // X-Forwarded-Proto / X-Forwarded-Host / X-Forwarded-For;否则一律视为直连。
+    // 仅当应用确实部署在可信代理(如 Nginx)之后才开启,否则客户端可伪造这些头。
+    public var trustProxy: Bool = false
+
     public init() {}
 
     public func setLocal(key: String, value: Any): Unit {

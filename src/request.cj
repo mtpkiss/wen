@@ -145,7 +145,19 @@ public class HttpRequest {
     // 此时主机名是方括号连同其中的地址(即 "[::1]"),不能简单地按第一个冒号
     // 切分,否则会把 IPv6 地址截断。没有 Host 头、或切分后主机名为空时返回 None。
     public func hostname(): ?String {
-        match (this.header("host")) {
+        // 信任代理时优先采用 X-Forwarded-Host(取逗号分隔的第一个值,即最初客户端
+        // 请求的主机名),否则使用 Host 头。
+        let raw = if (trustProxy()) {
+            match (this.header("x-forwarded-host")) {
+                case Some(v) =>
+                    let (first, _) = splitOnce(v, ",")
+                    Some(first.trimAscii())
+                case None => this.header("host")
+            }
+        } else {
+            this.header("host")
+        }
+        match (raw) {
             case Some(h) =>
                 if (h.startsWith("[")) {
                     match (h.indexOf("]")) {
@@ -192,4 +204,131 @@ public class HttpRequest {
         let (wantMain, _) = splitOnce(contentTypeFor(t).toAsciiLower(), ";")
         return accept.contains(wantMain.trimAscii())
     }
+
+    // 当前请求所属应用是否开启了「信任代理」。它决定下面这些方法是否采信
+    // X-Forwarded-* 头。未关联应用(app 为 None)时一律返回 false。
+    func trustProxy(): Bool {
+        match (this.app) {
+            case Some(a) => return a.trustProxy
+            case None => return false
+        }
+    }
+
+    // 请求所用的协议:"http" 或 "https"。Wen 自身直连无 TLS,默认返回 "http";
+    // 当信任代理时,改用 X-Forwarded-Proto 头的第一个值(反向代理在终结 HTTPS 后
+    // 转发明文请求时,会用该头告知原始协议)。对应 Express 的 req.protocol。
+    public func protocol(): String {
+        if (trustProxy()) {
+            match (this.header("x-forwarded-proto")) {
+                case Some(v) =>
+                    let (first, _) = splitOnce(v, ",")
+                    let p = first.trimAscii().toAsciiLower()
+                    if (!p.isEmpty()) {
+                        return p
+                    }
+                case None => ()
+            }
+        }
+        return "http"
+    }
+
+    // 请求是否经由 HTTPS,等价于 protocol() == "https"。对应 Express 的 req.secure。
+    public func secure(): Bool {
+        return protocol() == "https"
+    }
+
+    // X-Forwarded-For 链(对应 Express 的 req.ips)。仅在信任代理时有意义:把该头
+    // 按逗号拆分、去空白,顺序为「最靠近客户端 → 最靠近服务器」。不信任代理或无此头
+    // 时返回空列表。
+    public func ips(): ArrayList<String> {
+        let out = ArrayList<String>()
+        if (trustProxy()) {
+            match (this.header("x-forwarded-for")) {
+                case Some(v) =>
+                    for (part in v.split(",")) {
+                        let p = part.trimAscii()
+                        if (!p.isEmpty()) {
+                            out.add(p)
+                        }
+                    }
+                case None => ()
+            }
+        }
+        return out
+    }
+
+    // 客户端真实 IP:信任代理时取 X-Forwarded-For 链中的第一个(最初的客户端),
+    // 否则回退到直连对端地址 ip。之所以单列一个方法而非改写 ip 字段,是为了保持
+    // ip 始终表示「直接对端」的语义不变(ip 由服务端在建立连接时填入)。
+    public func clientIp(): String {
+        if (trustProxy()) {
+            let chain = ips()
+            if (!chain.isEmpty()) {
+                return chain[0]
+            }
+        }
+        return this.ip
+    }
+
+    // 子域名列表(对应 Express 的 req.subdomains)。在 hostname 的基础上,去掉末尾
+    // 「主域名 + 顶级域」若干段(段数由应用设置 "subdomain offset" 决定,默认 2),
+    // 其余段按从右到左(由近及远)的顺序返回。
+    // 例如 hostname 为 "tobi.ferrets.example.com"、offset=2 时返回 ["ferrets", "tobi"]。
+    // 当主机名是 IP 字面量、或段数不足以扣除 offset 时,返回空列表。
+    public func subdomains(): ArrayList<String> {
+        let out = ArrayList<String>()
+        let host = match (hostname()) {
+            case Some(h) => h
+            case None => return out
+        }
+        // IP 地址(IPv4 或方括号 IPv6 字面量)不拆子域名。
+        if (host.startsWith("[") || isIpv4Like(host)) {
+            return out
+        }
+        let parts = host.split(".")
+        let offset = subdomainOffset()
+        // 丢弃末尾 offset 段,把剩下的从右往左收集。
+        var i = parts.size - offset - 1
+        while (i >= 0) {
+            out.add(parts[i])
+            i -= 1
+        }
+        return out
+    }
+
+    // 读取应用设置 "subdomain offset"(默认 2);非正数或缺失时回退为 2。
+    func subdomainOffset(): Int64 {
+        match (this.setting("subdomain offset")) {
+            case Some(v) =>
+                let n = parseInt(v)
+                if (n > 0) {
+                    return n
+                }
+                return 2
+            case None => return 2
+        }
+    }
+
+    // 是否为 AJAX 请求:X-Requested-With 头等于 "XMLHttpRequest"(大小写无关)。
+    // 许多前端库(如 jQuery)会自动带上该头。对应 Express 的 req.xhr。
+    public func xhr(): Bool {
+        match (this.header("x-requested-with")) {
+            case Some(v) => return v.toAsciiLower() == "xmlhttprequest"
+            case None => return false
+        }
+    }
+}
+
+// 判断字符串是否形如 IPv4 地址(只由数字与 "." 组成)。用于在 subdomains 中避免把
+// 形如 "127.0.0.1" 的 IP 误当作带子域名的主机名来拆分。
+func isIpv4Like(s: String): Bool {
+    if (s.isEmpty()) {
+        return false
+    }
+    for (b in s.toArray()) {
+        if (!((b >= UInt8(48) && b <= UInt8(57)) || b == UInt8(46))) {
+            return false
+        }
+    }
+    return true
 }
