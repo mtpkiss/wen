@@ -189,6 +189,16 @@ public class HttpResponse {
         this.finished = true
     }
 
+    // Serialize a JsonValue and send it as the JSON body.
+    public func json(value: JsonValue): Unit {
+        json(value.toJsonString())
+    }
+
+    // Convenience: send a JSON object built with the JsonObj builder.
+    public func json(value: JsonObj): Unit {
+        json(value.toJsonString())
+    }
+
     // Finish with the current status/body but no new content.
     public func end(): Unit {
         this.finished = true

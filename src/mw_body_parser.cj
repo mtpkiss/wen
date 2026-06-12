@@ -26,14 +26,21 @@ public func urlencodedParser(): Middleware {
     }
 }
 
-// Marks application/json bodies by storing the raw JSON under attribute "json".
-// We keep the raw text because the framework lacks a JSON value type.
+// Parses application/json bodies into a JsonValue, exposed via `req.json()`.
+// The raw text is also kept under attribute "json" for callers that want it.
+// A malformed body is left unparsed (req.json() stays None) rather than failing
+// the request; validate in your handler if strictness is required.
 public func jsonParser(): Middleware {
     return { req: HttpRequest, _: HttpResponse, next: Next =>
         match (req.header("content-type")) {
             case Some(ct) =>
                 if (ct.contains("application/json") && !req.body.isEmpty()) {
                     req.setAttribute("json", req.body)
+                    try {
+                        req.jsonBody = Some(parseJson(req.body))
+                    } catch (_: JsonException) {
+                        ()
+                    }
                 }
             case None => ()
         }

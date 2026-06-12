@@ -33,6 +33,10 @@ public class HttpRequest {
     // (uploads, proxied content, ...) survive intact. `body` is the UTF-8 view.
     public var bodyBytes: Array<UInt8>
 
+    // Parsed JSON body, populated by the jsonParser middleware when the request
+    // carries a well-formed application/json body. Read via `json()`.
+    public var jsonBody: ?JsonValue = None
+
     // Remote peer address, filled in by the server (empty when handled directly
     // via app.handle, e.g. in tests).
     public var ip: String = ""
@@ -98,6 +102,12 @@ public class HttpRequest {
     // A parsed cookie value (requires the cookieParser middleware).
     public func cookie(name: String): ?String {
         return this.cookies.get(name)
+    }
+
+    // The parsed JSON body, if the jsonParser middleware ran and the body was
+    // well-formed application/json. Navigate it with get/at/asString/asInt/...
+    public func json(): ?JsonValue {
+        return this.jsonBody
     }
 
     // Read an application setting at request time, if the owning app is known.
