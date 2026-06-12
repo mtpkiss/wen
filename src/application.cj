@@ -143,6 +143,9 @@ public class Application {
     // 情况下直接构造 req/res 来测试整条处理链。
     public func handle(req: HttpRequest, res: HttpResponse): Unit {
         req.app = Some(this)
+        // 让响应持有对本次请求的引用（对应 Express 的 res.req），这样像
+        // sendFile 这类方法才能读取条件请求（If-None-Match）与 Range 等请求头。
+        res.req = Some(req)
         router.handle(req, res)
     }
 

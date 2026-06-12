@@ -25,6 +25,12 @@ public class HttpResponse {
     public var bodyBytes: ?Array<UInt8> = None
     public var finished: Bool = false
 
+    // 指向本次响应所对应的请求对象(对应 Express 的 res.req),由 app.handle 在
+    // 派发时设置。sendFile 等方法借它读取条件请求(If-None-Match)与 Range 头,
+    // 从而支持 304 缓存协商与 206 分片下载。未经 app.handle 驱动(如直接构造 res
+    // 的测试场景)时为 None,此时文件类方法退化为发送完整内容。
+    public var req: ?HttpRequest = None
+
     // 用于流式响应的实时连接,由服务端在处理请求时挂接上来。当响应不是经由真实
     // 连接、而是直接通过 app.handle 驱动时(例如测试场景),没有底层连接可挂,
     // 此字段为 None。
@@ -155,7 +161,8 @@ public class HttpResponse {
     //     转换成合适的响应,例如 404),而不是在此静默处理。
     //   - 文件以原始字节发送,从而保证二进制资源(图片、字体等)原样送达,
     //     不会因为经过 UTF-8 编解码往返而被破坏。
-    // 设置完字节体后即把 finished 置为 true,表示响应已完成。
+    //   - 经由 applyFileResponse 统一附带 ETag 与 Accept-Ranges,并在请求带
+    //     If-None-Match / Range 时分别给出 304 / 206(详见 file_response.cj)。
     public func sendFile(path: String): Unit {
         let p = if (path.startsWith("./")) {
             path[2..path.size]
@@ -165,9 +172,35 @@ public class HttpResponse {
         if (!exists(p)) {
             throw Exception("sendFile: file not found: ${path}")
         }
-        this.headers["Content-Type"] = mimeFor(p)
-        this.bodyBytes = Some(File.readFrom(p))
-        this.finished = true
+        applyFileResponse(this, File.readFrom(p), mimeFor(p))
+    }
+
+    // 把响应标记为「附件下载」:设置 Content-Disposition 头,浏览器收到后会弹出
+    // 保存对话框而非内联显示。无参版本只声明 attachment;带文件名版本额外给出建议
+    // 的保存文件名,并据其扩展名推断 Content-Type(对应 Express 的 res.attachment)。
+    public func attachment(): HttpResponse {
+        this.headers["Content-Disposition"] = "attachment"
+        return this
+    }
+
+    public func attachment(filename: String): HttpResponse {
+        this.headers["Content-Disposition"] = "attachment; filename=\"${filename}\""
+        this.headers["Content-Type"] = mimeFor(filename)
+        return this
+    }
+
+    // 以「附件下载」的方式发送一个文件(对应 Express 的 res.download)。先写好
+    // Content-Disposition(下载文件名默认取路径的 basename,也可显式指定),再交给
+    // sendFile 发送文件字节——因此同样具备二进制安全、ETag 与 Range 支持。
+    // 注意:Content-Type 以文件实际扩展名为准(sendFile 内设置),下载文件名只影响
+    // 保存时的建议名,二者互不冲突。
+    public func download(path: String): Unit {
+        download(path, basename(path))
+    }
+
+    public func download(path: String, filename: String): Unit {
+        this.headers["Content-Disposition"] = "attachment; filename=\"${filename}\""
+        sendFile(path)
     }
 
     // 发送一段文本响应体(纯文本或 HTML)并结束响应。

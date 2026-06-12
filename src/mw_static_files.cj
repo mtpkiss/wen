@@ -55,9 +55,9 @@ public func staticFiles(root: String): Middleware {
             return
         }
 
-        // 直接发送文件的原始字节，这样图片、字体等二进制资源能被原封不动地
-        // 送出，而不会因为经过一次 UTF-8 编解码往返而被破坏。
-        res.contentType(mimeFor(rel)).sendBytes(File.readFrom(path))
+        // 经 applyFileResponse 发送文件：原始字节（二进制安全），并统一附带 ETag
+        // 与 Accept-Ranges，支持 If-None-Match 命中回 304、Range 请求回 206 分片。
+        applyFileResponse(res, File.readFrom(path), mimeFor(rel))
     }
 }
 
