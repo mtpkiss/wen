@@ -71,6 +71,58 @@ public func listContains(list: ArrayList<String>, value: String): Bool {
     return false
 }
 
+// base64 字母表(标准,RFC 4648)。
+let B64_TABLE: Array<UInt8> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toArray()
+
+// 标准 base64 编码(带 "=" 填充)。
+public func base64Encode(data: Array<UInt8>): String {
+    let out = ArrayList<UInt8>()
+    let n = data.size
+    var i = 0
+    while (i < n) {
+        let b0 = Int64(data[i])
+        let b1 = if (i + 1 < n) { Int64(data[i + 1]) } else { 0 }
+        let b2 = if (i + 2 < n) { Int64(data[i + 2]) } else { 0 }
+        let triple = (b0 << 16) | (b1 << 8) | b2
+        out.add(B64_TABLE[(triple >> 18) & 0x3F])
+        out.add(B64_TABLE[(triple >> 12) & 0x3F])
+        if (i + 1 < n) { out.add(B64_TABLE[(triple >> 6) & 0x3F]) } else { out.add(UInt8(61)) }   // '='
+        if (i + 2 < n) { out.add(B64_TABLE[triple & 0x3F]) } else { out.add(UInt8(61)) }
+        i += 3
+    }
+    return String.fromUtf8(out.toArray())
+}
+
+// 标准 base64 解码:忽略 "="、空白与非法字符。buf 始终掩到 24 位以免溢出。
+public func base64Decode(s: String): Array<UInt8> {
+    let out = ArrayList<UInt8>()
+    var buf = 0
+    var bits = 0
+    for (c in s.toArray()) {
+        let v = b64Val(c)
+        if (v < 0) {
+            continue
+        }
+        buf = ((buf << 6) | v) & 0xFFFFFF
+        bits += 6
+        if (bits >= 8) {
+            bits -= 8
+            out.add(UInt8((buf >> bits) & 0xFF))
+        }
+    }
+    return out.toArray()
+}
+
+// 单个 base64 字符的数值(0..63);非 base64 字符返回 -1。
+func b64Val(c: UInt8): Int64 {
+    if (c >= UInt8(65) && c <= UInt8(90)) { return Int64(c) - 65 }          // A-Z
+    if (c >= UInt8(97) && c <= UInt8(122)) { return Int64(c) - 97 + 26 }    // a-z
+    if (c >= UInt8(48) && c <= UInt8(57)) { return Int64(c) - 48 + 52 }     // 0-9
+    if (c == UInt8(43)) { return 62 }                                       // +
+    if (c == UInt8(47)) { return 63 }                                       // /
+    return -1
+}
+
 // 返回字符串中最后一个 "." 的下标;不存在则返回 -1。用于在 "<value>.<sig>" 形式
 // 的签名 Cookie 中,从右侧切出签名部分(value 自身可以包含 ".")。
 public func lastIndexOfDot(s: String): Int64 {

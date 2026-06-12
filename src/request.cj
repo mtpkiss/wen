@@ -118,6 +118,11 @@ public class HttpRequest {
         return this.attributes.get(key)
     }
 
+    // 本请求的关联 ID(由 requestId() 中间件设置;未启用时为 None)。
+    public func requestId(): ?String {
+        return this.attributes.get("requestId")
+    }
+
     // 向 locals 存储区暂存一个任意类型的值,供下游处理器取用。
     // 与 setAttribute 不同,这里接受任意类型(Any),而非仅限字符串。
     public func setLocal(key: String, value: Any): Unit {
