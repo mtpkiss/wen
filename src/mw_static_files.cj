@@ -57,7 +57,7 @@ public func staticFiles(root: String): Middleware {
 
         // 经 applyFileResponse 发送文件：原始字节（二进制安全），并统一附带 ETag
         // 与 Accept-Ranges，支持 If-None-Match 命中回 304、Range 请求回 206 分片。
-        applyFileResponse(res, File.readFrom(path), mimeFor(rel))
+        applyFileResponse(res, File.readFrom(path), mimeFor(rel), httpDateForFile(path))
     }
 }
 

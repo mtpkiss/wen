@@ -172,7 +172,7 @@ public class HttpResponse {
         if (!exists(p)) {
             throw Exception("sendFile: file not found: ${path}")
         }
-        applyFileResponse(this, File.readFrom(p), mimeFor(p))
+        applyFileResponse(this, File.readFrom(p), mimeFor(p), httpDateForFile(p))
     }
 
     // 把响应标记为「附件下载」:设置 Content-Disposition 头,浏览器收到后会弹出

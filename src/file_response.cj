@@ -1,6 +1,8 @@
 package wen
 
 import std.collection.*
+import std.fs.*
+import std.time.*
 
 /*
  * 文件响应的公共逻辑:把一段文件字节按「带缓存协商与分片下载」的语义写入响应。
@@ -26,12 +28,17 @@ enum RangeResult {
 }
 
 // 把文件字节按文件响应语义写入 res 并结束响应:设置 Content-Type / ETag /
-// Accept-Ranges,再依据请求头决定 200 全量、304 命中缓存、206 分片或 416。
-func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: String): Unit {
+// Accept-Ranges /(可选)Last-Modified,再依据请求头决定 200 全量、304 命中缓存、
+// 206 分片或 416。lastModified 为已格式化好的 HTTP 日期(无则传 None)。
+func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: String, lastModified: ?String): Unit {
     res.headers["Content-Type"] = contentType
     res.headers["Accept-Ranges"] = "bytes"
     let etag = computeETag(data)
     res.headers["ETag"] = etag
+    match (lastModified) {
+        case Some(lm) => res.headers["Last-Modified"] = lm
+        case None => ()
+    }
 
     // 没有请求上下文时(如单元测试直接调用),无从读取条件/Range 头,直接发整体。
     let req = match (res.req) {
@@ -42,18 +49,31 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
             return
     }
 
-    // 条件请求:If-None-Match 命中当前 ETag 则回 304(空体,见 serializeResponse
-    // 对 304 的处理:既不发 body 也不发 Content-Length)。ETag 头保留在响应里。
+    // 条件请求:按规范 If-None-Match 优先于 If-Modified-Since。命中即回 304(空体,
+    // 见 serializeResponse 对 304 的处理:既不发 body 也不发 Content-Length);
+    // ETag / Last-Modified 头仍保留在响应里。
     match (req.header("if-none-match")) {
         case Some(inm) =>
             if (etagMatches(inm, etag)) {
-                res.status(304)
-                res.body = ""
-                res.bodyBytes = None
-                res.finished = true
+                send304(res)
                 return
             }
-        case None => ()
+            // 提供了 If-None-Match 但不匹配:按规范忽略 If-Modified-Since,继续往下。
+        case None =>
+            // 没有 If-None-Match 时,才考虑 If-Modified-Since。客户端通常会原样回送
+            // 我们之前给出的 Last-Modified;此处做保守的「值相等即视为未修改」判断
+            // (只在完全一致时回 304,绝不会误判为未改动)。
+            match (lastModified) {
+                case Some(lm) =>
+                    match (req.header("if-modified-since")) {
+                        case Some(ims) => if (ims.trimAscii() == lm) {
+                            send304(res)
+                            return
+                        }
+                        case None => ()
+                    }
+                case None => ()
+            }
     }
 
     // Range 分片请求。
@@ -80,6 +100,42 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
     // 无条件命中、无可用 Range:发送完整内容(200)。
     res.bodyBytes = Some(data)
     res.finished = true
+}
+
+// 回 304 Not Modified(空体)。
+func send304(res: HttpResponse): Unit {
+    res.status(304)
+    res.body = ""
+    res.bodyBytes = None
+    res.finished = true
+}
+
+// 取文件最后修改时间并格式化成 HTTP 日期(用于 Last-Modified);取不到时返回 None。
+func httpDateForFile(path: String): ?String {
+    try {
+        return Some(formatHttpDate(FileInfo(Path(path)).lastModificationTime))
+    } catch (_: Exception) {
+        return None
+    }
+}
+
+// 把一个(UTC)时间格式化为 RFC 1123 形式的 HTTP 日期,例如
+// "Fri, 12 Jun 2026 00:40:55 GMT"。星期与月份取其英文全名的前三个字母作为缩写。
+func formatHttpDate(t: DateTime): String {
+    let dow = t.dayOfWeek.toString()
+    let mon = t.month.toString()
+    let dowAbbr = if (dow.size >= 3) { dow[0..3] } else { dow }
+    let monAbbr = if (mon.size >= 3) { mon[0..3] } else { mon }
+    return "${dowAbbr}, ${pad2(t.dayOfMonth)} ${monAbbr} ${t.year} " +
+           "${pad2(t.hour)}:${pad2(t.minute)}:${pad2(t.second)} GMT"
+}
+
+// 把 0..99 的整数补足成两位十进制字符串。
+func pad2(n: Int64): String {
+    if (n < 10) {
+        return "0${n}"
+    }
+    return n.toString()
 }
 
 // 依据内容算出一个强 ETag(形如 "<size>-<h1>-<h2>")。这里用两个不同质数/模数的
