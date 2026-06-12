@@ -311,8 +311,8 @@ main(): Int64 {
   `app.use(path, Router)`(含 mergeParams);自动 `HEAD`/`OPTIONS`、`405 + Allow`。
 - **中间件**:中间件链 `(req, res, next)`、全局/路径挂载、数组批量挂载、错误处理中间件
   `(err, req, res, next)`、`Plugin` 系统。内置:`logger / cors / helmet(安全头) /
-  compression(gzip 压缩) / rateLimit(限流) / jsonParser / urlencodedParser /
-  multipart(文件上传) / cookieParser / staticFiles / session`。
+  compression(gzip 压缩) / etag(动态条件 GET) / rateLimit(限流) / jsonParser /
+  urlencodedParser / multipart(文件上传) / cookieParser / staticFiles / session`。
 - **请求**:`headers/query/params/cookies`、字符串 `attributes` 与类型化 `locals`、
   `body/bodyBytes`、`json()`(解析后的 `JsonValue`)、`file(name)/files`(上传)、
   `signedCookie(name)`、`session`;`hostname()/isType()`、`accepts()` 与 `accepts([...])`
@@ -324,7 +324,8 @@ main(): Int64 {
   `attachment/download`(附件下载);流式 `stream` 与 Server-Sent Events `sse`。
 - **文件与缓存**:`sendFile / download / staticFiles` 均**二进制安全**(原始字节,不经
   UTF-8 往返);自动 `ETag` + `If-None-Match` → 304、`Last-Modified` + `If-Modified-Since`
-  → 304、`Range` 分片下载(206 / 416)。
+  → 304、`Range` 分片下载(206 / 416)。动态响应(`send/json`)经 `etag()` 中间件也能
+  获得 `ETag` 与条件 GET(304)。
 - **JSON**:内置零依赖 `JsonValue`(对象保序)+ `parseJson` + `toJsonString` + `JsonObj`
   链式构建器,访问器 `asString/asInt/asFloat/asBool/get/at/size/keys`;正确处理转义、
   `\u` 与代理对。
