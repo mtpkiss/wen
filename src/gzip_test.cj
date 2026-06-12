@@ -1,7 +1,6 @@
 package wen
 
 import std.collection.*
-import std.fs.*
 import std.unittest.*
 import std.unittest.testmacro.*
 
@@ -134,15 +133,6 @@ class GzipTest {
         let gz = gzipCompress(raw)
         @Assert(gz.size < raw.size / 4)                 // 至少压到原来的 1/4 以下
         @Assert(bytesEqual(inflateGzip(gz), raw))
-    }
-
-    // 把一份 gzip 输出落盘,供外部 gunzip 交叉验证(不删除,测试后由脚本核对)。
-    @TestCase
-    func testDumpForGunzip(): Unit {
-        let s = "Wen gzip cross-check 你好 " + "hello " + "hello " + "hello world"
-        File.writeTo("._cjx_gz_dump.gz", gzipCompress(s.toArray()))
-        File.writeTo("._cjx_gz_dump.txt", s.toArray())
-        @Assert(true)
     }
 
     // compression() 中间件:客户端接受 gzip 时压缩文本响应,且能解压回原文。

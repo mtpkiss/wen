@@ -8,3 +8,6 @@ target/
 src/main.cj
 demo.exe
 *.cjo
+
+# 测试运行产生的临时文件
+._cjx_*
