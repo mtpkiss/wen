@@ -127,6 +127,7 @@ public class Application {
     // Server tunables applied when listen() builds the HttpServer.
     public var maxBodySize: Int64 = 1048576
     public var readTimeoutMs: Int64 = 15000
+    public var maxConnections: Int64 = 1024
 
     public func listen(port: Int64): Unit {
         buildServer().listen(port)
@@ -142,6 +143,7 @@ public class Application {
         let server = HttpServer(this)
         server.maxBodySize = this.maxBodySize
         server.readTimeoutMs = this.readTimeoutMs
+        server.maxConnections = this.maxConnections
         return server
     }
 }

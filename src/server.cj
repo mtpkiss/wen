@@ -2,12 +2,21 @@ package wen
 
 import std.net.*
 import std.collection.*
+import std.sync.*
 
 // Raised when an incoming request body exceeds the configured maximum, mapped
 // to a 413 response by the server.
 public class PayloadTooLargeException <: Exception {
     public init() {
         super("Payload Too Large")
+    }
+}
+
+// Raised on malformed framing (e.g. both Content-Length and Transfer-Encoding
+// present, a request-smuggling vector), mapped to a 400 response by the server.
+public class BadRequestException <: Exception {
+    public init() {
+        super("Bad Request")
     }
 }
 
@@ -43,6 +52,9 @@ public class HttpServer {
     public var maxBodySize: Int64 = 1048576
     // Per-read socket timeout in milliseconds, guarding against slow/idle peers.
     public var readTimeoutMs: Int64 = 15000
+    // Maximum number of connections served concurrently (default 1024). Bounds
+    // the thread count so a connection flood cannot exhaust resources.
+    public var maxConnections: Int64 = 1024
 
     public init(app: Application) {
         this.app = app
@@ -51,10 +63,19 @@ public class HttpServer {
     public func listen(port: Int64): Unit {
         let server = TcpServerSocket(bindAt: UInt16(port))
         server.bind()
+        // Bound concurrency: the accept loop blocks once `maxConnections` are in
+        // flight (the OS backlog absorbs the wait) and resumes as handlers free
+        // their slot, so a flood cannot spawn unbounded threads.
+        let slots = Semaphore(maxConnections)
         while (true) {
+            slots.acquire()
             let client = server.accept()
             spawn {
-                => handleConnection(client)
+                try {
+                    handleConnection(client)
+                } finally {
+                    slots.release()
+                }
             }
         }
     }
@@ -96,6 +117,8 @@ public class HttpServer {
             }
         } catch (_: PayloadTooLargeException) {
             writeError(client, 413, "Payload Too Large")
+        } catch (_: BadRequestException) {
+            writeError(client, 400, "Bad Request")
         } catch (_: Exception) {
             writeError(client, 500, "Internal Server Error")
         } finally {
@@ -218,9 +241,15 @@ public class HttpServer {
     }
 
     func serializeResponse(res: HttpResponse): Array<UInt8> {
+        // 204 No Content and 304 Not Modified carry neither a body nor a
+        // Content-Length header, per RFC 7230.
+        let bodyless = res.statusCode == 204 || res.statusCode == 304
         // For a HEAD response, keep the Content-Length already set (the GET body
         // size) but emit no body. Otherwise compute it from the actual body.
         let bodyBytes = if (res.suppressBody) {
+            Array<UInt8>()
+        } else if (bodyless) {
+            res.headers.remove("Content-Length")
             Array<UInt8>()
         } else {
             let real = match (res.bodyBytes) {
@@ -307,7 +336,13 @@ class ConnReader {
         let headerSectionEnd = sep + 4
         let headerText = String.fromUtf8(sliceList(buf, 0, sep))
 
-        if (headerIsChunked(headerText)) {
+        let chunked = headerIsChunked(headerText)
+        if (chunked && headerHasContentLength(headerText)) {
+            // Both Transfer-Encoding and Content-Length present: ambiguous
+            // framing and a classic request-smuggling vector (RFC 7230 §3.3.3).
+            throw BadRequestException()
+        }
+        if (chunked) {
             return readChunked(headerSectionEnd)
         }
 
@@ -456,6 +491,17 @@ func headerContentLength(headerText: String): Int64 {
         }
     }
     return 0
+}
+
+// Whether the header block declares a Content-Length.
+func headerHasContentLength(headerText: String): Bool {
+    for (line in headerText.split("\r\n")) {
+        let (k, _) = splitOnce(line, ":")
+        if (k.toAsciiLower().trimAscii() == "content-length") {
+            return true
+        }
+    }
+    return false
 }
 
 // Whether the request declares a chunked transfer encoding.

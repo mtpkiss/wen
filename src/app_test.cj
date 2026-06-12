@@ -281,6 +281,37 @@ class AppTest {
         @Assert(len, "5")
     }
 
+    // A 204 response is serialized with no body and no Content-Length header.
+    @TestCase
+    func test204NoContentLength(): Unit {
+        let server = HttpServer(wen())
+        let res = HttpResponse()
+        res.status(204).end()
+        let text = String.fromUtf8(server.serializeResponse(res))
+        @Expect(text.contains("204 No Content"))
+        @Expect(!text.contains("Content-Length"))
+        // The header section must end with the blank line and carry no body.
+        @Expect(text.endsWith("\r\n\r\n"))
+    }
+
+    // A 304 response likewise omits Content-Length.
+    @TestCase
+    func test304NoContentLength(): Unit {
+        let server = HttpServer(wen())
+        let res = HttpResponse()
+        res.status(304).end()
+        let text = String.fromUtf8(server.serializeResponse(res))
+        @Expect(text.contains("304 Not Modified"))
+        @Expect(!text.contains("Content-Length"))
+    }
+
+    // headerHasContentLength detects the Content-Length header case-insensitively.
+    @TestCase
+    func testHeaderHasContentLength(): Unit {
+        @Assert(headerHasContentLength("POST / HTTP/1.1\r\ncontent-length: 5"))
+        @Assert(!headerHasContentLength("GET / HTTP/1.1\r\nHost: x"))
+    }
+
     // A truly unknown path still yields 404.
     @TestCase
     func testUnknownPathStill404(): Unit {
