@@ -23,6 +23,7 @@ public func reasonPhrase(code: Int64): String {
         case 403 => "Forbidden"
         case 404 => "Not Found"
         case 405 => "Method Not Allowed"
+        case 406 => "Not Acceptable"
         case 409 => "Conflict"
         case 412 => "Precondition Failed"
         case 415 => "Unsupported Media Type"

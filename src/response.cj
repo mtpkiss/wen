@@ -305,6 +305,66 @@ public class HttpResponse {
         render(name, JsonObj().build())
     }
 
+    // 内容协商分发(对应 Express 的 res.format)。传入若干「类型 -> 回调」条目,框架
+    // 依据请求的 Accept 头从中挑出客户端最偏好、且服务端能提供的类型,设好对应的
+    // Content-Type 后调用其回调来产生响应;并自动加上 Vary: Accept(告诉缓存该响应
+    // 随 Accept 而变)。类型用简写(如 "html"/"json")或完整 MIME 均可。
+    // 特殊条目 "default" 作为兜底:当没有任何类型可接受时调用它;若也没有 default,
+    // 则回 406 Not Acceptable。
+    // 用法示例:
+    //   res.format([
+    //       ("html", { => res.send("<h1>Hi</h1>") }),
+    //       ("json", { => res.json("{\"hi\":true}") })
+    //   ])
+    public func format(handlers: Array<(String, () -> Unit)>): Unit {
+        // 收集可供选择的类型(排除特殊的 "default")。
+        let offered = ArrayList<String>()
+        for ((t, _) in handlers) {
+            if (t != "default") {
+                offered.add(t)
+            }
+        }
+        // 该响应随 Accept 头而变,补上 Vary 以利缓存正确性。
+        match (this.headers.get("Vary")) {
+            case Some(v) => if (!v.contains("Accept")) { this.headers["Vary"] = "${v}, Accept" }
+            case None => this.headers["Vary"] = "Accept"
+        }
+        var chosen: ?String = None
+        match (this.req) {
+            case Some(r) => chosen = r.accepts(offered.toArray())
+            case None => if (offered.size > 0) { chosen = Some(offered[0]) }
+        }
+        match (chosen) {
+            case Some(t) =>
+                this.headers["Content-Type"] = contentTypeFor(t)
+                callFormat(handlers, t)
+            case None =>
+                if (hasFormat(handlers, "default")) {
+                    callFormat(handlers, "default")
+                } else {
+                    this.status(406).send("Not Acceptable")
+                }
+        }
+    }
+
+    private func callFormat(handlers: Array<(String, () -> Unit)>, key: String): Unit {
+        for ((t, fn) in handlers) {
+            if (t == key) {
+                fn()
+                return
+            }
+        }
+    }
+
+    private func hasFormat(handlers: Array<(String, () -> Unit)>, key: String): Bool {
+        for ((t, _) in handlers) {
+            if (t == key) {
+                return true
+            }
+        }
+        return false
+    }
+
     // 取回本响应所属的 Application(经 req.app)。渲染依赖应用上的视图设置与引擎表,
     // 因此必须是经 app.handle 派发的响应;直接构造的 res 没有该关联,抛异常提示。
     private func resolveApp(): Application {

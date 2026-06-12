@@ -196,19 +196,71 @@ public class HttpRequest {
     }
 
     // 判断客户端的 Accept 请求头是否接受类型 `t`(`t` 可为简写或完整 MIME 类型)。
-    // 与 Express 一致:当 Accept 头缺失、为空、或包含通配 `*/*` 时,视为接受任何
-    // 类型,直接返回 true。否则把 `t` 展开成完整 MIME、剥掉参数部分,再在 Accept
-    // 头中做大小写无关的子串包含判断。
+    // 缺少 Accept 头时视为接受任何类型(返回 true)。否则按内容协商规则判断:把 `t`
+    // 展开成完整 MIME、剥掉参数部分,在 Accept 条目中查找匹配并要求其质量值 q > 0
+    // (即某项写成 "application/json;q=0" 时,该类型被明确拒绝,返回 false)。
     public func accepts(t: String): Bool {
-        let accept = match (this.header("accept")) {
-            case Some(v) => v.toAsciiLower()
+        match (this.header("accept")) {
             case None => return true
+            case Some(v) =>
+                let items = parseAcceptHeader(v)
+                if (items.isEmpty()) {
+                    return true
+                }
+                let (full, _) = splitOnce(contentTypeFor(t).toAsciiLower(), ";")
+                let (q, rank, _) = acceptMatch(full.trimAscii(), items)
+                return rank >= 0 && q > 0.0
         }
-        if (accept.isEmpty() || accept.contains("*/*")) {
-            return true
+    }
+
+    // 在一组候选类型里,按客户端 Accept 头选出「最佳」的那个并返回(对应 Express 的
+    // req.accepts([...]))。挑选优先级:质量值 q 越大越好;q 相同则匹配越具体越好;
+    // 再相同则在 Accept 头中越靠前越好;仍相同则按候选数组给出的先后。都不被接受
+    // (或都 q=0)时返回 None。缺少 Accept 头时返回候选中的第一个。
+    public func accepts(types: Array<String>): ?String {
+        let header = match (this.header("accept")) {
+            case Some(v) => v
+            case None =>
+                if (types.size > 0) {
+                    return Some(types[0])
+                }
+                return None
         }
-        let (wantMain, _) = splitOnce(contentTypeFor(t).toAsciiLower(), ";")
-        return accept.contains(wantMain.trimAscii())
+        let items = parseAcceptHeader(header)
+        if (items.isEmpty()) {
+            if (types.size > 0) {
+                return Some(types[0])
+            }
+            return None
+        }
+        var best: ?String = None
+        var bestQ = -1.0
+        var bestRank = -2
+        var bestIdx = 0
+        for (cand in types) {
+            let (full, _) = splitOnce(contentTypeFor(cand).toAsciiLower(), ";")
+            let (q, rank, idx) = acceptMatch(full.trimAscii(), items)
+            if (rank < 0 || q <= 0.0) {
+                continue
+            }
+            var better = false
+            if (q > bestQ) {
+                better = true
+            } else if (q == bestQ) {
+                if (rank > bestRank) {
+                    better = true
+                } else if (rank == bestRank && idx < bestIdx) {
+                    better = true
+                }
+            }
+            if (better) {
+                bestQ = q
+                bestRank = rank
+                bestIdx = idx
+                best = Some(cand)
+            }
+        }
+        return best
     }
 
     // 当前请求所属应用是否开启了「信任代理」。它决定下面这些方法是否采信
