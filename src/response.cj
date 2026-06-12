@@ -312,6 +312,70 @@ public class HttpResponse {
         this.finished = true
     }
 
+    // 指定状态码的重定向(如 301 永久重定向)。
+    public func redirect(status: Int64, location: String): Unit {
+        this.status(status)
+        this.headers["Location"] = location
+        this.body = ""
+        this.finished = true
+    }
+
+    // 往 Vary 头追加一个字段(已存在则不重复),对应 Express 的 res.vary。
+    public func vary(field: String): HttpResponse {
+        match (this.headers.get("Vary")) {
+            case Some(v) =>
+                var present = false
+                for (part in v.split(",")) {
+                    if (part.trimAscii().toAsciiLower() == field.toAsciiLower()) {
+                        present = true
+                    }
+                }
+                if (!present) {
+                    this.headers["Vary"] = "${v}, ${field}"
+                }
+            case None => this.headers["Vary"] = field
+        }
+        return this
+    }
+
+    // 设置 Link 响应头(对应 Express 的 res.links),入参为若干 (rel, url) 对,
+    // 输出形如:<url1>; rel="next", <url2>; rel="last"。
+    public func links(rels: Array<(String, String)>): HttpResponse {
+        var s = ""
+        var first = true
+        for ((rel, url) in rels) {
+            if (!first) {
+                s += ", "
+            }
+            s += "<${url}>; rel=\"${rel}\""
+            first = false
+        }
+        this.headers["Link"] = s
+        return this
+    }
+
+    // 发送 JSONP 响应(对应 Express 的 res.jsonp):当请求带合法的 callback 查询参数时,
+    // 用该回调名包裹 JSON 并以 application/javascript 发送;否则退化为普通 JSON。
+    // 回调名经白名单校验(仅字母/数字/_ $ .),以防脚本注入。
+    public func jsonp(payload: String): Unit {
+        let cb: ?String = match (this.req) {
+            case Some(r) => r.queryParam("callback")
+            case None => None
+        }
+        match (cb) {
+            case Some(name) =>
+                if (isJsonpCallback(name)) {
+                    this.headers["Content-Type"] = "application/javascript; charset=utf-8"
+                    this.headers["X-Content-Type-Options"] = "nosniff"
+                    this.body = "/**/ typeof ${name} === 'function' && ${name}(${payload});"
+                    this.finished = true
+                } else {
+                    json(payload)
+                }
+            case None => json(payload)
+        }
+    }
+
     // 渲染一个视图模板并作为 HTML 响应发送(对应 Express 的 res.render)。视图定位、
     // 引擎选择等逻辑都委托给所属 Application.renderView;这里只负责设好 Content-Type、
     // 写入渲染结果并结束响应。data 为传给模板的数据(用 JsonValue 表示)。
@@ -414,6 +478,24 @@ public class HttpResponse {
         }
         return app.cookieSecret
     }
+}
+
+// JSONP 回调名是否合法:非空、长度受限,且仅由字母/数字/下划线/$/. 组成,
+// 以防把任意脚本注入到响应里。
+func isJsonpCallback(s: String): Bool {
+    if (s.isEmpty() || s.size > 128) {
+        return false
+    }
+    for (b in s.toArray()) {
+        let ok = (b >= UInt8(65) && b <= UInt8(90)) ||       // A-Z
+            (b >= UInt8(97) && b <= UInt8(122)) ||            // a-z
+            (b >= UInt8(48) && b <= UInt8(57)) ||             // 0-9
+            b == UInt8(95) || b == UInt8(36) || b == UInt8(46)  // _ $ .
+        if (!ok) {
+            return false
+        }
+    }
+    return true
 }
 
 // 把内容类型的简写(如 "json"、"html"、"text" 等)展开为完整的 MIME 类型。

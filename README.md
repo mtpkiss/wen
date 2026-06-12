@@ -319,11 +319,13 @@ main(): Int64 {
   `signedCookie(name)`、`session`;`hostname()/isType()`、`accepts()` 与 `accepts([...])`
   (带 q 值的最佳匹配);代理感知 `protocol()/secure()/ips()/clientIp()/subdomains()/xhr()`
   (配合 `app.trustProxy`)。
-- **响应**:`send/json/sendBytes/sendStatus/redirect/end`;`json` 支持字符串与类型化
-  `JsonValue/JsonObj`;`cookie`(支持 `signed` 签名、`domain`/`expires`/`maxAge`/
-  `httpOnly`/`secure`/`sameSite`)/`clearCookie`、`set` 批量、
-  `mimeType/contentType/append/location`;`render`(视图渲染)、`format`(内容协商)、
-  `attachment/download`(附件下载);流式 `stream` 与 Server-Sent Events `sse`。
+- **响应**:`send/json/jsonp/sendBytes/sendStatus/end`、`redirect`(可带状态码);`json`
+  支持字符串与类型化 `JsonValue/JsonObj`;`cookie`(支持 `signed` 签名、`domain`/`expires`/
+  `maxAge`/`httpOnly`/`secure`/`sameSite`)/`clearCookie`、`set` 批量、
+  `mimeType/contentType/append/location/vary/links`;`render`(视图渲染)、`format`(内容
+  协商)、`attachment/download`(附件下载);流式 `stream` 与 Server-Sent Events `sse`。
+- **应用设置**:`set/setting`(字符串)、`enable/disable/enabled/disabled`(布尔)、
+  `locals`(共享对象)、`trustProxy/cookieSecret/maxConnections` 等开关。
 - **文件与缓存**:`sendFile / download / staticFiles` 均**二进制安全**(原始字节,不经
   UTF-8 往返);自动 `ETag` + `If-None-Match` → 304、`Last-Modified` + `If-Modified-Since`
   → 304、`Range` 分片下载(206 / 416)。动态响应(`send/json`)经 `etag()` 中间件也能
@@ -342,6 +344,24 @@ main(): Int64 {
   请求体、并发连接上限(信号量背压)、请求体大小上限与读超时;请求走私防护
   (同时带 Content-Length 与 Transfer-Encoding → 400)、`204/304` 不带响应体与
   Content-Length、自动 `Date` 响应头。
+
+## 内置中间件速查
+
+| 中间件 | 作用 |
+|---|---|
+| `logger()` | 请求日志(进/出 + 最终状态码) |
+| `requestId()` | 注入 / 沿用 `X-Request-Id`,贯穿日志 |
+| `cors()` / `cors(origin)` | CORS 头 + 自动应答 `OPTIONS` 预检 |
+| `helmet(...)` | 一组安全响应头(CSP / nosniff / HSTS / 防点击劫持等) |
+| `compression(threshold)` | 按 `Accept-Encoding` 自动 gzip 压缩文本响应 |
+| `etag()` | 动态响应 `ETag` + `If-None-Match` → 304 |
+| `rateLimit(max, windowSeconds)` | 按客户端 IP 限流,超额 429 + `Retry-After` |
+| `basicAuth(verify)` / `bearerAuth(verify)` | HTTP Basic / Bearer 认证,失败 401 |
+| `jsonParser()` / `urlencodedParser()` | 解析 JSON / 表单请求体 |
+| `multipart()` | 解析 `multipart/form-data`(文件上传) |
+| `cookieParser()` | 解析 `Cookie` 头到 `req.cookies` |
+| `session(store?)` | 会话(签名 sid;默认内存 store,可自定义 `SessionStore`) |
+| `staticFiles(root, ...)` | 静态文件(二进制安全 + ETag/Range/Cache-Control/dotfiles) |
 
 ## 构建与测试
 

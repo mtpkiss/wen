@@ -206,6 +206,19 @@ public class Application {
         return settings.get(key)
     }
 
+    // 布尔设置的语法糖(对应 Express 的 app.enable/disable/enabled/disabled):
+    // enable/disable 把设置置为 "true"/"false";enabled/disabled 判断其布尔值
+    // (未设置视为 false / 未启用)。
+    public func enable(key: String): Application { settings[key] = "true"; return this }
+    public func disable(key: String): Application { settings[key] = "false"; return this }
+    public func enabled(key: String): Bool {
+        match (settings.get(key)) {
+            case Some(v) => return v == "true"
+            case None => return false
+        }
+    }
+    public func disabled(key: String): Bool { return !enabled(key) }
+
     // ---- 请求分发 / 启动服务 ------------------------------------------------
 
     // 对给定的请求 / 响应跑完整条中间件链。这是真正的请求处理入口：它先把当前
