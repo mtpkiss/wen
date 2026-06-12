@@ -58,6 +58,10 @@ public class HttpRequest {
     // 直接构造请求(未经应用派发)时为 None,此时 setting() 会返回 None。
     public var app: ?Application = None
 
+    // multipart/form-data 上传的文件列表,由 multipart() 中间件填充;未启用该中间件
+    // 或非文件上传请求时为空。用 file(name) 按字段名取单个文件。
+    public let files: ArrayList<UploadedFile> = ArrayList<UploadedFile>()
+
     // 内部状态:next("route") 信号。处理器调用 nextRoute() 置位后,调度器会跳过
     // 当前路由的剩余处理器。
     var skipRouteFlag: Bool = false
@@ -390,6 +394,17 @@ public class HttpRequest {
             return true
         }
         return false
+    }
+
+    // 取某个字段名的上传文件(同名多文件时返回第一个);不存在则返回 None。
+    // 需先经 multipart() 中间件解析。
+    public func file(name: String): ?UploadedFile {
+        for (f in this.files) {
+            if (f.fieldName == name) {
+                return Some(f)
+            }
+        }
+        return None
     }
 
     // 内部:某参数名的预处理回调本请求是否已触发过。
