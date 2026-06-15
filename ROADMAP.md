@@ -20,7 +20,6 @@
 - `engine(ext, fn)` 视图引擎注册
 - `set / setting / enable / disable / enabled / disabled` 配置开关
 - `locals` + `setLocal / local`
-- `register(plugin)` 插件机制(Express 无此原生能力)
 - `cookieSecret`、`trustProxy`
 - 服务器调优:`maxBodySize` / `readTimeoutMs` / `maxConnections`;HTTP keep-alive
 

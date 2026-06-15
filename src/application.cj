@@ -89,14 +89,6 @@ public class Application {
         return this
     }
 
-    // 注册一个实现了 Plugin 接口的插件。内部直接回调插件的 install 方法，并把
-    // 当前 Application 交给它，让插件在安装阶段完成自己的扩展（加路由、加中间件、
-    // 改设置等）。返回 this 以便继续链式调用。
-    public func register(plugin: Plugin): Application {
-        plugin.install(this)
-        return this
-    }
-
     // 为某个模板扩展名注册视图引擎,对应 Express 的 app.engine(ext, fn)。扩展名可带
     // 或不带前导点("html" 与 ".html" 等价)。注册后,渲染该扩展名的模板时即用此引擎。
     public func engine(ext: String, fn: ViewEngine): Application {
