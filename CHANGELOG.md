@@ -4,8 +4,11 @@
 
 ## [Unreleased]
 
-精简框架范围,把「不该由框架拍板的策略」交还给应用(含破坏性变更):
+围绕「保持简单、可扩展」收敛范围、减少样板(含破坏性变更):
 
+- **请求体 / Cookie 解析内置化**:JSON / 表单 / multipart / Cookie 改为「首次访问 `req.json()` /
+  `attribute()` / `file()` / `cookie()` 时按 Content-Type 自动懒解析」,**无需再 `app.use` 解析中间件**;
+  原 `jsonParser` / `urlencodedParser` / `multipart` / `cookieParser` 工厂保留为薄壳(提前触发),不破坏现有代码。
 - **helmet**:默认只发部署无关、不会误伤的头(`nosniff` / `X-Frame-Options` / `Referrer-Policy` / HSTS);
   `csp` 与新增的 `coop` / `corp` 改为 **opt-in**(默认不发,需显式传值)。此前 CSP 默认 `default-src 'self'`、
   COOP/CORP 无条件下发,易静默打挂外部资源 / 跨窗口通信。

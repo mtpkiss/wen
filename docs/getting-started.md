@@ -64,8 +64,7 @@ app.use(compression())                 // gzip
 app.use(etag())                        // 动态 ETag + 条件 GET
 app.use(helmet())                      // 安全响应头
 app.use(cors())
-app.use(jsonParser())
-app.use(cookieParser())
+// JSON / 表单 / multipart / Cookie 解析已内置:req.json()/attribute()/file()/cookie() 首次访问即自动解析,无需注册
 
 app.param("id", { req, _, value =>
     req.attributes["entity"] = "loaded:${value}"

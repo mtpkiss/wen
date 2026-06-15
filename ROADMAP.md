@@ -53,11 +53,13 @@
 - `headersSent`、`locals`、`finished`、`suppressBody`(HEAD 请求自动省略响应体)
 
 ### 内置中间件(Express 中多为独立 npm 包)
-- `jsonParser`(express.json)、`urlencodedParser`(express.urlencoded)、`textParser`
-  (express.text)、`rawParser`(express.raw)、`multipart`(文件上传)
+- **请求体解析已内置**(首次访问 `req.json()`/`attribute()`/`file()` 时按 Content-Type 自动懒解析):
+  JSON / `x-www-form-urlencoded` / `multipart`(文件上传);`jsonParser`/`urlencodedParser`/`multipart`
+  工厂保留为「提前触发」薄壳。`textParser`(express.text)/ `rawParser`(express.raw)处理非默认类型,仍需显式注册。
 - `staticFiles`(express.static:index / maxAge / dotfiles / etag / lastModified / immutable /
   setHeaders / redirect / ETag / Last-Modified / Range)
-- `cookieParser`、`session`(`MemorySessionStore` + `SessionStore` 接口)
+- **Cookie 解析已内置**(`req.cookie()`/`signedCookie()` 首次访问即自动解析;`cookieParser` 工厂保留为薄壳)、
+  `session`(`MemorySessionStore` + `SessionStore` 接口)
 - `cors`、`helmet`、`compression`(自带 gzip)、`logger`、`requestId`、`etag`(动态)
 - `basicAuth` / `bearerAuth`
 

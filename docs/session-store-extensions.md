@@ -202,8 +202,7 @@ main(): Int64 {
                                        keyPrefix: "myapp:session:",
                                        ttlSeconds: 7200)  // 2 小时过期
     
-    // 3. 注册中间件（按顺序）
-    app.use(cookieParser())
+    // 3. 注册会话中间件（Cookie 解析已内置,无需 cookieParser）
     app.use(session(sessionStore))  // 传入自定义存储
     
     // 4. 使用会话

@@ -42,8 +42,8 @@ public class HttpRequest {
     // 任意对象。
     public let locals: HashMap<String, Any>
 
-    // 解析后的请求 Cookie 键值对。该字段由 cookieParser 中间件负责填充;
-    // 如果没有启用 cookieParser,这个表会一直为空。
+    // 解析后的请求 Cookie 键值对。首次通过 cookie()/signedCookie() 等访问器读取时,
+    // 会从 Cookie 头按需解析填充(也可由可选的 cookieParser 中间件提前触发)。
     public let cookies: HashMap<String, String>
 
     // 请求体的原始字节。服务端会原样保留这份字节数据,以确保二进制负载
@@ -52,8 +52,8 @@ public class HttpRequest {
     // 文本请求体;需要逐字节处理二进制时应使用 bodyBytes。
     public var bodyBytes: Array<UInt8>
 
-    // 解析后的 JSON 请求体。仅当请求携带格式正确的 application/json 请求体、
-    // 且启用了 jsonParser 中间件时,该字段才会被填充;否则保持为 None。
+    // 解析后的 JSON 请求体。首次调用 json() 时,会按需解析 application/json 请求体
+    // 填充(也可由可选的 jsonParser 中间件提前触发);为空 / 非法 JSON 时保持 None。
     // 通过 `json()` 方法读取它。
     public var jsonBody: ?JsonValue = None
 
@@ -72,8 +72,8 @@ public class HttpRequest {
     // ETag / Last-Modified 头。
     public var res: ?HttpResponse = None
 
-    // multipart/form-data 上传的文件列表,由 multipart() 中间件填充;未启用该中间件
-    // 或非文件上传请求时为空。用 file(name) 按字段名取单个文件。
+    // multipart/form-data 上传的文件列表。首次通过 file(name)/files 访问时,会按需解析
+    // multipart 请求体填充(也可由可选的 multipart 中间件提前触发)。用 file(name) 取单个文件。
     public let files: ArrayList<UploadedFile> = ArrayList<UploadedFile>()
 
     // 当前请求的会话对象,由 session() 中间件设置;未启用时为 None。
@@ -84,6 +84,9 @@ public class HttpRequest {
     var skipRouteFlag: Bool = false
     // 内部状态:本请求已触发过 param 预处理回调的参数名,确保每个参数名只触发一次。
     let processedParamNames: ArrayList<String> = ArrayList<String>()
+    // 内部状态:请求体 / Cookie 是否已解析(懒解析的一次性闸门,见 ensureBody / ensureCookies)。
+    var bodyParsed: Bool = false
+    var cookiesParsed: Bool = false
 
     public init(method: String, url: String) {
         this.method = method
@@ -129,6 +132,7 @@ public class HttpRequest {
     }
 
     public func attribute(key: String): ?String {
+        ensureBody()
         return this.attributes.get(key)
     }
 
@@ -150,16 +154,18 @@ public class HttpRequest {
         return this.locals.get(key)
     }
 
-    // 取一个已解析的 Cookie 值。该功能依赖 cookieParser 中间件先行解析;
-    // 若未启用该中间件,或不存在同名 Cookie,则返回 None。
+    // 取一个 Cookie 值。首次访问时自动解析 Cookie 头(无需任何中间件);
+    // 不存在同名 Cookie 时返回 None。
     public func cookie(name: String): ?String {
+        ensureCookies()
         return this.cookies.get(name)
     }
 
-    // 返回已解析的 JSON 请求体。仅当 jsonParser 中间件已运行、且请求体是格式
-    // 正确的 application/json 时才有值,否则为 None。拿到 JsonValue 后,可用
+    // 返回解析后的 JSON 请求体。首次调用时自动解析 application/json 请求体(无需任何
+    // 中间件);请求体为空或非法 JSON 时返回 None。拿到 JsonValue 后,可用
     // get/at/asString/asInt 等方法在其中逐层导航取值。
     public func json(): ?JsonValue {
+        ensureBody()
         return this.jsonBody
     }
 
@@ -604,8 +610,9 @@ public class HttpRequest {
     // 读取并验签一个签名 Cookie(对应 res.cookie(..., signed: true) 写入的值)。
     // 流程:从 cookies 取原始值(形如 "<value>.<sig>"),用 app.cookieSecret 重新计算
     // HMAC 并定长时间比对;一致才返回原值,否则(无该 Cookie / 无密钥 / 验签失败)
-    // 返回 None。需先经 cookieParser 解析出 cookies。
+    // 返回 None。Cookie 头在首次访问时自动解析,无需任何中间件。
     public func signedCookie(name: String): ?String {
+        ensureCookies()
         let raw = match (this.cookies.get(name)) {
             case Some(v) => v
             case None => return None
@@ -617,6 +624,7 @@ public class HttpRequest {
     // req.signedCookies。每次调用都会重新计算(因此可在中间件链中任何时刻读到最新结果);
     // 验签失败或非签名形态的 Cookie 不会进入结果。无密钥 / 无 cookies 时返回空表。
     public func signedCookies(): HashMap<String, String> {
+        ensureCookies()
         let out = HashMap<String, String>()
         for ((name, raw) in this.cookies) {
             match (verifySignedCookie(raw)) {
@@ -650,14 +658,68 @@ public class HttpRequest {
     }
 
     // 取某个字段名的上传文件(同名多文件时返回第一个);不存在则返回 None。
-    // 需先经 multipart() 中间件解析。
+    // 首次访问时自动解析 multipart 请求体,无需任何中间件。
     public func file(name: String): ?UploadedFile {
+        ensureBody()
         for (f in this.files) {
             if (f.fieldName == name) {
                 return Some(f)
             }
         }
         return None
+    }
+
+    // 懒解析请求体:按 Content-Type 解析一次。application/json -> jsonBody;
+    // x-www-form-urlencoded -> attributes;multipart/form-data -> files(文本字段进 attributes)。
+    // 由 json()/attribute()/file() 等访问器按需触发;jsonParser/urlencodedParser/multipart
+    // 等中间件也只是提前调用它。无 Content-Type 或类型不匹配时什么都不做。
+    func ensureBody(): Unit {
+        if (bodyParsed) {
+            return
+        }
+        bodyParsed = true
+        let ctRaw = match (header("content-type")) {
+            case Some(v) => v
+            case None => return
+        }
+        let ct = ctRaw.toAsciiLower()
+        if (ct.contains("application/json")) {
+            if (!this.body.isEmpty()) {
+                try {
+                    this.jsonBody = Some(parseJson(this.body))
+                } catch (_: JsonException) {
+                    ()
+                }
+            }
+        } else if (ct.contains("application/x-www-form-urlencoded")) {
+            parseQuery(this.body, this.attributes)
+        } else if (ct.contains("multipart/form-data")) {
+            match (extractBoundary(ctRaw)) {
+                case Some(b) => parseMultipart(this, b)
+                case None => ()
+            }
+        }
+    }
+
+    // 懒解析 Cookie 头一次,填充 cookies。由 cookie()/signedCookie() 等访问器按需触发;
+    // cookieParser 中间件也只是提前调用它。无 Cookie 头时什么都不做。
+    func ensureCookies(): Unit {
+        if (cookiesParsed) {
+            return
+        }
+        cookiesParsed = true
+        match (header("cookie")) {
+            case Some(raw) =>
+                for (pair in raw.split(";")) {
+                    let p = pair.trimAscii()
+                    if (p.isEmpty()) {
+                        continue
+                    }
+                    let (k, v) = splitOnce(p, "=")
+                    this.cookies[k.trimAscii()] = v.trimAscii()
+                }
+            case None => ()
+        }
     }
 
     // 内部:某参数名的预处理回调本请求是否已触发过。

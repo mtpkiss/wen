@@ -83,54 +83,45 @@ app.get("/api", [
 ])
 ```
 
-## jsonParser() / urlencodedParser()
+## 请求体 / Cookie 解析(已内置,无需注册)
 
-解析 `application/json` / `application/x-www-form-urlencoded` 请求体。JSON 解析到
-`req.json()`(`?JsonValue`);表单字段进 `req.attribute(name)`。
+JSON、表单(`x-www-form-urlencoded`)、文件上传(`multipart/form-data`)、Cookie 的解析都是
+**内置**的:框架在你**首次访问**对应数据时,按请求的 `Content-Type` 自动解析一次(空体 /
+类型不匹配则什么都不做;结果会缓存)。因此**不需要**再 `app.use(...)` 任何解析中间件。
 
 ```cangjie
-app.use(jsonParser())
 app.post("/u", { req, res =>
-    let name = req.json()?.get("name")?.asString() ?? "?"   // 示意:逐层取值见 API 文档
+    let name = req.json()?.get("name")?.asString() ?? "?"   // JSON:自动解析
     res.send(name)
 })
-```
 
-## multipart()
-
-解析 `multipart/form-data`(文件上传)。文本字段进 `req.attribute(name)`,文件进 `req.files`,
-用 `req.file(name)` 取(`UploadedFile` 有 `filename/contentType/bytes/size()/text()/saveTo(path)`)。
-
-```cangjie
-app.use(multipart())
 app.post("/upload", { req, res =>
-    match (req.file("avatar")) {
+    match (req.file("avatar")) {                            // multipart:自动解析
         case Some(f) => f.saveTo("./uploads/${f.filename}"); res.send("saved ${f.size()} bytes")
         case None => res.status(400).send("no file")
     }
 })
+
+app.get("/c", { req, res => res.send(req.cookie("sid") ?? "anon") })   // Cookie:自动解析
 ```
 
-## cookieParser()
+读取入口:JSON → `req.json()`;表单 / multipart 文本字段 → `req.attribute(name)`;上传文件 →
+`req.file(name)` / `req.files`;Cookie → `req.cookie(name)` / `req.signedCookie(name)`。
 
-解析 `Cookie` 头到 `req.cookies`,用 `req.cookie(name)` 读取。配合 `app.cookieSecret` 与
-`req.signedCookie(name)` 可读签名 Cookie。
-
-```cangjie
-app.use(cookieParser())
-```
+> 仍保留 `jsonParser()` / `urlencodedParser()` / `multipart()` / `cookieParser()` 工厂(现在只是
+> 「提前触发解析」的薄壳),以便在中间件链里显式表达意图——但通常不必。`textParser()` /
+> `rawParser()` 处理非默认类型(纯文本 / 原始字节),仍需显式注册。
 
 ## session(store?)
 
-会话:用签名的 `sid` Cookie 关联服务端会话数据。需先注册 `cookieParser()` 并设置
-`app.cookieSecret`。默认 `MemorySessionStore`(线程安全),可实现 `SessionStore` 接入外部存储。
+会话:用签名的 `sid` Cookie 关联服务端会话数据。设置 `app.cookieSecret` 即可(Cookie 解析已内置)。
+默认 `MemorySessionStore`(线程安全),可实现 `SessionStore` 接入外部存储。
 
 > 📚 **扩展指南**: 如需将会话数据存储到 Redis、数据库等外部存储，请参考  
 > [Session 存储扩展指南](./session-store-extensions.md)
 
 ```cangjie
 app.cookieSecret = "change-me"
-app.use(cookieParser())
 app.use(session())
 app.get("/counter", { req, res =>
     match (req.session) {

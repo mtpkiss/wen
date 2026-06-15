@@ -53,8 +53,8 @@
 - `setAttribute(k, v)` / `attribute(k): ?String`
 - `setLocal(k, v)` / `local(k): ?Any`
 - `cookie(name): ?String` / `signedCookie(name): ?String`
-- `json(): ?JsonValue` —— 需 `jsonParser`
-- `file(name): ?UploadedFile` —— 需 `multipart`
+- `json(): ?JsonValue` —— 自动解析 `application/json` 请求体(无需中间件)
+- `file(name): ?UploadedFile` —— 自动解析 `multipart/form-data`(无需中间件)
 - `requestId(): ?String`
 - `setting(key): ?String`
 - `hostname(): ?String` / `isType(t): Bool`

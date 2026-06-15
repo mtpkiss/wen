@@ -57,20 +57,11 @@ public class UploadedFile {
     }
 }
 
-// 构造 multipart/form-data 解析中间件。仅当请求 Content-Type 为 multipart/form-data
-// 且能解析出 boundary 时才处理;其它请求原样放行。
+// multipart/form-data 解析中间件(兼容保留)。解析现在是内置的——首次通过 req.file(name) /
+// req.files 访问时自动解析(见 HttpRequest.ensureBody),本中间件已非必需,内部仅提前触发解析。
 public func multipart(): Middleware {
     return { req: HttpRequest, _: HttpResponse, next: Next =>
-        match (req.header("content-type")) {
-            case Some(ct) =>
-                if (ct.toAsciiLower().contains("multipart/form-data")) {
-                    match (extractBoundary(ct)) {
-                        case Some(b) => parseMultipart(req, b)
-                        case None => ()
-                    }
-                }
-            case None => ()
-        }
+        req.ensureBody()
         next()
     }
 }

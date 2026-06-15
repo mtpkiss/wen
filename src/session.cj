@@ -13,8 +13,8 @@ import std.random.*
  *     没有有效会话则新建一个(分配随机 sid,标记为 new)。
  *   - 处理后:把会话数据回存到 store;若是新会话,则下发签名的 sid Cookie。
  *
- * 前置条件:必须先注册 cookieParser(以便解析出 cookies),并设置 app.cookieSecret
- * (sid Cookie 经 HMAC 签名,客户端无法伪造)。否则签名/验签无法进行。
+ * 前置条件:设置 app.cookieSecret(sid Cookie 经 HMAC 签名,客户端无法伪造),否则签名/
+ * 验签无法进行。Cookie 解析已内置,无需再注册 cookieParser。
  *
  * 默认的 MemorySessionStore 把会话存在进程内存里(重启即失),仅适合单实例/开发场景;
  * 生产可自行实现 SessionStore 接口接入 Redis、数据库等。内存实现用 Mutex 保护,
