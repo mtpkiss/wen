@@ -9,10 +9,8 @@ package wen
  * 设置 ETag 头;若请求带的 If-None-Match 与之匹配,则改回 304 Not Modified(空体),
  * 省去重复传输——这正是 Express 默认开启的 etag 行为。
  *
- * 注册顺序:建议放在 compression() 之后(`app.use(compression()); ...; app.use(etag())`)。
- * 这样在「next() 之后」的后序执行里,本中间件先于压缩运行,从而 ETag 基于「未压缩」的
- * 原始内容计算、并在压缩之前完成 304 判定。即便顺序反了也安全——一旦发现响应已带
- * Content-Encoding,本中间件会直接跳过(只是拿不到 ETag,不会出错)。
+ * 说明:若响应已带 Content-Encoding(例如由 nginx 等边缘压缩、或其它中间件设置),本
+ * 中间件会直接跳过(只是拿不到 ETag,不会出错)。
  *
  * 跳过的情形:流式响应、非 200、非 GET/HEAD、空体、已自带 ETag(如文件响应)、已被
  * 压缩(带 Content-Encoding)。

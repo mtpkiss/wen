@@ -15,6 +15,8 @@
 - **logger**:精简为「每请求一行」+ 一个 `format` 钩子(`(req, res, 毫秒) -> String`);移除原先的
   7 个布尔开关与 ANSI 上色——定制统一交给 `format`。
 - **rateLimit**:**移出内置**。限流是网关 / 基础设施层职责,单实例内存计数对多实例不可靠。
+- **compression(gzip)**:**移出内置**。响应压缩属边缘 / 反代职责(nginx `gzip on;`,与 TLS 终止同一层),
+  自写的固定哈夫曼 DEFLATE 压缩率本就不如 zlib。删除 `gzip.cj` 与 `compression()`——需要压缩在边缘开启。
 - **docs**:更正「内置 `{{ key }}` 模板引擎」的表述——框架本就不内置模板引擎,需 `app.engine` 注册。
 
 ## [0.2.0] - 2026-06-12

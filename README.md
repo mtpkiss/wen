@@ -307,7 +307,7 @@ main(): Int64 {
   `app.use(path, Router)`(含 mergeParams);自动 `HEAD`/`OPTIONS`、`405 + Allow`。
 - **中间件**:中间件链 `(req, res, next)`、全局/路径挂载、数组批量挂载、错误处理中间件
   `(err, req, res, next)`。内置:`logger / requestId(请求 ID) / cors /
-  helmet(安全头) / compression(gzip 压缩) / etag(动态条件 GET) /
+  helmet(安全头) / etag(动态条件 GET) /
   basicAuth · bearerAuth(认证) / staticFiles / session`;JSON / 表单 / multipart / Cookie
   解析已**内置**(`req.json()/attribute()/file()/cookie()` 首次访问即自动解析,无需注册)。
 - **请求**:`headers/query/params/cookies`、字符串 `attributes` 与类型化 `locals`、
@@ -349,7 +349,6 @@ main(): Int64 {
 | `requestId()` | 注入 / 沿用 `X-Request-Id`,贯穿日志 |
 | `cors()` / `cors(origin)` | CORS 头 + 自动应答 `OPTIONS` 预检 |
 | `helmet(...)` | 一组安全响应头(CSP / nosniff / HSTS / 防点击劫持等) |
-| `compression(threshold)` | 按 `Accept-Encoding` 自动 gzip 压缩文本响应 |
 | `etag()` | 动态响应 `ETag` + `If-None-Match` → 304 |
 | `basicAuth(verify)` / `bearerAuth(verify)` | HTTP Basic / Bearer 认证,失败 401 |
 | (解析已内置) | JSON / 表单 / multipart / Cookie 在 `req.json()/attribute()/file()/cookie()` 首次访问时自动解析,无需注册 |

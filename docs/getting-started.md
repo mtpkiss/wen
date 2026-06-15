@@ -60,7 +60,6 @@ cjpm run     # 若你的模块 output-type = "executable"
 ```cangjie
 let app = wen()
 
-app.use(compression())                 // gzip
 app.use(etag())                        // 动态 ETag + 条件 GET
 app.use(helmet())                      // 安全响应头
 app.use(cors())

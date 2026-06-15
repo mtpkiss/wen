@@ -98,8 +98,8 @@
 
 - `Router`、`Route`、`UploadedFile`、`Session`、`SessionStore`、`MemorySessionStore`、
   `StreamWriter`、`SseWriter`
-- 工具:`hmacSha256Hex(key, msg)`、`gzipCompress(data)`、`base64Encode/Decode`、
+- 工具:`hmacSha256Hex(key, msg)`、`base64Encode/Decode`、
   `parseJson`、`parseQuery`、`urlDecode`、`contentTypeFor`、`reasonPhrase`
 
-> 这三处实现(JSON / HMAC-SHA256 / gzip)均为零依赖自写,封装在单文件「替换缝」内,
-> 日后可整体切换到官方 `stdx`。
+> 这两处实现(JSON / HMAC-SHA256)均为零依赖自写,封装在单文件「替换缝」内,日后可
+> 整体切换到官方 `stdx`。压缩(gzip)与 TLS 不自写,交给 nginx 等边缘。

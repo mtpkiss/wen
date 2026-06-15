@@ -47,22 +47,12 @@ app.use(helmet())
 app.use(helmet(hsts: false, frameOptions: "DENY"))
 ```
 
-## compression(threshold! = 256)
-
-按 `Accept-Encoding: gzip` 自动压缩文本类响应(达到阈值且能减小体积时),设
-`Content-Encoding: gzip` 与 `Vary: Accept-Encoding`。基于自写 DEFLATE,零依赖。建议靠前注册。
-
-```cangjie
-app.use(compression())
-```
-
 ## etag()
 
 为 200 的 GET/HEAD 动态响应(`send/json/sendBytes`)按内容算 `ETag`;`If-None-Match` 命中
-则回 304。已带 ETag(文件响应)或已压缩则跳过。建议放在 `compression()` 之后。
+则回 304。已带 ETag(文件响应)或已带 `Content-Encoding`(如被边缘压缩)则跳过。
 
 ```cangjie
-app.use(compression())
 app.use(etag())
 ```
 

@@ -60,7 +60,7 @@
   setHeaders / redirect / ETag / Last-Modified / Range)
 - **Cookie 解析已内置**(`req.cookie()`/`signedCookie()` 首次访问即自动解析;`cookieParser` 工厂保留为薄壳)、
   `session`(`MemorySessionStore` + `SessionStore` 接口)
-- `cors`、`helmet`、`compression`(自带 gzip)、`logger`、`requestId`、`etag`(动态)
+- `cors`、`helmet`、`logger`、`requestId`、`etag`(动态)
 - `basicAuth` / `bearerAuth`
 
 ### 视图 / 工具
