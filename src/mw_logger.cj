@@ -1,24 +1,80 @@
 package wen
 
+import std.time.*
 
 /*
- * 请求日志插件。
+ * 请求日志中间件。
  *
- * 为每个请求打印一对单行轨迹：进入时打一行“-->”，带上请求方法和路径；
- * 处理完成、即将返回时再打一行“<--”，带上最终的响应状态码。
- *
- * 关键点在于状态码是在 `next()` 返回**之后**才读取的——也就是说要等整条
- * 中间件链与处理器都执行完毕，res.statusCode 才会反映出下游最终设置的那个
- * 值，这样日志记录到的状态码才是准确的。
+ * 入站打一行 `--> METHOD path …`,出站再打一行 `<-- METHOD path status …ms`。
+ * 出站行的状态码与耗时都在 `next()` 返回之后读取,保证拿到的是整条链跑完后
+ * 下游最终设置的值。所有附加字段都是可选的,默认仅打开 `duration`。
  */
-
-// 构造一个用于打印请求日志的 Middleware。
-public func logger(): Middleware {
+public func logger(
+    duration!: Bool = true,
+    ip!: Bool = false,
+    userAgent!: Bool = false,
+    referer!: Bool = false,
+    requestId!: Bool = false,
+    slow!: Int64 = -1,
+    colorize!: Bool = false
+): Middleware {
     return { req: HttpRequest, res: HttpResponse, next: Next =>
-        println("--> ${req.method} ${req.path}")
+        var inLine = "--> ${req.method} ${req.path}"
+        if (ip) {
+            inLine += "  ip=${req.clientIp()}"
+        }
+        if (requestId) {
+            match (req.requestId()) {
+                case Some(rid) => inLine += "  rid=${rid}"
+                case None => ()
+            }
+        }
+        if (userAgent) {
+            match (req.header("user-agent")) {
+                case Some(v) => inLine += "  ua=\"${v}\""
+                case None => ()
+            }
+        }
+        if (referer) {
+            match (req.header("referer")) {
+                case Some(v) => inLine += "  referer=\"${v}\""
+                case None => ()
+            }
+        }
+        println(inLine)
+
+        let start = DateTime.now()
         next()
-        // 只在 next() 执行完、整条链跑过之后再读取 statusCode，
-        // 以保证此时拿到的是最新、最终的状态码。
-        println("<-- ${req.method} ${req.path} ${res.statusCode}")
+        let elapsedMs = (DateTime.now() - start).toMilliseconds()
+
+        let statusStr = if (colorize) {
+            colorStatus(res.statusCode)
+        } else {
+            res.statusCode.toString()
+        }
+        var outLine = "<-- ${req.method} ${req.path} ${statusStr}"
+        if (duration) {
+            outLine += "  ${elapsedMs}ms"
+        }
+        if (slow >= 0 && elapsedMs > slow) {
+            outLine += "  [SLOW]"
+        }
+        println(outLine)
     }
+}
+
+// 给 HTTP 状态码套上 ANSI 颜色:2xx 绿 / 3xx 青 / 4xx 黄 / 5xx 红。
+func colorStatus(code: Int64): String {
+    let color = if (code >= 500) {
+        "31"
+    } else if (code >= 400) {
+        "33"
+    } else if (code >= 300) {
+        "36"
+    } else if (code >= 200) {
+        "32"
+    } else {
+        "0"
+    }
+    return "\u{001b}[${color}m${code}\u{001b}[0m"
 }
