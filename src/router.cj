@@ -59,15 +59,22 @@ class Segment {
 public class PathPattern {
     let segments: ArrayList<Segment>
     let hasWildcard: Bool
+    // 编译时记录原始模式路径是否以 "/" 结尾;严格路由模式下,只有同样以 "/" 结尾
+    // (或同样不以 "/" 结尾)的请求才被视为精确匹配。非严格模式下该字段不参与匹配。
+    // 根模式("/")不算「尾部斜杠」(否则会把所有路径都强制要求带尾斜杠)。
+    let trailingSlash: Bool
 
-    init(segments: ArrayList<Segment>, hasWildcard: Bool) {
+    init(segments: ArrayList<Segment>, hasWildcard: Bool, trailingSlash: Bool) {
         this.segments = segments
         this.hasWildcard = hasWildcard
+        this.trailingSlash = trailingSlash
     }
 
     public static func compile(path: String): PathPattern {
         let segs = ArrayList<Segment>()
         var wildcard = false
+        // 仅当路径非根("/" 仅一个字符,但 endsWith("/") 为真)且确实以 "/" 结尾时记为有尾斜杠。
+        let trailing = path.size > 1 && path.endsWith("/")
         for (raw in pathSegments(path)) {
             if (raw == "*") {
                 segs.add(Segment(Wildcard, "*"))
@@ -99,22 +106,30 @@ public class PathPattern {
                 segs.add(Segment(Literal, raw))
             }
         }
-        return PathPattern(segs, wildcard)
+        return PathPattern(segs, wildcard, trailing)
     }
 
     // 精确匹配。匹配成功时返回捕获到的参数表(键为参数名)，失败时返回 None。
-    public func matchExact(path: String): ?HashMap<String, String> {
-        return doMatch(pathSegments(path), false)
+    // caseSensitive=false 时按大小写无关比较字面段;strict=true 时要求请求路径与模式的
+    // 尾部斜杠形态一致(仅影响精确匹配,前缀匹配始终按现有 segment 维度比较)。
+    public func matchExact(path: String, caseSensitive!: Bool = true, strict!: Bool = false): ?HashMap<String, String> {
+        if (strict) {
+            let reqTrailing = path.size > 1 && path.endsWith("/")
+            if (reqTrailing != this.trailingSlash) {
+                return None
+            }
+        }
+        return doMatch(pathSegments(path), false, caseSensitive)
     }
 
     // 前缀匹配，供挂载式中间件使用(只要求模式是请求路径的前缀)。
-    public func matchPrefix(path: String): ?HashMap<String, String> {
-        return doMatch(pathSegments(path), true)
+    public func matchPrefix(path: String, caseSensitive!: Bool = true): ?HashMap<String, String> {
+        return doMatch(pathSegments(path), true, caseSensitive)
     }
 
-    private func doMatch(parts: Array<String>, prefix: Bool): ?HashMap<String, String> {
+    private func doMatch(parts: Array<String>, prefix: Bool, caseSensitive: Bool): ?HashMap<String, String> {
         let params = HashMap<String, String>()
-        if (matchFrom(0, parts, 0, prefix, params)) {
+        if (matchFrom(0, parts, 0, prefix, params, caseSensitive)) {
             return params
         }
         return None
@@ -125,7 +140,7 @@ public class PathPattern {
     // 之所以用回溯而非简单的线性扫描，是为了正确处理可缺省参数(":name?"):碰到
     // 可缺省段时，先试「消费一段」，若后续匹配不下去再回退试「跳过该段」。
     private func matchFrom(si: Int64, parts: Array<String>, pi: Int64, prefix: Bool,
-                          params: HashMap<String, String>): Bool {
+                          params: HashMap<String, String>, caseSensitive: Bool): Bool {
         if (si >= segments.size) {
             // 模式已全部用完。前缀匹配:请求路径还剩多余段也算成功;精确匹配:
             // 请求路径必须正好也用完。
@@ -144,13 +159,13 @@ public class PathPattern {
                     // 先尝试消费当前这一段(需有可用段且满足正则约束)。
                     if (pi < parts.size && constraintOk(seg, parts[pi])) {
                         params[seg.value] = urlDecode(parts[pi])
-                        if (matchFrom(si + 1, parts, pi + 1, prefix, params)) {
+                        if (matchFrom(si + 1, parts, pi + 1, prefix, params, caseSensitive)) {
                             return true
                         }
                         // 走不通则回退:撤销本段的捕获，改为「跳过该可缺省段」。
                         params.remove(seg.value)
                     }
-                    return matchFrom(si + 1, parts, pi, prefix, params)
+                    return matchFrom(si + 1, parts, pi, prefix, params, caseSensitive)
                 }
                 if (pi >= parts.size) {
                     return false
@@ -160,15 +175,20 @@ public class PathPattern {
                 }
                 // 捕获到的参数值会做 URL 解码(例如 "john%20doe" -> "john doe")。
                 params[seg.value] = urlDecode(parts[pi])
-                return matchFrom(si + 1, parts, pi + 1, prefix, params)
+                return matchFrom(si + 1, parts, pi + 1, prefix, params, caseSensitive)
             case Literal =>
                 if (pi >= parts.size) {
                     return false
                 }
-                if (seg.value != parts[pi]) {
+                let same = if (caseSensitive) {
+                    seg.value == parts[pi]
+                } else {
+                    seg.value.toAsciiLower() == parts[pi].toAsciiLower()
+                }
+                if (!same) {
                     return false
                 }
-                return matchFrom(si + 1, parts, pi + 1, prefix, params)
+                return matchFrom(si + 1, parts, pi + 1, prefix, params, caseSensitive)
         }
     }
 
@@ -218,14 +238,12 @@ class Layer {
     }
 
     // 判断本层是否匹配该请求:匹配则返回捕获到的参数表，否则返回 None。
-    func tryMatch(req: HttpRequest): ?HashMap<String, String> {
+    // caseSensitive / strict 由所在 Router 在派发时传入(对应 Express 的
+    // `case sensitive routing` / `strict routing` 设置)。
+    func tryMatch(req: HttpRequest, caseSensitive: Bool, strict: Bool): ?HashMap<String, String> {
         if (this.isError) {
-            // 错误处理层不看方法、也不看路径，一律视为匹配(返回空参数表);
-            // 它到底跑不跑、何时跑，完全由 dispatch 根据是否处于错误模式决定。
             return Some(HashMap<String, String>())
         }
-        // 方法过滤:若本层限定了方法且既不是 ALL(通配方法)、又与请求方法不同，
-        // 则直接判定不匹配。method 为 None 表示不限方法，跳过此过滤。
         match (this.method) {
             case Some(m) =>
                 if (m != HttpMethod.ALL && m != req.method) {
@@ -233,12 +251,10 @@ class Layer {
                 }
             case None => ()
         }
-        // 路径匹配方式取决于本层是不是挂载式中间件:挂载式用前缀匹配，
-        // 普通路由用精确匹配。
         if (this.isPrefix) {
-            return this.pattern.matchPrefix(req.path)
+            return this.pattern.matchPrefix(req.path, caseSensitive: caseSensitive)
         }
-        return this.pattern.matchExact(req.path)
+        return this.pattern.matchExact(req.path, caseSensitive: caseSensitive, strict: strict)
     }
 }
 
@@ -249,6 +265,18 @@ public class Router {
     var routeCounter: Int64 = 0
     // app.param 注册的参数预处理回调表,键为参数名。
     let paramCallbacks: HashMap<String, ParamHandler> = HashMap<String, ParamHandler>()
+
+    // 当本 Router 被挂载到某 Application/Router 的某前缀下时,该前缀路径(对应 Express 的
+    // app.mountpath)。顶级 Router 默认为空串。Application.use(path, sub)/Router.use(path, sub)
+    // 会自动设置;多次挂载时以最后一次为准。
+    public var mountpath: String = ""
+
+    // 路由匹配的两项行为开关,对应 Express 的 'case sensitive routing' 与 'strict routing'。
+    // 默认值匹配 Express:caseSensitive=false(大小写无关,/Foo 与 /foo 视为同一路由)、
+    // strict=false(尾部斜杠无关,/foo 与 /foo/ 视为同一路由)。
+    // 由 Application.handle 从应用 settings 读取后写入;直接构造 Router 也可手动设置。
+    public var caseSensitive: Bool = false
+    public var strict: Bool = false
 
     public init() {}
 
@@ -322,7 +350,9 @@ public class Router {
     // 把一个子路由（Router）作为「迷你应用」挂载到 `path` 前缀下，对应 Express
     // 的 `router.use('/v1', subRouter)`。行为与 Application.use(path, sub) 一致：
     // 落在该前缀下的请求会被交给子路由，子路由先剥掉前缀再做自己的匹配。
+    // 同时把挂载前缀记录到 sub.mountpath(对应 Express 的 router.mountpath)。
     public func use(path: String, sub: Router): Unit {
+        sub.mountpath = path
         add(None, path, { req: HttpRequest, res: HttpResponse, next: Next =>
             sub.handleAsMiddleware(req, res, next)
         }, true)
@@ -402,7 +432,7 @@ public class Router {
                     if (m == HttpMethod.ALL) {
                         continue
                     }
-                    match (layer.pattern.matchExact(path)) {
+                    match (layer.pattern.matchExact(path, caseSensitive: this.caseSensitive, strict: this.strict)) {
                         case Some(_) =>
                             if (!listContains(out, m)) {
                                 out.add(m)
@@ -423,7 +453,7 @@ public class Router {
             match (layer.method) {
                 case Some(m) =>
                     if (m == method || m == HttpMethod.ALL) {
-                        match (layer.pattern.matchExact(path)) {
+                        match (layer.pattern.matchExact(path, caseSensitive: this.caseSensitive, strict: this.strict)) {
                             case Some(_) => return true
                             case None => ()
                         }
@@ -468,7 +498,7 @@ public class Router {
     private func runChain(req: HttpRequest, res: HttpResponse, onExhausted: Next, onError: (Exception) -> Unit): Unit {
         let matched = ArrayList<Layer>()
         for (layer in layers) {
-            match (layer.tryMatch(req)) {
+            match (layer.tryMatch(req, this.caseSensitive, this.strict)) {
                 case Some(_) => matched.add(layer)
                 case None => ()
             }
@@ -520,7 +550,7 @@ public class Router {
         // 重新运行本层的匹配以取回它捕获的参数并写入 req.params。之所以要在此重新
         // 匹配，是因为不同的层可能捕获不同的参数名/值，需在执行该层处理器前对齐。
         var captured = HashMap<String, String>()
-        match (layer.tryMatch(req)) {
+        match (layer.tryMatch(req, this.caseSensitive, this.strict)) {
             case Some(params) =>
                 captured = params
                 for ((k, v) in params) {

@@ -30,14 +30,25 @@ enum RangeResult {
 // 把文件字节按文件响应语义写入 res 并结束响应:设置 Content-Type / ETag /
 // Accept-Ranges /(可选)Last-Modified,再依据请求头决定 200 全量、304 命中缓存、
 // 206 分片或 416。lastModified 为已格式化好的 HTTP 日期(无则传 None)。
-func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: String, lastModified: ?String): Unit {
+// 可选关键字参数 etag / sendLastModified 用于关闭对应响应头与条件请求支持(静态
+// 中间件选项化时,把对应开关传到这里实现)。
+func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: String, lastModified: ?String,
+                       etag!: Bool = true, sendLastModified!: Bool = true): Unit {
     res.headers["Content-Type"] = contentType
     res.headers["Accept-Ranges"] = "bytes"
-    let etag = computeETag(data)
-    res.headers["ETag"] = etag
-    match (lastModified) {
-        case Some(lm) => res.headers["Last-Modified"] = lm
-        case None => ()
+    var etagValue = ""
+    if (etag) {
+        etagValue = computeETag(data)
+        res.headers["ETag"] = etagValue
+    }
+    var effectiveLastModified: ?String = None
+    if (sendLastModified) {
+        match (lastModified) {
+            case Some(lm) =>
+                res.headers["Last-Modified"] = lm
+                effectiveLastModified = Some(lm)
+            case None => ()
+        }
     }
 
     // 没有请求上下文时(如单元测试直接调用),无从读取条件/Range 头,直接发整体。
@@ -51,29 +62,40 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
 
     // 条件请求:按规范 If-None-Match 优先于 If-Modified-Since。命中即回 304(空体,
     // 见 serializeResponse 对 304 的处理:既不发 body 也不发 Content-Length);
-    // ETag / Last-Modified 头仍保留在响应里。
-    match (req.header("if-none-match")) {
-        case Some(inm) =>
-            if (etagMatches(inm, etag)) {
-                send304(res)
-                return
-            }
-            // 提供了 If-None-Match 但不匹配:按规范忽略 If-Modified-Since,继续往下。
-        case None =>
-            // 没有 If-None-Match 时,才考虑 If-Modified-Since。客户端通常会原样回送
-            // 我们之前给出的 Last-Modified;此处做保守的「值相等即视为未修改」判断
-            // (只在完全一致时回 304,绝不会误判为未改动)。
-            match (lastModified) {
-                case Some(lm) =>
-                    match (req.header("if-modified-since")) {
-                        case Some(ims) => if (ims.trimAscii() == lm) {
-                            send304(res)
-                            return
+    // ETag / Last-Modified 头仍保留在响应里。当 etag/sendLastModified 关闭时,
+    // 对应方向的条件判断也一并跳过(否则与已不发送的头部对照,语义不一致)。
+    if (etag) {
+        match (req.header("if-none-match")) {
+            case Some(inm) =>
+                if (etagMatches(inm, etagValue)) {
+                    send304(res)
+                    return
+                }
+            case None =>
+                match (effectiveLastModified) {
+                    case Some(lm) =>
+                        match (req.header("if-modified-since")) {
+                            case Some(ims) => if (ims.trimAscii() == lm) {
+                                send304(res)
+                                return
+                            }
+                            case None => ()
                         }
-                        case None => ()
+                    case None => ()
+                }
+        }
+    } else {
+        match (effectiveLastModified) {
+            case Some(lm) =>
+                match (req.header("if-modified-since")) {
+                    case Some(ims) => if (ims.trimAscii() == lm) {
+                        send304(res)
+                        return
                     }
-                case None => ()
-            }
+                    case None => ()
+                }
+            case None => ()
+        }
     }
 
     // Range 分片请求。
@@ -158,6 +180,22 @@ func ensureDateHeader(res: HttpResponse): Unit {
     match (res.headers.get("Date")) {
         case Some(_) => ()
         case None => res.headers["Date"] = httpDateNow()
+    }
+}
+
+// 若 res.charset 已设置且 Content-Type 中尚未包含 "charset=",则追加它。在响应实际
+// 写出(serializeResponse / StreamWriter.begin)前调用一次,统一处理所有路径设置的
+// Content-Type(send / json / sendFile / contentType / mimeType / 静态文件 等)。
+func applyCharsetIfSet(res: HttpResponse): Unit {
+    if (res.charset.isEmpty()) {
+        return
+    }
+    match (res.headers.get("Content-Type")) {
+        case Some(ct) =>
+            if (!ct.toAsciiLower().contains("charset=")) {
+                res.headers["Content-Type"] = "${ct}; charset=${res.charset}"
+            }
+        case None => ()
     }
 }
 

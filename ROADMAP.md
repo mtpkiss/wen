@@ -45,6 +45,7 @@
 ### 响应 HttpResponse
 - `status / sendStatus`、`send / sendBytes / json / jsonp / end`
 - `set / get / append / contentType / mimeType`(对应 `res.type`)`/ location / vary / links`
+- `charset`(独立于 MIME 的字符集,序列化前自动并入 Content-Type)
 - `cookie / clearCookie`(含 Domain / Expires / maxAge 选项)
 - `redirect(location)` / `redirect(status, location)`
 - `sendFile / download / attachment`(含条件请求 304、Range 206、416)
@@ -55,7 +56,8 @@
 ### 内置中间件(Express 中多为独立 npm 包)
 - `jsonParser`(express.json)、`urlencodedParser`(express.urlencoded)、`textParser`
   (express.text)、`rawParser`(express.raw)、`multipart`(文件上传)
-- `staticFiles`(express.static:index / maxAge / dotfiles / ETag / Last-Modified / Range)
+- `staticFiles`(express.static:index / maxAge / dotfiles / etag / lastModified / immutable /
+  setHeaders / ETag / Last-Modified / Range)
 - `cookieParser`、`session`(`MemorySessionStore` + `SessionStore` 接口)
 - `cors`、`helmet`、`compression`(自带 gzip)、`rateLimit`、`logger`、`requestId`、`etag`(动态)
 - `basicAuth` / `bearerAuth`
@@ -69,11 +71,8 @@
 ## 二、部分实现 ⚠️(底层已具备,缺 Express 风格 API)
 
 - **`req.signedCookies`** —— 已有 `signedCookie(name)` 单项访问,缺整表映射。
-  > 注:`req.fresh` / `req.stale` 与 `req.range(size)` 已于 2026-06-15 实现(支持多区间、
-  > 含 `req.res` 链接),见上节「已实现」。
-- **应用配置项** —— `set / setting` 机制已具备,但 `case sensitive routing`、`strict routing`
-  等标准开关尚未接入实际路由行为。
-- **子应用挂载** —— 支持挂载子 `Router`,但没有完整的子 `Application` 及 `app.mountpath`。
+- **子应用挂载** —— 支持挂载子 `Router`(并提供 `Router.mountpath`),但没有完整的子
+  `Application` 概念(子应用的 `mount` 事件、独立设置继承等高级行为)。
 
 ---
 
@@ -81,13 +80,12 @@
 
 ### 高优先级
 - HTTPS / TLS(`listenHttps`)—— 依赖仓颉 TLS 能力或 FFI;短期替代:nginx 反向代理
-- `res.charset`(独立于 MIME 的字符集设置)
 
 ### 中优先级
-- `app.mountpath` 及 `mount` 事件;`app.path()`
+- 子应用 `mount` 事件、`app.path()`(注:`Router.mountpath` 已实现)
 - `res.setTimeout()` / 请求级超时(依赖 Timer API)
 - `trust proxy` 的完整语义(目前仅布尔 `trustProxy`)
-- 静态文件选项开关化:可关闭 ETag / Last-Modified、目录 `redirect`、`setHeaders`、`immutable`
+- 静态文件选项 `redirect`(目录请求补 "/" 重定向);其余开关化已完成
 
 ### 低优先级 / 生态
 - WebSocket(建议作为独立模块,需握手 + 帧编解码)
@@ -102,6 +100,9 @@
 1. ✅ **已完成(2026-06-15)**:`textParser` / `rawParser`、`acceptsCharsets / Encodings / Languages`。
 2. ✅ **已完成(2026-06-15)**:`req.fresh` / `req.stale`、`req.range(size)`(含 `req.res` 链接)。
    尚余 `req.signedCookies` 整表映射。
+3. ✅ **已完成(2026-06-15)**:`res.charset`、静态文件选项(`etag` / `lastModified` /
+   `immutable` / `setHeaders`)、`Router.mountpath`、`case sensitive routing` / `strict routing`
+   (默认值匹配 Express:大小写无关、尾部斜杠无关)。
 3. **小属性 / 配置**:`res.charset`、静态选项开关化、`app.mountpath`、
    `case sensitive` / `strict routing`。预计 1–2 天。
 4. **需先调研仓颉标准库**:TLS(HTTPS)、Timer(超时)、process(集群)——

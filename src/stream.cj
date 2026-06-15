@@ -39,6 +39,7 @@ public class StreamWriter {
         started = true
         res.headersSent = true
         ensureDateHeader(res)
+        applyCharsetIfSet(res)
         match (res.conn) {
             case Some(c) =>
                 var head = "HTTP/1.1 ${res.statusCode} ${res.statusMessage}\r\n"

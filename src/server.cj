@@ -277,6 +277,7 @@ public class HttpServer {
     func serializeResponse(res: HttpResponse): Array<UInt8> {
         // 补上 Date 响应头(HTTP/1.1 建议服务器发送当前时间)。
         ensureDateHeader(res)
+        applyCharsetIfSet(res)
         // 按 RFC 7230 规定，204 No Content 与 304 Not Modified 这两类响应
         // 既不携带响应体，也不能带 Content-Length 头。因此下面对这两个状态码
         // 特殊处理：清空响应体并移除已设置的 Content-Length。

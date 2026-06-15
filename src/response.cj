@@ -47,6 +47,12 @@ public class HttpResponse {
     // 错误处理中间件可用此属性判断是否还能修改响应头,若已为 true 则只能向上冒泡错误。
     public var headersSent: Bool = false
 
+    // 独立于 MIME 类型的字符集设置,对应 Express 的 res.charset。设为非空字符串(如
+    // "utf-8")后,在响应序列化前框架会自动把它拼到 Content-Type 上:若现有
+    // Content-Type 已显式带 "charset=" 则保持原值不动,否则追加 "; charset=<charset>"。
+    // 因此可以在任意时刻设置(包括 send/json 之后),都能影响最终发出的 Content-Type。
+    public var charset: String = ""
+
     // 为 true 时,序列化阶段仍会保留 Content-Length 响应头(声明本应有的长度),
     // 但不实际写出响应体。用于自动处理 HEAD 请求的响应:HEAD 要求返回与 GET
     // 相同的头部、却不带正文。

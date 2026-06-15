@@ -15,13 +15,21 @@ import std.fs.*
  */
 
 // 构造一个从 `root` 目录提供文件服务的中间件。可选具名参数:
-//   index    —— 目录默认文件名(默认 "index.html");请求路径为空或以 "/" 结尾时,
-//               自动在其后补上该文件名。
-//   maxAge   —— 缓存秒数;>=0 时为响应加上 Cache-Control: public, max-age=N。
-//   dotfiles —— 隐藏文件(路径段以 "." 开头,如 .env/.git)的策略:"ignore"(默认,
-//               当作不存在、放行)/"deny"(回 403)/"allow"(照常提供)。
+//   index        —— 目录默认文件名(默认 "index.html");请求路径为空或以 "/" 结尾时,
+//                   自动在其后补上该文件名。
+//   maxAge       —— 缓存秒数;>=0 时为响应加上 Cache-Control: public, max-age=N。
+//   dotfiles     —— 隐藏文件(路径段以 "." 开头,如 .env/.git)的策略:"ignore"(默认,
+//                   当作不存在、放行)/"deny"(回 403)/"allow"(照常提供)。
+//   etag         —— 是否发送 ETag 并参与 If-None-Match 条件请求(默认 true)。
+//   lastModified —— 是否发送 Last-Modified 并参与 If-Modified-Since 条件请求(默认 true)。
+//   immutable    —— maxAge>0 且 immutable=true 时,Cache-Control 追加 ", immutable",
+//                   告诉客户端该资源在缓存期内永远不会变(适合带指纹的构建产物)。
+//   setHeaders   —— 在文件发送前调用的回调,可在其中对响应任意定制头部;入参为
+//                   (res, 该次请求映射到的真实文件路径)。默认为 None(不调用)。
 public func staticFiles(root: String, index!: String = "index.html", maxAge!: Int64 = -1,
-                        dotfiles!: String = "ignore"): Middleware {
+                        dotfiles!: String = "ignore", etag!: Bool = true,
+                        lastModified!: Bool = true, immutable!: Bool = false,
+                        setHeaders!: ?(HttpResponse, String) -> Unit = None): Middleware {
     // 仓颉的 std.fs 不会处理路径开头的 "./"，因此这里把它去掉，这样调用方
     // 无论传 "public" 还是 "./public" 都能正常工作。
     let base = if (root.startsWith("./")) {
@@ -74,12 +82,25 @@ public func staticFiles(root: String, index!: String = "index.html", maxAge!: In
 
         // 可选的缓存头。
         if (maxAge >= 0) {
-            res.headers["Cache-Control"] = "public, max-age=${maxAge}"
+            var cc = "public, max-age=${maxAge}"
+            if (immutable && maxAge > 0) {
+                cc += ", immutable"
+            }
+            res.headers["Cache-Control"] = cc
+        }
+
+        // 自定义响应头钩子:在文件发送前调用,可任意改写响应头。
+        match (setHeaders) {
+            case Some(cb) => cb(res, path)
+            case None => ()
         }
 
         // 经 applyFileResponse 发送文件：原始字节（二进制安全），并统一附带 ETag
         // 与 Accept-Ranges，支持 If-None-Match 命中回 304、Range 请求回 206 分片。
-        applyFileResponse(res, File.readFrom(path), mimeFor(rel), httpDateForFile(path))
+        // etag / lastModified 开关被透传过去,用于关闭对应响应头与条件请求支持。
+        let lm: ?String = if (lastModified) { httpDateForFile(path) } else { None }
+        applyFileResponse(res, File.readFrom(path), mimeFor(rel), lm,
+                          etag: etag, sendLastModified: lastModified)
     }
 }
 

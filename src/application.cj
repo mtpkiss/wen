@@ -75,6 +75,7 @@ public class Application {
     // 可见，不会因为进入子路由就丢失）。实现上是把子路由包装成一个普通中间件，
     // 在其中调用 sub.handleAsMiddleware 来驱动子路由的匹配与执行。
     public func use(path: String, sub: Router): Application {
+        sub.mountpath = path
         router.use(path, { req: HttpRequest, res: HttpResponse, next: Next =>
             sub.handleAsMiddleware(req, res, next)
         })
@@ -232,6 +233,10 @@ public class Application {
         // req.fresh()/req.range() 也据此读取响应上的 ETag / Last-Modified。
         res.req = Some(req)
         req.res = Some(res)
+        // 把 Express 风格的两项路由设置投递到 router(只对顶级 router 生效;嵌套的
+        // 子 Router 可独立设置 caseSensitive / strict)。
+        router.caseSensitive = enabled("case sensitive routing")
+        router.strict = enabled("strict routing")
         router.handle(req, res)
     }
 
