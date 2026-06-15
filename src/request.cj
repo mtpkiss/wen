@@ -610,6 +610,25 @@ public class HttpRequest {
             case Some(v) => v
             case None => return None
         }
+        return verifySignedCookie(raw)
+    }
+
+    // 把所有验签通过的 Cookie 收集成一张 name -> 已验签值 的映射,对应 Express 的
+    // req.signedCookies。每次调用都会重新计算(因此可在中间件链中任何时刻读到最新结果);
+    // 验签失败或非签名形态的 Cookie 不会进入结果。无密钥 / 无 cookies 时返回空表。
+    public func signedCookies(): HashMap<String, String> {
+        let out = HashMap<String, String>()
+        for ((name, raw) in this.cookies) {
+            match (verifySignedCookie(raw)) {
+                case Some(v) => out[name] = v
+                case None => ()
+            }
+        }
+        return out
+    }
+
+    // 验签单个 Cookie 原始值:无密钥 / 形态不对 / HMAC 不一致都返回 None。
+    private func verifySignedCookie(raw: String): ?String {
         let secret = match (this.app) {
             case Some(a) => a.cookieSecret
             case None => return None

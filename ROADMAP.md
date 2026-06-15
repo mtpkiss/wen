@@ -33,7 +33,7 @@
 - `method / url / path / httpVersion / originalUrl / baseUrl`
 - `headers` + `get() / header()`;`query` + `queryParam()`;`params` + `param()`
 - `body / bodyBytes / jsonBody / json()`
-- `cookies` + `cookie()`;`signedCookie()` 签名 cookie
+- `cookies` + `cookie()`;`signedCookie(name)` / `signedCookies()` 签名 cookie
 - `files` + `file()` 文件上传
 - `session`
 - `ip / ips() / clientIp() / protocol() / secure() / hostname() / subdomains() / xhr()`
@@ -70,7 +70,6 @@
 
 ## 二、部分实现 ⚠️(底层已具备,缺 Express 风格 API)
 
-- **`req.signedCookies`** —— 已有 `signedCookie(name)` 单项访问,缺整表映射。
 - **子应用挂载** —— 支持挂载子 `Router`(并提供 `Router.mountpath`),但没有完整的子
   `Application` 概念(子应用的 `mount` 事件、独立设置继承等高级行为)。
 
@@ -98,13 +97,11 @@
 ## 四、建议推进顺序
 
 1. ✅ **已完成(2026-06-15)**:`textParser` / `rawParser`、`acceptsCharsets / Encodings / Languages`。
-2. ✅ **已完成(2026-06-15)**:`req.fresh` / `req.stale`、`req.range(size)`(含 `req.res` 链接)。
-   尚余 `req.signedCookies` 整表映射。
+2. ✅ **已完成(2026-06-15)**:`req.fresh` / `req.stale`、`req.range(size)`(含 `req.res` 链接)、
+   `req.signedCookies()` 整表映射。
 3. ✅ **已完成(2026-06-15)**:`res.charset`、静态文件选项(`etag` / `lastModified` /
    `immutable` / `setHeaders`)、`Router.mountpath`、`case sensitive routing` / `strict routing`
    (默认值匹配 Express:大小写无关、尾部斜杠无关)。
-3. **小属性 / 配置**:`res.charset`、静态选项开关化、`app.mountpath`、
-   `case sensitive` / `strict routing`。预计 1–2 天。
 4. **需先调研仓颉标准库**:TLS(HTTPS)、Timer(超时)、process(集群)——
    确认 API 可用性后,决定原生实现还是外部替代(nginx 等)。
 5. **独立模块 / 长期**:WebSocket;HTTP/2 待生态成熟。
