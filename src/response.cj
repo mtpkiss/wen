@@ -40,6 +40,13 @@ public class HttpResponse {
     // 处理器自己(见 stream/sse)。
     public var hijacked: Bool = false
 
+    // 标记响应头是否已发送给客户端。对应 Express 的 res.headersSent。
+    // 两种情况下会变为 true:
+    //   1. 流式响应(stream/sse):StreamWriter.begin() 把状态行和响应头直接写入底层连接时。
+    //   2. 普通响应:serializeResponse 将整个响应序列化写出时(由 server 在写入 socket 前设置)。
+    // 错误处理中间件可用此属性判断是否还能修改响应头,若已为 true 则只能向上冒泡错误。
+    public var headersSent: Bool = false
+
     // 为 true 时,序列化阶段仍会保留 Content-Length 响应头(声明本应有的长度),
     // 但不实际写出响应体。用于自动处理 HEAD 请求的响应:HEAD 要求返回与 GET
     // 相同的头部、却不带正文。

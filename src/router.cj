@@ -319,6 +319,15 @@ public class Router {
     public func options(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.OPTIONS), path, handlers, false) }
     public func all(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.ALL), path, handlers, false) }
 
+    // 把一个子路由（Router）作为「迷你应用」挂载到 `path` 前缀下，对应 Express
+    // 的 `router.use('/v1', subRouter)`。行为与 Application.use(path, sub) 一致：
+    // 落在该前缀下的请求会被交给子路由，子路由先剥掉前缀再做自己的匹配。
+    public func use(path: String, sub: Router): Unit {
+        add(None, path, { req: HttpRequest, res: HttpResponse, next: Next =>
+            sub.handleAsMiddleware(req, res, next)
+        }, true)
+    }
+
     // 一次挂载多个全局/前缀中间件。
     public func use(handlers: Array<Middleware>): Unit { addAll(None, "/", handlers, true) }
     public func use(path: String, handlers: Array<Middleware>): Unit { addAll(None, path, handlers, true) }
@@ -555,21 +564,29 @@ public class Router {
         // 的相对路径，这与 Express 的行为一致。这里先保存原始路径并临时替换为剥掉前缀
         // 后的路径供该处理器使用;待轮到链的后续部分运行时，会先把原始路径还原回去，
         // 从而保证下游路由仍按完整路径来匹配。
+        // 同时维护 req.baseUrl：在子路由处理期间将其设为挂载前缀，以便子路由内的
+        // 处理器能获知自己是在哪个路径前缀下运行的(对应 Express 的 req.baseUrl)。
         if (layer.isPrefix && layer.pattern.segments.size > 0) {
             let savedPath = req.path
+            let savedBaseUrl = req.baseUrl
+            let mountPrefix = buildMountPrefix(req.path, layer.pattern.segments.size)
             req.path = stripMountPath(req.path, layer.pattern.segments.size)
+            req.baseUrl = savedBaseUrl + mountPrefix
             let next: Next = { =>
                 req.path = savedPath
+                req.baseUrl = savedBaseUrl
                 dispatch(matched, index + 1, req, res, onExhausted, onError, None)
             }
             try {
                 layer.handler(req, res, next)
             } catch (ex: Exception) {
                 req.path = savedPath
+                req.baseUrl = savedBaseUrl
                 dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
                 return
             }
             req.path = savedPath
+            req.baseUrl = savedBaseUrl
             if (req.consumeSkipRoute()) {
                 skipRoute()
             }
@@ -602,5 +619,21 @@ public class Router {
             i += 1
         }
         return rebuilt
+    }
+
+    // 从路径中取出前 `mountSegments` 个段并重新拼成路径前缀字符串，用于构建 baseUrl。
+    // 例如 buildMountPrefix("/api/users/1", 1) -> "/api"
+    //        buildMountPrefix("/api/users/1", 2) -> "/api/users"
+    // 若段数不足则返回路径本身。
+    func buildMountPrefix(path: String, mountSegments: Int64): String {
+        let parts = pathSegments(path)
+        let take = if (mountSegments < parts.size) { mountSegments } else { parts.size }
+        var prefix = ""
+        var i = Int64(0)
+        while (i < take) {
+            prefix += "/" + parts[i]
+            i += 1
+        }
+        return prefix
     }
 }

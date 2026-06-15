@@ -130,6 +130,9 @@ app.use(cookieParser())
 会话:用签名的 `sid` Cookie 关联服务端会话数据。需先注册 `cookieParser()` 并设置
 `app.cookieSecret`。默认 `MemorySessionStore`(线程安全),可实现 `SessionStore` 接入外部存储。
 
+> 📚 **扩展指南**: 如需将会话数据存储到 Redis、数据库等外部存储，请参考  
+> [Session 存储扩展指南](./session-store-extensions.md)
+
 ```cangjie
 app.cookieSecret = "change-me"
 app.use(cookieParser())

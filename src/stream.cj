@@ -37,6 +37,7 @@ public class StreamWriter {
             return
         }
         started = true
+        res.headersSent = true
         ensureDateHeader(res)
         match (res.conn) {
             case Some(c) =>

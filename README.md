@@ -367,6 +367,7 @@ main(): Int64 {
 
 - [快速上手](docs/getting-started.md)
 - [内置中间件参考](docs/middleware.md)
+- [Session 存储扩展指南](docs/session-store-extensions.md) - 如何将会话数据存储到 Redis、数据库等
 - [API 参考](docs/api.md)
 - [更新日志](CHANGELOG.md)
 

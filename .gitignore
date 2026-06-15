@@ -3,6 +3,10 @@ target/
 
 # IDE
 .idea/
+.vscode/
+
+# LSP / 工具缓存
+.cache/
 
 # Local runnable demo / scratch (not part of the library)
 src/main.cj

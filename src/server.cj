@@ -129,6 +129,7 @@ public class HttpServer {
                 } else {
                     "close"
                 }
+                res.headersSent = true
                 client.write(serializeResponse(res))
                 if (!keepAlive) {
                     break
@@ -219,6 +220,8 @@ public class HttpServer {
 
         let req = HttpRequest(method, target)
         req.httpVersion = version
+        // 保存原始 URL(不受任何中间件重写影响)
+        req.originalUrl = target
 
         let (path, queryString) = splitOnce(target, "?")
         req.path = path

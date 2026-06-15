@@ -15,6 +15,15 @@ public class HttpRequest {
     public var path: String         // 仅路径部分(已剥离查询串),例如 "/a"
     public var httpVersion: String
 
+    // 始终保留客户端发来的原始请求 URL(含查询串),不随中间件对 url/path 的修改而改变。
+    // 对应 Express 的 req.originalUrl。在 app.use(path, router) 子挂载场景下,
+    // 访问 /api/users 时 url 可能被改写为 /users,但 originalUrl 始终是 /api/users。
+    public var originalUrl: String = ""
+
+    // 当前路由器实例被挂载的路径前缀。例如把子路由挂载到 "/api" 时,进入该子路由的
+    // 请求其 baseUrl 为 "/api"。顶级路由的 baseUrl 为 ""。对应 Express 的 req.baseUrl。
+    public var baseUrl: String = ""
+
     public let headers: HashMap<String, String>
     public let query: HashMap<String, String>
     public var params: HashMap<String, String>
@@ -57,6 +66,11 @@ public class HttpRequest {
     // 能在请求处理期间访问到应用级别的配置项。它对应 Express 中的 `req.app`。
     // 直接构造请求(未经应用派发)时为 None,此时 setting() 会返回 None。
     public var app: ?Application = None
+
+    // 指向本次请求对应的响应对象,对应 Express 的 req.res,由 app.handle 设置;
+    // 直接构造请求(未经应用派发)时为 None。fresh()/stale() 依赖它读取响应上的
+    // ETag / Last-Modified 头。
+    public var res: ?HttpResponse = None
 
     // multipart/form-data 上传的文件列表,由 multipart() 中间件填充;未启用该中间件
     // 或非文件上传请求时为空。用 file(name) 按字段名取单个文件。
@@ -275,6 +289,147 @@ public class HttpRequest {
         return best
     }
 
+    // 解析 Range 请求头,对应 Express 的 req.range(size)。size 为内容总字节数。返回:
+    //   NoRange         —— 请求未带 Range 头;
+    //   Malformed       —— 语法非法(无 "bytes=" 单位或为空,对应 Express 的 -2);
+    //   Unsatisfiable   —— 语法合法但区间全部越界(对应 Express 的 -1,调用方应回 416);
+    //   Satisfiable(rs) —— 一个或多个可满足的字节区间(闭区间含两端,已按 size 归一化)。
+    // 支持多区间(逗号分隔)及 "start-end" / "start-" / "-suffix" 三种写法;末尾后缀
+    // 超过 size 时起点夹到 0(与文件服务的 Range 行为一致)。单个非法/越界子区间会被跳过。
+    public func range(size: Int64): RangeRequest {
+        let raw = match (this.header("range")) {
+            case Some(v) => v.trimAscii()
+            case None => return NoRange
+        }
+        if (!raw.toAsciiLower().startsWith("bytes=")) {
+            return Malformed
+        }
+        let spec = raw[6..raw.size].trimAscii()
+        if (spec.isEmpty()) {
+            return Malformed
+        }
+        if (size <= 0) {
+            return Unsatisfiable
+        }
+        let ranges = ArrayList<ByteRange>()
+        for (part in spec.split(",")) {
+            let p = part.trimAscii()
+            if (p.isEmpty()) {
+                continue
+            }
+            let (aRaw, bRaw) = splitOnce(p, "-")
+            let aStr = aRaw.trimAscii()
+            let bStr = bRaw.trimAscii()
+            var start = 0
+            var end = 0
+            if (aStr.isEmpty()) {
+                // "-N":请求末尾 N 个字节。
+                if (!allDigits(bStr)) {
+                    continue
+                }
+                let n = parseInt(bStr)
+                if (n <= 0) {
+                    continue
+                }
+                start = size - n
+                if (start < 0) {
+                    start = 0
+                }
+                end = size - 1
+            } else {
+                if (!allDigits(aStr)) {
+                    continue
+                }
+                start = parseInt(aStr)
+                if (bStr.isEmpty()) {
+                    end = size - 1
+                } else if (allDigits(bStr)) {
+                    end = parseInt(bStr)
+                } else {
+                    continue
+                }
+            }
+            if (end > size - 1) {
+                end = size - 1
+            }
+            if (start < 0 || start > end) {
+                continue
+            }
+            ranges.add(ByteRange(start, end))
+        }
+        if (ranges.isEmpty()) {
+            return Unsatisfiable
+        }
+        return Satisfiable(ranges.toArray())
+    }
+
+    // 对应 Express 的 req.fresh:依据条件请求头判断「客户端缓存是否仍然新鲜」(可回 304)。
+    // 为 true 需同时满足:
+    //   1. 方法为 GET 或 HEAD;
+    //   2. 已绑定响应(经 app.handle 派发)且其状态码为 2xx 或 304;
+    //   3. 请求带 If-None-Match 或 If-Modified-Since(都没有则无从判断,返回 false);
+    //   4. 请求未声明 Cache-Control: no-cache;
+    //   5. 与响应的 ETag / Last-Modified 比对全部通过。
+    // ETag 比对复用 etagMatches(支持 "*"、逗号分隔、弱校验前缀);Last-Modified 采用与
+    // 文件响应一致的保守判断(取值完全相等才算未变),绝不误判为「未修改」。
+    public func fresh(): Bool {
+        if (this.method != "GET" && this.method != "HEAD") {
+            return false
+        }
+        let res = match (this.res) {
+            case Some(r) => r
+            case None => return false
+        }
+        let status = res.statusCode
+        if (!((status >= 200 && status < 300) || status == 304)) {
+            return false
+        }
+
+        let inm = this.header("if-none-match")
+        let ims = this.header("if-modified-since")
+        let hasInm = match (inm) { case Some(_) => true; case None => false }
+        let hasIms = match (ims) { case Some(_) => true; case None => false }
+        if (!hasInm && !hasIms) {
+            return false
+        }
+        match (this.header("cache-control")) {
+            case Some(cc) => if (cc.toAsciiLower().contains("no-cache")) {
+                return false
+            }
+            case None => ()
+        }
+        // If-None-Match:"*" 视为命中;否则需与响应 ETag 匹配(无 ETag 则判为不新鲜)。
+        match (inm) {
+            case Some(v) =>
+                if (v.trimAscii() != "*") {
+                    match (responseHeaderCI(res, "etag")) {
+                        case Some(etag) => if (!etagMatches(v, etag)) {
+                            return false
+                        }
+                        case None => return false
+                    }
+                }
+            case None => ()
+        }
+        // If-Modified-Since:保守地只在与响应 Last-Modified 完全相等时才算未变。
+        match (ims) {
+            case Some(v) =>
+                match (responseHeaderCI(res, "last-modified")) {
+                    case Some(lm) => if (v.trimAscii() != lm.trimAscii()) {
+                        return false
+                    }
+                    case None => return false
+                }
+            case None => ()
+        }
+        return true
+    }
+
+    // 对应 Express 的 req.stale:与 fresh() 相反,表示客户端缓存已过期、需重新发送内容。
+    public func stale(): Bool {
+        return !fresh()
+    }
+
     // 当前请求所属应用是否开启了「信任代理」。它决定下面这些方法是否采信
     // X-Forwarded-* 头。未关联应用(app 为 None)时一律返回 false。
     func trustProxy(): Bool {
@@ -467,4 +622,49 @@ func isIpv4Like(s: String): Bool {
         }
     }
     return true
+}
+
+// 一个字节区间 [start, end](闭区间,含两端)。req.range(size) 解析出的每个可满足
+// 区间都用它表示。
+public struct ByteRange {
+    public let start: Int64
+    public let end: Int64
+    public init(start: Int64, end: Int64) {
+        this.start = start
+        this.end = end
+    }
+}
+
+// req.range(size) 的解析结果,详见 HttpRequest.range 的文档说明。
+public enum RangeRequest {
+    | Satisfiable(Array<ByteRange>)
+    | Unsatisfiable
+    | Malformed
+    | NoRange
+}
+
+// 字符串是否非空且全部由 ASCII 数字组成。用于 Range 解析时区分「缺省/非数字」
+// 与合法数字(parseInt 对空串/非数字一律返回 0,无法单独区分,故先用本函数判定)。
+func allDigits(s: String): Bool {
+    if (s.isEmpty()) {
+        return false
+    }
+    for (b in s.toArray()) {
+        if (b < UInt8(48) || b > UInt8(57)) {
+            return false
+        }
+    }
+    return true
+}
+
+// 大小写无关地读取一个响应头(res.get 按原样键查找,这里兜底处理大小写差异),
+// 供 fresh() 读取响应的 ETag / Last-Modified。
+func responseHeaderCI(res: HttpResponse, name: String): ?String {
+    let want = name.toAsciiLower()
+    for ((k, v) in res.headers) {
+        if (k.toAsciiLower() == want) {
+            return v
+        }
+    }
+    return None
 }
