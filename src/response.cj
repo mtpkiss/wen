@@ -351,22 +351,6 @@ public class HttpResponse {
         return this
     }
 
-    // 设置 Link 响应头(对应 Express 的 res.links),入参为若干 (rel, url) 对,
-    // 输出形如:<url1>; rel="next", <url2>; rel="last"。
-    public func links(rels: Array<(String, String)>): HttpResponse {
-        var s = ""
-        var first = true
-        for ((rel, url) in rels) {
-            if (!first) {
-                s += ", "
-            }
-            s += "<${url}>; rel=\"${rel}\""
-            first = false
-        }
-        this.headers["Link"] = s
-        return this
-    }
-
     // 渲染一个视图模板并作为 HTML 响应发送(对应 Express 的 res.render)。视图定位、
     // 引擎选择等逻辑都委托给所属 Application.renderView;这里只负责设好 Content-Type、
     // 写入渲染结果并结束响应。data 为传给模板的数据(用 JsonValue 表示)。

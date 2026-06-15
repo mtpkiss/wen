@@ -318,7 +318,7 @@ main(): Int64 {
 - **响应**:`send/json/jsonp/sendBytes/sendStatus/end`、`redirect`(可带状态码);`json`
   支持字符串与类型化 `JsonValue/JsonObj`;`cookie`(支持 `signed` 签名、`domain`/`expires`/
   `maxAge`/`httpOnly`/`secure`/`sameSite`)/`clearCookie`、`set` 批量、
-  `mimeType/contentType/append/location/vary/links`;`render`(视图渲染)、`format`(内容
+  `mimeType/contentType/append/location/vary`;`render`(视图渲染)、`format`(内容
   协商)、`attachment/download`(附件下载);流式 `stream` 与 Server-Sent Events `sse`。
 - **应用设置**:`set/setting`(字符串)、`enable/disable/enabled/disabled`(布尔)、
   `locals`(共享对象)、`trustProxy/cookieSecret/maxConnections` 等开关。

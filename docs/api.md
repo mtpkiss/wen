@@ -70,7 +70,7 @@
 - `status(code): HttpResponse`
 - `set(name, value)` / `set(headers: HashMap)` / `get(name): ?String`
 - `contentType(value)` / `mimeType(shorthand)` / `location(url)`
-- `append(name, value)` / `vary(field)` / `links([(rel, url)...])`
+- `append(name, value)` / `vary(field)`
 
 ### Cookie
 

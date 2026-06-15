@@ -43,7 +43,7 @@
 
 ### 响应 HttpResponse
 - `status / sendStatus`、`send / sendBytes / json / jsonp / end`
-- `set / get / append / contentType / mimeType`(对应 `res.type`)`/ location / vary / links`
+- `set / get / append / contentType / mimeType`(对应 `res.type`)`/ location / vary`
 - `charset`(独立于 MIME 的字符集,序列化前自动并入 Content-Type)
 - `cookie / clearCookie`(含 Domain / Expires / maxAge 选项)
 - `redirect(location)` / `redirect(status, location)`

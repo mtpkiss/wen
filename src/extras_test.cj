@@ -20,14 +20,6 @@ class ExtrasTest {
         @Assert(hv(res, "Vary") == "Accept, Accept-Encoding")
     }
 
-    // res.links 生成 Link 头。
-    @TestCase
-    func testLinks(): Unit {
-        let res = HttpResponse()
-        res.links([("next", "/p/2"), ("last", "/p/9")])
-        @Assert(hv(res, "Link") == "</p/2>; rel=\"next\", </p/9>; rel=\"last\"")
-    }
-
     // redirect 带状态码。
     @TestCase
     func testRedirectStatus(): Unit {
