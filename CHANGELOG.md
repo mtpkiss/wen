@@ -2,6 +2,18 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+精简框架范围,把「不该由框架拍板的策略」交还给应用(含破坏性变更):
+
+- **helmet**:默认只发部署无关、不会误伤的头(`nosniff` / `X-Frame-Options` / `Referrer-Policy` / HSTS);
+  `csp` 与新增的 `coop` / `corp` 改为 **opt-in**(默认不发,需显式传值)。此前 CSP 默认 `default-src 'self'`、
+  COOP/CORP 无条件下发,易静默打挂外部资源 / 跨窗口通信。
+- **logger**:精简为「每请求一行」+ 一个 `format` 钩子(`(req, res, 毫秒) -> String`);移除原先的
+  7 个布尔开关与 ANSI 上色——定制统一交给 `format`。
+- **rateLimit**:**移出内置**。限流是网关 / 基础设施层职责,单实例内存计数对多实例不可靠。
+- **docs**:更正「内置 `{{ key }}` 模板引擎」的表述——框架本就不内置模板引擎,需 `app.engine` 注册。
+
 ## [0.2.0] - 2026-06-12
 
 一次大幅扩充,将 Wen 从基础雏形补成一个较完整、类 Express 的零依赖框架。
@@ -17,7 +29,7 @@
   `app.param(name, fn)`。
 - **代理感知请求**:`req.protocol/secure/ips/clientIp/subdomains/xhr` + `app.trustProxy`。
 - **内容协商**:`req.accepts` 升级为带 q 值的最佳匹配、`req.accepts([...])`、`res.format`。
-- **视图渲染**:`res.render` + `app.engine` + 内置 `{{ key }}` 模板引擎。
+- **视图渲染**:`res.render` + `app.engine`(框架不内置模板引擎,由用户注册任意引擎)。
 - **中间件**:`helmet`(安全头)、`compression`(自写 gzip)、`rateLimit`(限流)、
   `basicAuth`/`bearerAuth`(认证)、`requestId`、`multipart`(文件上传)、`session`(签名
   sid + 内存 store)、`etag`。

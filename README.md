@@ -111,12 +111,12 @@ main(): Int64 {
         res.json(JsonObj().put("page", page).build())
     })
 
-    // 视图渲染(res.render):用内置 {{ key }} 引擎渲染 ./views/hello.html。
-    // 先创建 ./views/hello.html,例如:<h1>你好,{{ name }}!</h1>
+    // 视图渲染(res.render):框架不内置模板引擎,需先用 app.engine(ext, fn) 注册引擎。
+    // 这里用最朴素的做法 —— 直接拼一段 HTML 返回(模板用法见下方「能力一览·视图渲染」)。
     //   curl 'http://localhost:8080/hello?name=世界'  -> <h1>你好,世界!</h1>
     app.get("/hello", { req: HttpRequest, res: HttpResponse =>
         let name = match (req.queryParam("name")) { case Some(v) => v; case None => "Wen" }
-        res.render("hello", JsonObj().put("name", name).build())
+        res.send("<h1>你好,${name}!</h1>")
     })
 
     // 内容协商(res.format):同一资源按客户端 Accept 头的 q 值挑最合适的表示。
@@ -290,8 +290,6 @@ main(): Int64 {
     // ---- 配置项 -------------------------------------------------------------
     app.maxConnections = 1024              // 并发连接上限(信号量背压)
     app.trustProxy = true                  // 信任前置反代的 X-Forwarded-* 头
-    app.set("views", "./views")            // 视图根目录
-    app.set("view engine", "html")         // 默认模板扩展名
 
     // ---- 启动服务器 ---------------------------------------------------------
     app.listen(8080, { =>
@@ -310,8 +308,8 @@ main(): Int64 {
   `app.route(path)` 链式、`app.param(name, fn)` 参数预处理、可挂载子路由
   `app.use(path, Router)`(含 mergeParams);自动 `HEAD`/`OPTIONS`、`405 + Allow`。
 - **中间件**:中间件链 `(req, res, next)`、全局/路径挂载、数组批量挂载、错误处理中间件
-  `(err, req, res, next)`、`Plugin` 系统。内置:`logger / requestId(请求 ID) / cors /
-  helmet(安全头) / compression(gzip 压缩) / etag(动态条件 GET) / rateLimit(限流) /
+  `(err, req, res, next)`。内置:`logger / requestId(请求 ID) / cors /
+  helmet(安全头) / compression(gzip 压缩) / etag(动态条件 GET) /
   basicAuth · bearerAuth(认证) / jsonParser / urlencodedParser / multipart(文件上传) /
   cookieParser / staticFiles / session`。
 - **请求**:`headers/query/params/cookies`、字符串 `attributes` 与类型化 `locals`、
@@ -335,8 +333,8 @@ main(): Int64 {
   链式构建器,访问器 `asString/asInt/asFloat/asBool/get/at/size/keys`;正确处理转义、
   `\u` 与代理对。
 - **视图渲染**:`res.render` + `app.engine(ext, fn)` + `app.set("views"/"view engine")`;
-  内置极简 `{{ key }}` 模板引擎(支持 `a.b.c` 嵌套字段、默认 HTML 转义防注入),也可
-  接入任意第三方引擎。
+  框架**不内置模板引擎**(刻意保持精简),由你用 `app.engine` 接入任意引擎——可以是自写的
+  `{{ key }}` 字符串替换,也可以是第三方模板库;未注册对应扩展名的引擎时 `res.render` 抛异常。
 - **会话与安全**:HMAC-SHA256 **签名 Cookie**、`session()`(默认线程安全的内存存储,
   可实现 `SessionStore` 接入 Redis/DB)、`helmet()` 一组安全响应头(CSP / nosniff /
   HSTS / 防点击劫持等)。
@@ -355,7 +353,6 @@ main(): Int64 {
 | `helmet(...)` | 一组安全响应头(CSP / nosniff / HSTS / 防点击劫持等) |
 | `compression(threshold)` | 按 `Accept-Encoding` 自动 gzip 压缩文本响应 |
 | `etag()` | 动态响应 `ETag` + `If-None-Match` → 304 |
-| `rateLimit(max, windowSeconds)` | 按客户端 IP 限流,超额 429 + `Retry-After` |
 | `basicAuth(verify)` / `bearerAuth(verify)` | HTTP Basic / Bearer 认证,失败 401 |
 | `jsonParser()` / `urlencodedParser()` | 解析 JSON / 表单请求体 |
 | `multipart()` | 解析 `multipart/form-data`(文件上传) |

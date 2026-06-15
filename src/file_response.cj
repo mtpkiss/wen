@@ -165,11 +165,6 @@ func httpDateNow(): String {
     return formatHttpDate(DateTime.nowUTC())
 }
 
-// 当前 Unix 时间戳(秒),用于限流等按时间窗口的逻辑。
-func nowUnixSeconds(): Int64 {
-    return DateTime.now().toUnixTimeStamp().toSeconds()
-}
-
 // 「此刻起 seconds 秒后」的 HTTP 日期字符串(用于 Cookie 的 Expires 等)。
 func httpDateAfter(seconds: Int64): String {
     return formatHttpDate(DateTime.nowUTC() + Duration.second * seconds)

@@ -6,7 +6,7 @@ import std.collection.*
  * 应用对象——相当于 Express 里的 `const app = express()`。
  *
  * 它是整个框架对外的主入口，聚合了路由表、设置项和应用级共享数据，并提供注册
- * 路由 / 中间件 / 插件以及启动服务器的全部方法。
+ * 路由 / 中间件以及启动服务器的全部方法。
  *
  * 两个一贯的设计约定：
  * 1. 链式调用：所有注册类方法都返回 `this`（Application 自身），因此可以
@@ -52,7 +52,7 @@ public class Application {
         return locals.get(key)
     }
 
-    // ---- 中间件 / 插件 -------------------------------------------------------
+    // ---- 中间件 -------------------------------------------------------
 
     public func use(handler: Middleware): Application {
         router.use(handler)

@@ -1,18 +1,22 @@
 # 内置中间件参考
 
 所有内置中间件都是返回 `Middleware` 的工厂函数,用 `app.use(...)` 注册;部分也可挂在
-路由或路径前缀上。建议的注册顺序:压缩/ETag/安全/限流等「横切关注点」靠前,业务路由靠后。
+路由或路径前缀上。建议的注册顺序:压缩/ETag/安全等「横切关注点」靠前,业务路由靠后。
 
 ---
 
-## logger()
+## logger() / logger(format)
 
-打印每个请求的进/出一行(含最终状态码)。
+每个请求**完成后**打一行,默认 `METHOD path status durationMs`。需要别的字段或上色时,
+传入 `format` 函数(拿到 `req`、`res`、处理耗时毫秒,返回整行)自行排版——核心不为每个
+字段塞开关。
 
 ```cangjie
 app.use(logger())
-// --> GET /users/1
-// <-- GET /users/1 200
+// GET /users/1 200 3ms
+
+// 自定义:加 IP、只打慢请求、上 ANSI 颜色……都由你决定
+app.use(logger({ req, res, ms => "${req.method} ${req.path} ${res.statusCode} ${ms}ms ip=${req.clientIp()}" }))
 ```
 
 ## requestId(headerName! = "X-Request-Id")
@@ -60,15 +64,6 @@ app.use(compression())
 ```cangjie
 app.use(compression())
 app.use(etag())
-```
-
-## rateLimit(max! = 60, windowSeconds! = 60)
-
-固定时间窗口、按 `req.clientIp()` 限流;超额回 429 + `Retry-After`,每个响应带
-`X-RateLimit-Limit/Remaining`。内存计数、线程安全。
-
-```cangjie
-app.use(rateLimit(max: 100, windowSeconds: 60))
 ```
 
 ## basicAuth(verify, realm!) / bearerAuth(verify, realm!)

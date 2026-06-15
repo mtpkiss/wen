@@ -1,6 +1,6 @@
 # wen 路线图(对标 Express.js)
 
-> 更新于 2026-06-15。基于源码逐项核对(`cjpm test` 164/164 全绿)。
+> 更新于 2026-06-15。基于源码逐项核对(`cjpm test` 233/233 全绿)。
 > 图例:✅ 已实现 · ⚠️ 部分(底层已具备但未暴露 Express 风格 API)· ❌ 未实现
 >
 > 粗估:核心 HTTP API 已覆盖 Express 4.x 常用面 **约 85%**。路由 / 中间件 / 请求 /
@@ -58,11 +58,11 @@
 - `staticFiles`(express.static:index / maxAge / dotfiles / etag / lastModified / immutable /
   setHeaders / redirect / ETag / Last-Modified / Range)
 - `cookieParser`、`session`(`MemorySessionStore` + `SessionStore` 接口)
-- `cors`、`helmet`、`compression`(自带 gzip)、`rateLimit`、`logger`、`requestId`、`etag`(动态)
+- `cors`、`helmet`、`compression`(自带 gzip)、`logger`、`requestId`、`etag`(动态)
 - `basicAuth` / `bearerAuth`
 
 ### 视图 / 工具
-- `simpleViewEngine` 内置模板 + 自定义引擎
+- 视图渲染:`app.engine` 注册自定义引擎(框架**不内置**默认模板引擎)
 - 自写 JSON 解析 / 序列化(`json.cj`)、HMAC(`crypto_hmac.cj`,用于签名 cookie / session)
 
 ---

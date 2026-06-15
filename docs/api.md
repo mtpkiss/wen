@@ -24,7 +24,6 @@
 - `route(path): Route` —— 同一路径绑定多个动词(链式)
 - `param(name, ParamHandler)` —— 参数预处理
 - `engine(ext, ViewEngine)` —— 注册视图引擎
-- `register(Plugin)` —— 安装插件
 
 ### 设置与字段
 
@@ -97,7 +96,7 @@
 
 ## 其它公开类型 / 工具
 
-- `Router`、`Route`、`Plugin`、`UploadedFile`、`Session`、`SessionStore`、`MemorySessionStore`、
+- `Router`、`Route`、`UploadedFile`、`Session`、`SessionStore`、`MemorySessionStore`、
   `StreamWriter`、`SseWriter`
 - 工具:`hmacSha256Hex(key, msg)`、`gzipCompress(data)`、`base64Encode/Decode`、
   `parseJson`、`parseQuery`、`urlDecode`、`contentTypeFor`、`reasonPhrase`

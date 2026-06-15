@@ -20,16 +20,27 @@ class HelmetTest {
         return res
     }
 
-    // 默认配置下应下发预期的安全头。
+    // 默认配置:只发「部署无关、不会误伤」的头;策略类头(CSP / COOP / CORP)默认不发。
     @TestCase
     func testDefaults(): Unit {
         let res = run(helmet())
         @Assert(res.body == "ok")
+        // 默认开。
         @Assert(hv(res, "X-Content-Type-Options") == "nosniff")
         @Assert(hv(res, "X-Frame-Options") == "SAMEORIGIN")
         @Assert(hv(res, "Referrer-Policy") == "no-referrer")
-        @Expect(hv(res, "Content-Security-Policy").contains("default-src 'self'"))
         @Expect(hv(res, "Strict-Transport-Security").contains("max-age="))
+        // 默认关(易误伤,需显式传值)。
+        @Assert(hv(res, "Content-Security-Policy") == "")
+        @Assert(hv(res, "Cross-Origin-Opener-Policy") == "")
+        @Assert(hv(res, "Cross-Origin-Resource-Policy") == "")
+    }
+
+    // 策略类头需显式开启:传入即下发对应值。
+    @TestCase
+    func testOptInPolicies(): Unit {
+        let res = run(helmet(csp: "default-src 'self'", coop: "same-origin", corp: "same-origin"))
+        @Assert(hv(res, "Content-Security-Policy") == "default-src 'self'")
         @Assert(hv(res, "Cross-Origin-Opener-Policy") == "same-origin")
         @Assert(hv(res, "Cross-Origin-Resource-Policy") == "same-origin")
     }
