@@ -39,8 +39,7 @@ public class Application {
     public var cookieSecret: String = ""
 
     // 已注册的视图引擎表:键为扩展名(不含点,如 "html"),值为对应的渲染引擎。
-    // 经 app.engine(ext, fn) 注册;res.render 时按模板扩展名在此查找,缺省回退到
-    // 内置的 simpleViewEngine。
+    // 经 app.engine(ext, fn) 注册;res.render 时按模板扩展名在此查找,未注册即抛异常。
     let engines: HashMap<String, ViewEngine> = HashMap<String, ViewEngine>()
 
     public init() {}
@@ -108,7 +107,7 @@ public class Application {
     // 渲染一个视图并返回结果字符串(供 res.render 调用)。流程:
     //   1. 用 "views" 设置(默认 "views")作为视图根目录;
     //   2. 若 name 自带扩展名就用它,否则取 "view engine" 设置作为默认扩展名并补全文件名;
-    //   3. 按扩展名查注册的引擎,没有则回退到内置 simpleViewEngine;
+    //   3. 按扩展名查 app.engine(ext, fn) 注册的引擎;没有则抛异常;
     //   4. 交给引擎读取模板文件并渲染。
     func renderView(name: String, data: JsonValue): String {
         let viewsDir = match (this.setting("views")) {
@@ -130,7 +129,7 @@ public class Application {
         let path = joinViewPath(viewsDir, fileName)
         let eng = match (engines.get(normalizeExt(ext))) {
             case Some(en) => en
-            case None => simpleViewEngine
+            case None => throw Exception("render: 未为扩展名 '${ext}' 注册视图引擎,请用 app.engine(...) 注册")
         }
         return eng(path, data)
     }

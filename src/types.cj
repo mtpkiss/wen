@@ -42,5 +42,5 @@ public type ParamHandler = (HttpRequest, HttpResponse, String) -> Unit
 // 「视图引擎」契约,对应 Express 的模板引擎。入参为「已解析好的模板文件绝对/相对
 // 路径」与「渲染数据(用框架自带的 JsonValue 表示)」,返回渲染后的字符串(通常是
 // HTML)。引擎自行负责读取该模板文件。通过 app.engine(ext, fn) 为某扩展名注册;
-// 未注册时框架回退到内置的极简 {{ key }} 引擎(simpleViewEngine)。
+// 未注册时 res.render 抛异常——框架自身不内置默认引擎。
 public type ViewEngine = (String, JsonValue) -> String

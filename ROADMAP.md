@@ -68,22 +68,12 @@
 
 ---
 
-## 二、部分实现 ⚠️(底层已具备,缺 Express 风格 API)
-
-- **子应用挂载** —— 支持挂载子 `Router`(并提供 `Router.mountpath`),但没有完整的子
-  `Application` 概念(子应用的 `mount` 事件、独立设置继承等高级行为)。
-
----
-
-## 三、未实现 ❌
+## 二、未实现 ❌
 
 ### 高优先级
 - HTTPS / TLS(`listenHttps`)—— 依赖仓颉 TLS 能力或 FFI;短期替代:nginx 反向代理
 
 ### 中优先级
-- 子应用 `mount` 事件、`app.path()`(注:`Router.mountpath` 已实现;评估后判定收益不足以
-  建一套事件系统/父链遍历,故除非有明确需求否则不做)
-- `res.setTimeout()` / 请求级超时(依赖 Timer API)
 - `trust proxy` 的完整语义(目前仅布尔 `trustProxy`)
 
 ### 低优先级 / 生态
@@ -92,9 +82,17 @@
 - 集群 / 多进程(依赖 `std.process`;替代:nginx 负载均衡 / 容器编排)
 - 调试日志系统(类似 Node 的 `debug` 模块)
 
+### Express 中间件补遗(对标 npm 生态,非核心)
+- `csrf` —— CSRF 防护。Express 的 `csurf` 已弃用,现代做法是 `SameSite=Lax/Strict` cookie
+  + 双提交 token;`session` + 签名 cookie 已具备底层能力,做一个薄中间件即可。
+- `method-override` —— 允许 HTML 表单通过 `_method` 字段或 `X-HTTP-Method-Override`
+  头模拟 PUT/DELETE。实现量很小。
+- 请求体校验(`validator` / `joi` 风格)—— 目前需在 handler 里手写 `req.json()` 后判空。
+  可作为独立模块或留给用户选型,框架本身不必内置。
+
 ---
 
-## 四、建议推进顺序
+## 三、建议推进顺序
 
 1. ✅ **已完成(2026-06-15)**:`textParser` / `rawParser`、`acceptsCharsets / Encodings / Languages`。
 2. ✅ **已完成(2026-06-15)**:`req.fresh` / `req.stale`、`req.range(size)`(含 `req.res` 链接)、
@@ -103,6 +101,6 @@
    `immutable` / `setHeaders` / `redirect`)、`Router.mountpath`、
    `case sensitive routing` / `strict routing`
    (默认值匹配 Express:大小写无关、尾部斜杠无关)。
-4. **需先调研仓颉标准库**:TLS(HTTPS)、Timer(超时)、process(集群)——
+4. **需先调研仓颉标准库**:TLS(HTTPS)、process(集群)——
    确认 API 可用性后,决定原生实现还是外部替代(nginx 等)。
 5. **独立模块 / 长期**:WebSocket;HTTP/2 待生态成熟。

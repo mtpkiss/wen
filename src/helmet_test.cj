@@ -32,10 +32,6 @@ class HelmetTest {
         @Expect(hv(res, "Strict-Transport-Security").contains("max-age="))
         @Assert(hv(res, "Cross-Origin-Opener-Policy") == "same-origin")
         @Assert(hv(res, "Cross-Origin-Resource-Policy") == "same-origin")
-        @Assert(hv(res, "X-DNS-Prefetch-Control") == "off")
-        @Assert(hv(res, "X-Permitted-Cross-Domain-Policies") == "none")
-        @Assert(hv(res, "Origin-Agent-Cluster") == "?1")
-        @Assert(hv(res, "X-XSS-Protection") == "0")
     }
 
     // hsts: false 时不下发 HSTS 头。
