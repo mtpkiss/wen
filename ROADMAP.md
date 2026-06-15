@@ -38,6 +38,7 @@
 - `session`
 - `ip / ips() / clientIp() / protocol() / secure() / hostname() / subdomains() / xhr()`
 - `isType()`(对应 `req.is`)、`accepts()`(媒体类型协商)
+- `acceptsCharsets()` / `acceptsEncodings()` / `acceptsLanguages()`(均含数组与单值两种重载)
 - `fresh()` / `stale()`(条件请求新鲜度,可回 304)、`range(size)`(Range 解析,支持多区间)
 - `locals` + `setLocal / local`;`attributes`;`requestId()`;`app` / `res`;`setting()`;`nextRoute()`
 
@@ -52,7 +53,8 @@
 - `headersSent`、`locals`、`finished`、`suppressBody`(HEAD 请求自动省略响应体)
 
 ### 内置中间件(Express 中多为独立 npm 包)
-- `jsonParser`(express.json)、`urlencodedParser`(express.urlencoded)、`multipart`(文件上传)
+- `jsonParser`(express.json)、`urlencodedParser`(express.urlencoded)、`textParser`
+  (express.text)、`rawParser`(express.raw)、`multipart`(文件上传)
 - `staticFiles`(express.static:index / maxAge / dotfiles / ETag / Last-Modified / Range)
 - `cookieParser`、`session`(`MemorySessionStore` + `SessionStore` 接口)
 - `cors`、`helmet`、`compression`(自带 gzip)、`rateLimit`、`logger`、`requestId`、`etag`(动态)
@@ -78,8 +80,6 @@
 ## 三、未实现 ❌
 
 ### 高优先级
-- `express.raw()` / `express.text()` 请求体解析器
-- `req.acceptsCharsets()` / `acceptsEncodings()` / `acceptsLanguages()` 内容协商细分
 - HTTPS / TLS(`listenHttps`)—— 依赖仓颉 TLS 能力或 FFI;短期替代:nginx 反向代理
 - `res.charset`(独立于 MIME 的字符集设置)
 
@@ -99,8 +99,7 @@
 
 ## 四、建议推进顺序
 
-1. **零依赖、纯字符串处理(可立即做)**:`express.raw()` / `text()`、
-   `acceptsCharsets / Encodings / Languages`。预计 1–2 天。
+1. ✅ **已完成(2026-06-15)**:`textParser` / `rawParser`、`acceptsCharsets / Encodings / Languages`。
 2. ✅ **已完成(2026-06-15)**:`req.fresh` / `req.stale`、`req.range(size)`(含 `req.res` 链接)。
    尚余 `req.signedCookies` 整表映射。
 3. **小属性 / 配置**:`res.charset`、静态选项开关化、`app.mountpath`、

@@ -59,3 +59,37 @@ public func jsonParser(): Middleware {
         next()
     }
 }
+
+// 以纯文本方式处理请求体,对应 Express 的 express.text()。当请求 Content-Type 匹配
+// `contentType`(默认 "text/plain";大小写无关的子串匹配)时,把文本体写入
+// req.attributes["text"],便于与 jsonParser 的 "json" 入口对称地取用(req.body 本身
+// 始终保有该文本)。Content-Type 不匹配的请求原样放行、不写入。
+public func textParser(contentType!: String = "text/plain"): Middleware {
+    return { req: HttpRequest, _: HttpResponse, next: Next =>
+        match (req.header("content-type")) {
+            case Some(ct) =>
+                if (ct.toAsciiLower().contains(contentType.toAsciiLower())) {
+                    req.setAttribute("text", req.body)
+                }
+            case None => ()
+        }
+        next()
+    }
+}
+
+// 以原始字节方式处理请求体,对应 Express 的 express.raw()。当请求 Content-Type 匹配
+// `contentType`(默认 "application/octet-stream")时,把原始字节(二进制安全,不经
+// UTF-8 编解码往返)存入 req.locals["raw"](取用:req.local("raw") 再向下转型为
+// Array<UInt8>;也可始终用 req.bodyBytes 直接读取)。常用于 Webhook 按原文验签等场景。
+public func rawParser(contentType!: String = "application/octet-stream"): Middleware {
+    return { req: HttpRequest, _: HttpResponse, next: Next =>
+        match (req.header("content-type")) {
+            case Some(ct) =>
+                if (ct.toAsciiLower().contains(contentType.toAsciiLower())) {
+                    req.setLocal("raw", req.bodyBytes)
+                }
+            case None => ()
+        }
+        next()
+    }
+}

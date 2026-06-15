@@ -289,6 +289,48 @@ public class HttpRequest {
         return best
     }
 
+    // 内容协商:从候选 charset 列表里挑出客户端 Accept-Charset 最偏好的一个,对应
+    // Express 的 req.acceptsCharsets([...])。缺少该头时返回首个候选;都不可接受时返回 None。
+    public func acceptsCharsets(charsets: Array<String>): ?String {
+        return negotiateAccept(this.header("accept-charset"), charsets, false, false)
+    }
+
+    // 单个 charset 是否可被接受(acceptsCharsets 的布尔便捷形式)。
+    public func acceptsCharsets(charset: String): Bool {
+        match (acceptsCharsets([charset])) {
+            case Some(_) => return true
+            case None => return false
+        }
+    }
+
+    // 从候选编码列表里挑出客户端 Accept-Encoding 最偏好的一个,对应 req.acceptsEncodings。
+    // 特例:"identity"(不压缩)默认可接受,除非被 "identity;q=0" 或 "*;q=0" 显式排除。
+    public func acceptsEncodings(encodings: Array<String>): ?String {
+        return negotiateAccept(this.header("accept-encoding"), encodings, false, true)
+    }
+
+    // 单个编码是否可被接受(acceptsEncodings 的布尔便捷形式)。
+    public func acceptsEncodings(encoding: String): Bool {
+        match (acceptsEncodings([encoding])) {
+            case Some(_) => return true
+            case None => return false
+        }
+    }
+
+    // 从候选语言列表里挑出客户端 Accept-Language 最偏好的一个,对应 req.acceptsLanguages。
+    // 支持语言前缀匹配:头里的 "en" 可匹配候选 "en-US"。
+    public func acceptsLanguages(languages: Array<String>): ?String {
+        return negotiateAccept(this.header("accept-language"), languages, true, false)
+    }
+
+    // 单个语言是否可被接受(acceptsLanguages 的布尔便捷形式)。
+    public func acceptsLanguages(language: String): Bool {
+        match (acceptsLanguages([language])) {
+            case Some(_) => return true
+            case None => return false
+        }
+    }
+
     // 解析 Range 请求头,对应 Express 的 req.range(size)。size 为内容总字节数。返回:
     //   NoRange         —— 请求未带 Range 头;
     //   Malformed       —— 语法非法(无 "bytes=" 单位或为空,对应 Express 的 -2);

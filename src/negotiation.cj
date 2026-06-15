@@ -99,3 +99,76 @@ func acceptMatch(full: String, items: ArrayList<AcceptItem>): (Float64, Int64, I
     }
     return (bestQ, bestRank, bestIdx)
 }
+
+// 通用的 Accept-* 协商:从 offered 候选里挑出客户端最偏好的一个。用于 Accept-Charset /
+// Accept-Encoding / Accept-Language —— 它们的取值是简单 token(charset 名 / 编码名 /
+// 语言标签),而非 type/subtype 媒体类型。
+//   header        —— 对应的 Accept-* 头;None 表示该头缺失,视为「全部可接受」,返回首个候选。
+//   languageMode  —— 为 true 时启用语言前缀匹配(头里的 "en" 可匹配候选 "en-US")。
+//   encodingMode  —— 为 true 时启用 Accept-Encoding 特例:"identity" 默认可接受,
+//                    除非被 "identity;q=0" 或 "*;q=0" 显式排除。
+// 返回最佳候选;都不可接受(q 全为 0 / 被排除)时返回 None。候选并列时取列表中靠前者。
+func negotiateAccept(header: ?String, offered: Array<String>, languageMode: Bool, encodingMode: Bool): ?String {
+    if (offered.isEmpty()) {
+        return None
+    }
+    let raw = match (header) {
+        case Some(h) => h
+        case None => return Some(offered[0])
+    }
+    let items = parseAcceptHeader(raw)
+    var best: ?String = None
+    var bestQ = 0.0
+    var bestSpec = -1
+    for (cand in offered) {
+        let (q, spec) = acceptTokenScore(cand, items, languageMode, encodingMode)
+        if (spec >= 0 && q > 0.0) {
+            var better = false
+            match (best) {
+                case None => better = true
+                case Some(_) =>
+                    if (q > bestQ) {
+                        better = true
+                    } else if (q == bestQ && spec > bestSpec) {
+                        better = true
+                    }
+            }
+            if (better) {
+                best = Some(cand)
+                bestQ = q
+                bestSpec = spec
+            }
+        }
+    }
+    return best
+}
+
+// 为单个候选 token 在已解析的 Accept 条目里打分,返回 (q, 具体程度 spec)。
+// spec:2 精确相等 > 1 语言前缀 > 0 通配 "*";-1 表示无任何匹配。
+func acceptTokenScore(offered: String, items: ArrayList<AcceptItem>, languageMode: Bool, encodingMode: Bool): (Float64, Int64) {
+    let o = offered.toAsciiLower()
+    var bestQ = 0.0
+    var bestSpec = -1
+    for (item in items) {
+        let m = item.mediaType
+        var spec = -1
+        if (m == o) {
+            spec = 2
+        } else if (m == "*") {
+            spec = 0
+        } else if (languageMode && o.startsWith(m + "-")) {
+            spec = 1
+        }
+        if (spec >= 0) {
+            if (spec > bestSpec || (spec == bestSpec && item.q > bestQ)) {
+                bestSpec = spec
+                bestQ = item.q
+            }
+        }
+    }
+    // Accept-Encoding 特例:未被提及的 identity 默认可接受(给一个最低优先级兜底)。
+    if (bestSpec < 0 && encodingMode && o == "identity") {
+        return (1.0, 0)
+    }
+    return (bestQ, bestSpec)
+}
