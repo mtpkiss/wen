@@ -26,10 +26,15 @@ import std.fs.*
 //                   告诉客户端该资源在缓存期内永远不会变(适合带指纹的构建产物)。
 //   setHeaders   —— 在文件发送前调用的回调,可在其中对响应任意定制头部;入参为
 //                   (res, 该次请求映射到的真实文件路径)。默认为 None(不调用)。
+//   redirect     —— 目录请求且 URL 不以 "/" 结尾时是否 301 重定向到带斜杠版本(默认
+//                   true)。这能让目录内 HTML 的相对路径正确解析(比如 /dir 上的
+//                   <img src="a.png"> 应解析为 /dir/a.png 而非 /a.png)。关闭后目录
+//                   请求一律交给 next()。
 public func staticFiles(root: String, index!: String = "index.html", maxAge!: Int64 = -1,
                         dotfiles!: String = "ignore", etag!: Bool = true,
                         lastModified!: Bool = true, immutable!: Bool = false,
-                        setHeaders!: ?(HttpResponse, String) -> Unit = None): Middleware {
+                        setHeaders!: ?(HttpResponse, String) -> Unit = None,
+                        redirect!: Bool = true): Middleware {
     // 仓颉的 std.fs 不会处理路径开头的 "./"，因此这里把它去掉，这样调用方
     // 无论传 "public" 还是 "./public" 都能正常工作。
     let base = if (root.startsWith("./")) {
@@ -49,16 +54,33 @@ public func staticFiles(root: String, index!: String = "index.html", maxAge!: In
         } else {
             req.path
         }
-        // 目录请求(空路径或以 "/" 结尾)补上默认索引文件。
-        if (rel.isEmpty() || rel.endsWith("/")) {
-            rel += index
-        }
 
         // 安全：绝不允许通过 ".." 进行目录穿越、逃出所服务的 root 目录。
         // 一旦相对路径里出现 ".."，直接放行（next）而不去读文件。
         if (rel.contains("..")) {
             next()
             return
+        }
+
+        // 目录处理:URL 不以 "/" 结尾、但映射到的真实路径是目录时,默认 301 重定向到
+        // 带斜杠的版本(redirect=true);redirect=false 则交给 next 放行(视作未命中)。
+        // 至于 URL 已带 "/" 的目录请求,则在下面追加 index 后按文件处理。
+        let endsWithSlash = rel.isEmpty() || rel.endsWith("/")
+        if (!endsWithSlash) {
+            let probe = "${base}/${rel}"
+            if (exists(probe) && isDirectoryPath(probe)) {
+                if (redirect) {
+                    sendDirectoryRedirect(req, res)
+                } else {
+                    next()
+                }
+                return
+            }
+        }
+
+        // 目录请求(空路径或 URL 以 "/" 结尾)补上默认索引文件。
+        if (endsWithSlash) {
+            rel += index
         }
 
         // 隐藏文件(任一路径段以 "." 开头)按 dotfiles 策略处理。
@@ -112,6 +134,28 @@ func hasDotSegment(rel: String): Bool {
         }
     }
     return false
+}
+
+// 判断给定的文件系统路径是否为目录。基于 FileInfo 的 isDirectory 属性,任何异常
+// (路径不可访问 / 权限不足等)都返回 false,与上层「不存在即放行」的策略一致。
+func isDirectoryPath(path: String): Bool {
+    try {
+        return FileInfo(Path(path)).isDirectory()
+    } catch (_: Exception) {
+        return false
+    }
+}
+
+// 把目录请求(无尾斜杠)301 重定向到带斜杠的版本。优先用 originalUrl(以正确处理
+// 经由挂载点的真实 URL),否则退回到 req.path;并保留查询串。
+func sendDirectoryRedirect(req: HttpRequest, res: HttpResponse): Unit {
+    let originalOrPath = if (!req.originalUrl.isEmpty()) { req.originalUrl } else { req.path }
+    let (pathPart, query) = splitOnce(originalOrPath, "?")
+    var target = pathPart + "/"
+    if (!query.isEmpty()) {
+        target += "?" + query
+    }
+    res.redirect(301, target)
 }
 
 // 根据文件名的扩展名推断 Content-Type；对识别不出的扩展名，回退到通用的

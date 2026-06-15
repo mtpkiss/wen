@@ -57,7 +57,7 @@
 - `jsonParser`(express.json)、`urlencodedParser`(express.urlencoded)、`textParser`
   (express.text)、`rawParser`(express.raw)、`multipart`(文件上传)
 - `staticFiles`(express.static:index / maxAge / dotfiles / etag / lastModified / immutable /
-  setHeaders / ETag / Last-Modified / Range)
+  setHeaders / redirect / ETag / Last-Modified / Range)
 - `cookieParser`、`session`(`MemorySessionStore` + `SessionStore` 接口)
 - `cors`、`helmet`、`compression`(自带 gzip)、`rateLimit`、`logger`、`requestId`、`etag`(动态)
 - `basicAuth` / `bearerAuth`
@@ -81,10 +81,10 @@
 - HTTPS / TLS(`listenHttps`)—— 依赖仓颉 TLS 能力或 FFI;短期替代:nginx 反向代理
 
 ### 中优先级
-- 子应用 `mount` 事件、`app.path()`(注:`Router.mountpath` 已实现)
+- 子应用 `mount` 事件、`app.path()`(注:`Router.mountpath` 已实现;评估后判定收益不足以
+  建一套事件系统/父链遍历,故除非有明确需求否则不做)
 - `res.setTimeout()` / 请求级超时(依赖 Timer API)
 - `trust proxy` 的完整语义(目前仅布尔 `trustProxy`)
-- 静态文件选项 `redirect`(目录请求补 "/" 重定向);其余开关化已完成
 
 ### 低优先级 / 生态
 - WebSocket(建议作为独立模块,需握手 + 帧编解码)
@@ -100,7 +100,8 @@
 2. ✅ **已完成(2026-06-15)**:`req.fresh` / `req.stale`、`req.range(size)`(含 `req.res` 链接)、
    `req.signedCookies()` 整表映射。
 3. ✅ **已完成(2026-06-15)**:`res.charset`、静态文件选项(`etag` / `lastModified` /
-   `immutable` / `setHeaders`)、`Router.mountpath`、`case sensitive routing` / `strict routing`
+   `immutable` / `setHeaders` / `redirect`)、`Router.mountpath`、
+   `case sensitive routing` / `strict routing`
    (默认值匹配 Express:大小写无关、尾部斜杠无关)。
 4. **需先调研仓颉标准库**:TLS(HTTPS)、Timer(超时)、process(集群)——
    确认 API 可用性后,决定原生实现还是外部替代(nginx 等)。
