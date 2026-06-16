@@ -37,7 +37,7 @@ class ReqProxyTest {
         let req = HttpRequest("GET", "/");
         req.app = Some(app)
         req.ip = "10.0.0.9"
-        req.headers["x-forwarded-for"] = "1.1.1.1, 2.2.2.2"
+        req.headers["x-forwarded-for"] = "10.0.0.1, 10.0.0.2"
         @Assert(req.ips().size == 0)
         @Assert(req.clientIp() == "10.0.0.9")
     }
@@ -50,12 +50,12 @@ class ReqProxyTest {
         let req = HttpRequest("GET", "/");
         req.app = Some(app)
         req.ip = "10.0.0.9"
-        req.headers["x-forwarded-for"] = "1.1.1.1, 2.2.2.2"
+        req.headers["x-forwarded-for"] = "10.0.0.1, 10.0.0.2"
         let chain = req.ips()
         @Assert(chain.size == 2)
-        @Assert(chain[0] == "1.1.1.1")
-        @Assert(chain[1] == "2.2.2.2")
-        @Assert(req.clientIp() == "1.1.1.1")
+        @Assert(chain[0] == "10.0.0.1")
+        @Assert(chain[1] == "10.0.0.2")
+        @Assert(req.clientIp() == "10.0.0.1")
     }
 
     // 信任代理时,hostname 采用 X-Forwarded-Host。
