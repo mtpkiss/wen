@@ -41,13 +41,6 @@ class Segment {
         this.optional = false
     }
 
-    init(kind: SegKind, value: String, constraint: ?Regex) {
-        this.kind = kind
-        this.value = value
-        this.constraint = constraint
-        this.optional = false
-    }
-
     init(kind: SegKind, value: String, constraint: ?Regex, optional: Bool) {
         this.kind = kind
         this.value = value

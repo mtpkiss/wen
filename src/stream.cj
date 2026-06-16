@@ -41,16 +41,7 @@ public class StreamWriter {
         ensureDateHeader(res)
         applyCharsetIfSet(res)
         match (res.conn) {
-            case Some(c) =>
-                var head = "HTTP/1.1 ${res.statusCode} ${res.statusMessage}\r\n"
-                for ((k, v) in res.headers) {
-                    head += "${k}: ${v}\r\n"
-                }
-                for (ck in res.setCookies) {
-                    head += "Set-Cookie: ${ck}\r\n"
-                }
-                head += "\r\n"
-                c.write(head.toArray())
+            case Some(c) => c.write(buildHeadBlock(res).toArray())
             case None => ()
         }
     }

@@ -300,18 +300,8 @@ public class HttpServer {
             real
         }
 
-        var head = "HTTP/1.1 ${res.statusCode} ${res.statusMessage}\r\n"
-        for ((k, v) in res.headers) {
-            head += "${k}: ${v}\r\n"
-        }
-        // 每个待发送的 cookie 都单独占一行 Set-Cookie 头。HTTP 不允许把多个
-        // cookie 合并到一个 Set-Cookie 头里，故逐个输出独立的报文头行。
-        for (c in res.setCookies) {
-            head += "Set-Cookie: ${c}\r\n"
-        }
-        head += "\r\n"
-
-        let headBytes = head.toArray()
+        // 状态行 + 响应头 + Set-Cookie 行 + 终止空行(与流式响应共用 buildHeadBlock)。
+        let headBytes = buildHeadBlock(res).toArray()
         let total = Array<UInt8>(headBytes.size + bodyBytes.size, repeat: 0)
         var i = 0
         while (i < headBytes.size) {
@@ -325,6 +315,21 @@ public class HttpServer {
         }
         return total
     }
+}
+
+// 构造 HTTP 响应的头部块字符串:状态行 + 各响应头 + 各 Set-Cookie 行(HTTP 不允许把多个
+// cookie 合并到一行,故逐条输出)+ 终止空行。serializeResponse 与流式响应的 StreamWriter.begin
+// 共用它,避免两处重复拼装。
+func buildHeadBlock(res: HttpResponse): String {
+    var head = "HTTP/1.1 ${res.statusCode} ${res.statusMessage}\r\n"
+    for ((k, v) in res.headers) {
+        head += "${k}: ${v}\r\n"
+    }
+    for (c in res.setCookies) {
+        head += "Set-Cookie: ${c}\r\n"
+    }
+    head += "\r\n"
+    return head
 }
 
 /*
