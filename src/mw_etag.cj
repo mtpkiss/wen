@@ -16,45 +16,47 @@ package wen
  * 压缩(带 Content-Encoding)。
  */
 public func etag(): Middleware {
-    return { req: HttpRequest, res: HttpResponse, next: Next =>
-        next()
+    return {
+        req: HttpRequest, res: HttpResponse, next: Next =>
+            next()
 
-        if (res.hijacked || !res.finished) {
-            return
-        }
-        if (res.statusCode != 200) {
-            return
-        }
-        if (req.method != HttpMethod.GET && req.method != HttpMethod.HEAD) {
-            return
-        }
-        // 已有 ETag(如文件响应已设)或已被压缩,则不处理。
-        match (res.get("ETag")) {
-            case Some(_) => return
-            case None => ()
-        }
-        match (res.get("Content-Encoding")) {
-            case Some(_) => return
-            case None => ()
-        }
-
-        let raw = match (res.bodyBytes) {
-            case Some(b) => b
-            case None => res.body.toArray()
-        }
-        if (raw.size == 0) {
-            return
-        }
-
-        let tag = computeETag(raw)
-        res.headers["ETag"] = tag
-
-        // 条件请求:If-None-Match 命中当前 ETag -> 回 304(空体;ETag 头保留)。
-        match (req.header("if-none-match")) {
-            case Some(inm) => if (etagMatches(inm, tag)) {
-                send304(res)
+            if (res.hijacked || !res.finished) {
+                return
             }
-            case None => ()
-        }
+            if (res.statusCode != 200) {
+                return
+            }
+            if (req.method != HttpMethod.GET && req.method != HttpMethod.HEAD) {
+                return
+            }
+            // 已有 ETag(如文件响应已设)或已被压缩,则不处理。
+            match (res.get("ETag")) {
+                case Some(_) => return
+                case None => ()
+            }
+            match (res.get("Content-Encoding")) {
+                case Some(_) => return
+                case None => ()
+            }
+
+            let raw = match (res.bodyBytes) {
+                case Some(b) => b
+                case None => res.body.toArray()
+            }
+            if (raw.size == 0) {
+                return
+            }
+
+            let tag = computeETag(raw)
+            res.headers["ETag"] = tag
+
+            // 条件请求:If-None-Match 命中当前 ETag -> 回 304(空体;ETag 头保留)。
+            match (req.header("if-none-match")) {
+                case Some(inm) =>
+                    if (etagMatches(inm, tag)) {
+                        send304(res)
+                    }
+                case None => ()
+            }
     }
 }

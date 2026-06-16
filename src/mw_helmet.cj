@@ -29,30 +29,31 @@ public func helmet(
     coop!: String = "",
     corp!: String = ""
 ): Middleware {
-    return { _: HttpRequest, res: HttpResponse, next: Next =>
-        if (!csp.isEmpty()) {
-            res.headers["Content-Security-Policy"] = csp
-        }
-        if (noSniff) {
-            res.headers["X-Content-Type-Options"] = "nosniff"
-        }
-        if (!frameOptions.isEmpty()) {
-            res.headers["X-Frame-Options"] = frameOptions
-        }
-        if (!referrerPolicy.isEmpty()) {
-            res.headers["Referrer-Policy"] = referrerPolicy
-        }
-        if (hsts) {
-            // max-age 约 180 天,并涵盖子域名。
-            res.headers["Strict-Transport-Security"] = "max-age=15552000; includeSubDomains"
-        }
-        if (!coop.isEmpty()) {
-            res.headers["Cross-Origin-Opener-Policy"] = coop
-        }
-        if (!corp.isEmpty()) {
-            res.headers["Cross-Origin-Resource-Policy"] = corp
-        }
+    return {
+        _: HttpRequest, res: HttpResponse, next: Next =>
+            if (!csp.isEmpty()) {
+                res.headers["Content-Security-Policy"] = csp
+            }
+            if (noSniff) {
+                res.headers["X-Content-Type-Options"] = "nosniff"
+            }
+            if (!frameOptions.isEmpty()) {
+                res.headers["X-Frame-Options"] = frameOptions
+            }
+            if (!referrerPolicy.isEmpty()) {
+                res.headers["Referrer-Policy"] = referrerPolicy
+            }
+            if (hsts) {
+                // max-age 约 180 天,并涵盖子域名。
+                res.headers["Strict-Transport-Security"] = "max-age=15552000; includeSubDomains"
+            }
+            if (!coop.isEmpty()) {
+                res.headers["Cross-Origin-Opener-Policy"] = coop
+            }
+            if (!corp.isEmpty()) {
+                res.headers["Cross-Origin-Resource-Policy"] = corp
+            }
 
-        next()
+            next()
     }
 }

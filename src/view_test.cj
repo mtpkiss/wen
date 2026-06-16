@@ -15,22 +15,35 @@ class ViewTest {
 
         let app = wen()
         app.set("views", ".")
-        app.engine("tmpl", { _: String, data: JsonValue =>
-            // 自定义引擎:无视模板内容,直接据数据产出。
-            let title = match (data.get("title")) {
-                case Some(v) => match (v.asString()) { case Some(s) => s; case None => "?" }
-                case None => "?"
+        app.engine(
+            "tmpl",
+            {
+                _: String, data: JsonValue =>
+                    // 自定义引擎:无视模板内容,直接据数据产出。
+                    let title = match (data.get("title")) {
+                        case Some(v) => match (v.asString()) {
+                            case Some(s) => s;
+                            case None => "?"
+                        }
+                        case None => "?"
+                    }
+                    "CUSTOM:${title}"
             }
-            "CUSTOM:${title}"
-        })
-        app.get("/c", { _: HttpRequest, res: HttpResponse =>
-            res.render("._cjx_view_custom.tmpl", JsonObj().put("title", "Hi").build())
+        )
+        app.get("/c", {
+            _: HttpRequest, res: HttpResponse => res.render("._cjx_view_custom.tmpl",
+                JsonObj().put("title", "Hi").build())
         })
 
-        let req = HttpRequest("GET", "/c"); req.path = "/c"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/c");
+        req.path = "/c"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "CUSTOM:Hi")
-        let ct = match (res.headers.get("Content-Type")) { case Some(v) => v; case None => "" }
+        let ct = match (res.headers.get("Content-Type")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(ct.contains("text/html"))
         remove(path)
     }
@@ -44,19 +57,28 @@ class ViewTest {
         let app = wen()
         app.set("views", ".")
         app.set("view engine", "html")
-        app.engine("html", { _: String, data: JsonValue =>
-            let name = match (data.get("name")) {
-                case Some(v) => match (v.asString()) { case Some(s) => s; case None => "?" }
-                case None => "?"
+        app.engine(
+            "html",
+            {
+                _: String, data: JsonValue =>
+                    let name = match (data.get("name")) {
+                        case Some(v) => match (v.asString()) {
+                            case Some(s) => s;
+                            case None => "?"
+                        }
+                        case None => "?"
+                    }
+                    "<p>Hello, ${name}</p>"
             }
-            "<p>Hello, ${name}</p>"
-        })
-        app.get("/hello", { _: HttpRequest, res: HttpResponse =>
-            res.render("._cjx_view_hello", JsonObj().put("name", "张三").build())
+        )
+        app.get("/hello", {
+            _: HttpRequest, res: HttpResponse => res.render("._cjx_view_hello", JsonObj().put("name", "张三").build())
         })
 
-        let req = HttpRequest("GET", "/hello"); req.path = "/hello"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/hello");
+        req.path = "/hello"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 200)
         @Assert(res.body == "<p>Hello, 张三</p>")
         remove(path)
@@ -67,10 +89,11 @@ class ViewTest {
     func testUnregisteredEngineThrows(): Unit {
         let app = wen()
         app.set("views", ".")
-        app.get("/x", { _: HttpRequest, res: HttpResponse =>
-            res.render("missing.html")
+        app.get("/x", {
+            _: HttpRequest, res: HttpResponse => res.render("missing.html")
         })
-        let req = HttpRequest("GET", "/x"); req.path = "/x"
+        let req = HttpRequest("GET", "/x");
+        req.path = "/x"
         let res = HttpResponse()
         app.handle(req, res)
         @Assert(res.statusCode == 500)

@@ -31,13 +31,19 @@ class RequestIdGen {
 // 构造请求 ID 中间件。headerName 为读取/写回所用的头名(默认 X-Request-Id)。
 public func requestId(headerName!: String = "X-Request-Id"): Middleware {
     let gen = RequestIdGen()
-    return { req: HttpRequest, res: HttpResponse, next: Next =>
-        let id = match (req.header(headerName)) {
-            case Some(v) => if (v.trimAscii().isEmpty()) { gen.next() } else { v.trimAscii() }
-            case None => gen.next()
-        }
-        req.attributes["requestId"] = id
-        res.headers[headerName] = id
-        next()
+    return {
+        req: HttpRequest, res: HttpResponse, next: Next =>
+            let id = match (req.header(headerName)) {
+                case Some(v) =>
+                    if (v.trimAscii().isEmpty()) {
+                        gen.next()
+                    } else {
+                        v.trimAscii()
+                    }
+                case None => gen.next()
+            }
+            req.attributes["requestId"] = id
+            res.headers[headerName] = id
+            next()
     }
 }

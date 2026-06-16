@@ -15,17 +15,18 @@ import std.time.*
 
 // 默认日志:每个请求完成后打 "METHOD path status durationMs"。
 public func logger(): Middleware {
-    return logger({ req: HttpRequest, res: HttpResponse, ms: Int64 =>
-        "${req.method} ${req.path} ${res.statusCode} ${ms}ms"
+    return logger({
+        req: HttpRequest, res: HttpResponse, ms: Int64 => "${req.method} ${req.path} ${res.statusCode} ${ms}ms"
     })
 }
 
 // 自定义日志:format 拿到 (请求, 响应, 处理耗时毫秒),返回要打印的一整行。
 public func logger(format: (HttpRequest, HttpResponse, Int64) -> String): Middleware {
-    return { req: HttpRequest, res: HttpResponse, next: Next =>
-        let start = DateTime.now()
-        next()
-        let elapsedMs = (DateTime.now() - start).toMilliseconds()
-        println(format(req, res, elapsedMs))
+    return {
+        req: HttpRequest, res: HttpResponse, next: Next =>
+            let start = DateTime.now()
+            next()
+            let elapsedMs = (DateTime.now() - start).toMilliseconds()
+            println(format(req, res, elapsedMs))
     }
 }

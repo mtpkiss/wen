@@ -9,7 +9,6 @@ import std.unittest.testmacro.*
  * 测试 staticFiles 的 redirect 选项:目录请求未带尾斜杠时是否 301 重定向。
  * 默认 true(对齐 Express 行为);设为 false 时改为放行(next)。
  */
-
 @Test
 class StaticRedirectTest {
     // 建立结构: <dir>/sub/index.html(下面所有用例共享)。
@@ -28,9 +27,15 @@ class StaticRedirectTest {
 
     func teardown(dir: String): Unit {
         let sub = "${dir}/sub"
-        if (exists("${sub}/index.html")) { remove("${sub}/index.html") }
-        if (exists(sub)) { remove(sub) }
-        if (exists(dir)) { remove(dir) }
+        if (exists("${sub}/index.html")) {
+            remove("${sub}/index.html")
+        }
+        if (exists(sub)) {
+            remove(sub)
+        }
+        if (exists(dir)) {
+            remove(dir)
+        }
     }
 
     // 默认(redirect=true):请求 /sub(无尾斜杠)且映射到目录 -> 301 到 /sub/。
@@ -38,9 +43,12 @@ class StaticRedirectTest {
     func testDirRedirectDefault(): Unit {
         let dir = setupTree()
         let mw = staticFiles(dir)
-        let req = HttpRequest("GET", "/sub"); req.path = "/sub"; req.originalUrl = "/sub"
-        let res = HttpResponse(); res.req = Some(req)
-        mw(req, res, { => () })
+        let req = HttpRequest("GET", "/sub");
+        req.path = "/sub"
+        req.originalUrl = "/sub"
+        let res = HttpResponse();
+        res.req = Some(req)
+        mw(req, res, {=> ()})
         @Assert(res.statusCode == 301)
         match (res.get("Location")) {
             case Some(v) => @Assert(v == "/sub/")
@@ -57,8 +65,9 @@ class StaticRedirectTest {
         let req = HttpRequest("GET", "/sub?x=1&y=2")
         req.path = "/sub"
         req.originalUrl = "/sub?x=1&y=2"
-        let res = HttpResponse(); res.req = Some(req)
-        mw(req, res, { => () })
+        let res = HttpResponse();
+        res.req = Some(req)
+        mw(req, res, {=> ()})
         @Assert(res.statusCode == 301)
         match (res.get("Location")) {
             case Some(v) => @Assert(v == "/sub/?x=1&y=2")
@@ -76,8 +85,9 @@ class StaticRedirectTest {
         let req = HttpRequest("GET", "/static/sub")
         req.path = "/sub"
         req.originalUrl = "/static/sub"
-        let res = HttpResponse(); res.req = Some(req)
-        mw(req, res, { => () })
+        let res = HttpResponse();
+        res.req = Some(req)
+        mw(req, res, {=> ()})
         @Assert(res.statusCode == 301)
         match (res.get("Location")) {
             case Some(v) => @Assert(v == "/static/sub/")
@@ -91,10 +101,13 @@ class StaticRedirectTest {
     func testDirRedirectDisabled(): Unit {
         let dir = setupTree()
         let mw = staticFiles(dir, redirect: false)
-        let req = HttpRequest("GET", "/sub"); req.path = "/sub"; req.originalUrl = "/sub"
-        let res = HttpResponse(); res.req = Some(req)
+        let req = HttpRequest("GET", "/sub");
+        req.path = "/sub"
+        req.originalUrl = "/sub"
+        let res = HttpResponse();
+        res.req = Some(req)
         // Cangjie 闭包无法捕获外部 var,这里用 req.attributes 做信号。
-        mw(req, res, { => req.attributes["nextCalled"] = "1" })
+        mw(req, res, {=> req.attributes["nextCalled"] = "1"})
         match (req.attribute("nextCalled")) {
             case Some(v) => @Assert(v == "1")
             case None => @Assert(false)
@@ -108,9 +121,12 @@ class StaticRedirectTest {
     func testDirWithTrailingSlashServesIndex(): Unit {
         let dir = setupTree()
         let mw = staticFiles(dir)
-        let req = HttpRequest("GET", "/sub/"); req.path = "/sub/"; req.originalUrl = "/sub/"
-        let res = HttpResponse(); res.req = Some(req)
-        mw(req, res, { => () })
+        let req = HttpRequest("GET", "/sub/");
+        req.path = "/sub/"
+        req.originalUrl = "/sub/"
+        let res = HttpResponse();
+        res.req = Some(req)
+        mw(req, res, {=> ()})
         @Assert(res.statusCode == 200)
         match (res.bodyBytes) {
             case Some(b) => @Assert(String.fromUtf8(b).contains("home"))
@@ -125,9 +141,12 @@ class StaticRedirectTest {
         let dir = setupTree()
         File.writeTo("${dir}/plain.txt", "hello".toArray())
         let mw = staticFiles(dir)
-        let req = HttpRequest("GET", "/plain.txt"); req.path = "/plain.txt"; req.originalUrl = "/plain.txt"
-        let res = HttpResponse(); res.req = Some(req)
-        mw(req, res, { => () })
+        let req = HttpRequest("GET", "/plain.txt");
+        req.path = "/plain.txt"
+        req.originalUrl = "/plain.txt"
+        let res = HttpResponse();
+        res.req = Some(req)
+        mw(req, res, {=> ()})
         @Assert(res.statusCode == 200)
         match (res.bodyBytes) {
             case Some(b) => @Assert(String.fromUtf8(b) == "hello")

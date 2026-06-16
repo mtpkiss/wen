@@ -89,19 +89,29 @@ class NegotiationTest {
     @TestCase
     func testResFormatPicksJson(): Unit {
         let app = wen()
-        app.get("/data", { _: HttpRequest, res: HttpResponse =>
-            res.format([
-                ("html", { => res.send("<p>hi</p>") }),
-                ("json", { => res.json("{\"hi\":true}") })
-            ])
+        app.get("/data", {
+            _: HttpRequest, res: HttpResponse => res.format(
+                [
+                    ("html", {=> res.send("<p>hi</p>")}),
+                    ("json", {=> res.json("{\"hi\":true}")})
+                ]
+            )
         })
-        let req = HttpRequest("GET", "/data"); req.path = "/data"
+        let req = HttpRequest("GET", "/data");
+        req.path = "/data"
         req.headers["accept"] = "application/json"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "{\"hi\":true}")
-        let ct = match (res.headers.get("Content-Type")) { case Some(v) => v; case None => "" }
+        let ct = match (res.headers.get("Content-Type")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(ct.contains("application/json"))
-        let vary = match (res.headers.get("Vary")) { case Some(v) => v; case None => "" }
+        let vary = match (res.headers.get("Vary")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(vary.contains("Accept"))
     }
 
@@ -109,15 +119,19 @@ class NegotiationTest {
     @TestCase
     func testResFormat406(): Unit {
         let app = wen()
-        app.get("/data", { _: HttpRequest, res: HttpResponse =>
-            res.format([
-                ("html", { => res.send("<p>hi</p>") }),
-                ("json", { => res.json("{}") })
-            ])
+        app.get("/data", {
+            _: HttpRequest, res: HttpResponse => res.format(
+                [
+                    ("html", {=> res.send("<p>hi</p>")}),
+                    ("json", {=> res.json("{}")})
+                ]
+            )
         })
-        let req = HttpRequest("GET", "/data"); req.path = "/data"
+        let req = HttpRequest("GET", "/data");
+        req.path = "/data"
         req.headers["accept"] = "text/plain"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 406)
     }
 
@@ -125,15 +139,19 @@ class NegotiationTest {
     @TestCase
     func testResFormatDefault(): Unit {
         let app = wen()
-        app.get("/data", { _: HttpRequest, res: HttpResponse =>
-            res.format([
-                ("json", { => res.json("{}") }),
-                ("default", { => res.send("fallback") })
-            ])
+        app.get("/data", {
+            _: HttpRequest, res: HttpResponse => res.format(
+                [
+                    ("json", {=> res.json("{}")}),
+                    ("default", {=> res.send("fallback")})
+                ]
+            )
         })
-        let req = HttpRequest("GET", "/data"); req.path = "/data"
+        let req = HttpRequest("GET", "/data");
+        req.path = "/data"
         req.headers["accept"] = "text/plain"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "fallback")
     }
 }

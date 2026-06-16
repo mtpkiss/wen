@@ -32,7 +32,7 @@ func fileExt(name: String): ?String {
     let bytes = base.toArray()
     var i = bytes.size - 1
     while (i >= 0) {
-        if (bytes[i] == UInt8(46)) {     // '.'
+        if (bytes[i] == UInt8(46)) { // '.'
             // 位于开头的点(隐藏文件,如 ".bashrc")不算扩展名分隔符;结尾的点
             // 也不算(无实际扩展名)。其余位置才视为扩展名起点。
             if (i == 0 || i == bytes.size - 1) {

@@ -25,21 +25,29 @@ class MultipartTest {
         appendStr(buf, "Content-Disposition: form-data; name=\"avatar\"; filename=\"a.png\"\r\n")
         appendStr(buf, "Content-Type: image/png\r\n\r\n")
         // 含 0x00 与 0xFF 的二进制内容,验证逐字节完好(非法 UTF-8)。
-        buf.add(UInt8(137)); buf.add(UInt8(0)); buf.add(UInt8(255)); buf.add(UInt8(80))
+        buf.add(UInt8(137));
+        buf.add(UInt8(0));
+        buf.add(UInt8(255));
+        buf.add(UInt8(80))
         appendStr(buf, "\r\n")
         appendStr(buf, "--${boundary}--\r\n")
 
         let app = wen()
         app.use(multipart())
-        app.post("/upload", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        app.post("/upload", {_: HttpRequest, res: HttpResponse => res.send("ok")})
 
-        let req = HttpRequest("POST", "/upload"); req.path = "/upload"
+        let req = HttpRequest("POST", "/upload");
+        req.path = "/upload"
         req.headers["content-type"] = "multipart/form-data; boundary=${boundary}"
         req.bodyBytes = buf.toArray()
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
 
         // 文本字段(含多字节 UTF-8)进入 attributes。
-        let title = match (req.attribute("title")) { case Some(v) => v; case None => "" }
+        let title = match (req.attribute("title")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Assert(title == "Hello 世界")
 
         // 文件元数据与字节逐一核对。
@@ -69,17 +77,22 @@ class MultipartTest {
         appendStr(buf, "BBBB\r\n")
         appendStr(buf, "--${boundary}--\r\n")
 
-        let req = HttpRequest("POST", "/u"); req.path = "/u"
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
         req.headers["content-type"] = "multipart/form-data; boundary=${boundary}"
         req.bodyBytes = buf.toArray()
-        let app = wen(); app.use(multipart())
-        app.post("/u", { _: HttpRequest, res: HttpResponse => res.send("ok") })
-        let res = HttpResponse(); app.handle(req, res)
+        let app = wen();
+        app.use(multipart())
+        app.post("/u", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let res = HttpResponse();
+        app.handle(req, res)
 
         @Assert(req.files.size == 2)
         // file() 取同名第一个。
         match (req.file("docs")) {
-            case Some(f) => @Assert(f.filename == "x.txt"); @Assert(f.text() == "AAA")
+            case Some(f) =>
+                @Assert(f.filename == "x.txt")
+                @Assert(f.text() == "AAA")
             case None => @Assert(false)
         }
         match (req.file("nope")) {
@@ -93,11 +106,13 @@ class MultipartTest {
     func testNonMultipartPassthrough(): Unit {
         let app = wen()
         app.use(multipart())
-        app.post("/u", { _: HttpRequest, res: HttpResponse => res.send("ok") })
-        let req = HttpRequest("POST", "/u"); req.path = "/u"
+        app.post("/u", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
         req.headers["content-type"] = "application/json"
         req.body = "{}"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "ok")
         @Assert(req.files.size == 0)
     }
@@ -112,20 +127,22 @@ class MultipartTest {
         appendStr(buf, "v\r\n")
         appendStr(buf, "--${boundary}--\r\n")
 
-        let req = HttpRequest("POST", "/u"); req.path = "/u"
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
         req.headers["content-type"] = "multipart/form-data; boundary=\"${boundary}\""
         req.bodyBytes = buf.toArray()
-        let app = wen(); app.use(multipart())
-        app.post("/u", { _: HttpRequest, res: HttpResponse => res.send("ok") })
-        let res = HttpResponse(); app.handle(req, res)
+        let app = wen();
+        app.use(multipart())
+        app.post("/u", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(req.attribute("k") == Some("v"))
     }
 
     // saveTo 落盘后内容与上传字节一致。
     @TestCase
     func testSaveTo(): Unit {
-        let f = UploadedFile("a", "a.bin", "application/octet-stream",
-            [UInt8(1), UInt8(2), UInt8(3), UInt8(250)])
+        let f = UploadedFile("a", "a.bin", "application/octet-stream", [UInt8(1), UInt8(2), UInt8(3), UInt8(250)])
         let path = "._cjx_upload_save.bin"
         f.saveTo(path)
         let back = File.readFrom(path)

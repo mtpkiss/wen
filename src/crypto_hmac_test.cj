@@ -33,6 +33,6 @@ class CryptoHmacTest {
     func testHmacLongKey(): Unit {
         let longKey = "0123456789012345678901234567890123456789012345678901234567890123456789"
         let sig = hmacSha256Hex(longKey, "data")
-        @Assert(sig.size == 64)        // 32 字节 -> 64 个十六进制字符
+        @Assert(sig.size == 64) // 32 字节 -> 64 个十六进制字符
     }
 }

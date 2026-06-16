@@ -21,8 +21,8 @@ class AppTest {
     @TestCase
     func testBasicGet(): Unit {
         let app = wen()
-        app.get("/", { req: HttpRequest, res: HttpResponse =>
-            res.send("hi")
+        app.get("/", {
+            req: HttpRequest, res: HttpResponse => res.send("hi")
         })
         let req = HttpRequest("GET", "/")
         req.path = "/"
@@ -37,16 +37,20 @@ class AppTest {
     @TestCase
     func testParamRoute(): Unit {
         let app = wen()
-        app.get("/users/:id", { req: HttpRequest, res: HttpResponse =>
-            // req.param 返回 ?String（Option），这里用 match 显式解包，
-            // 而不依赖在 Option 上使用 ?? 运算符。
-            var id = "?"
-            match (req.param("id")) {
-                case Some(v) => id = v
-                case None => ()
+        app.get(
+            "/users/:id",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    // req.param 返回 ?String（Option），这里用 match 显式解包，
+                    // 而不依赖在 Option 上使用 ?? 运算符。
+                    var id = "?"
+                    match (req.param("id")) {
+                        case Some(v) => id = v
+                        case None => ()
+                    }
+                    res.json("{\"id\":\"${id}\"}")
             }
-            res.json("{\"id\":\"${id}\"}")
-        })
+        )
         let req = HttpRequest("GET", "/users/42")
         req.path = "/users/42"
         let res = HttpResponse()
@@ -61,8 +65,8 @@ class AppTest {
     @TestCase
     func testUnmatchedRouteIs404(): Unit {
         let app = wen()
-        app.get("/", { req: HttpRequest, res: HttpResponse =>
-            res.send("hi")
+        app.get("/", {
+            req: HttpRequest, res: HttpResponse => res.send("hi")
         })
         let req = HttpRequest("GET", "/nope")
         req.path = "/nope"
@@ -101,12 +105,21 @@ class AppTest {
     @TestCase
     func testParamUrlDecodedUtf8(): Unit {
         let app = wen()
-        app.get("/u/:name", { req: HttpRequest, res: HttpResponse =>
-            let n = match (req.param("name")) { case Some(v) => v; case None => "?" }
-            res.send(n)
-        })
-        let req = HttpRequest("GET", "/u/%E4%B8%AD"); req.path = "/u/%E4%B8%AD"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get(
+            "/u/:name",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let n = match (req.param("name")) {
+                        case Some(v) => v;
+                        case None => "?"
+                    }
+                    res.send(n)
+            }
+        )
+        let req = HttpRequest("GET", "/u/%E4%B8%AD");
+        req.path = "/u/%E4%B8%AD"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body, "中")
     }
 
@@ -124,8 +137,8 @@ class AppTest {
     @TestCase
     func testMountStripsPrefix(): Unit {
         let app = wen()
-        app.use("/static", { req: HttpRequest, res: HttpResponse, _: Next =>
-            res.send(req.path)
+        app.use("/static", {
+            req: HttpRequest, res: HttpResponse, _: Next => res.send(req.path)
         })
         let req = HttpRequest("GET", "/static/css/app.css")
         req.path = "/static/css/app.css"
@@ -140,9 +153,10 @@ class AppTest {
     @TestCase
     func testRouteChaining(): Unit {
         let app = wen()
-        app.route("/book")
-           .get({ req: HttpRequest, res: HttpResponse => res.send("list") })
-           .post({ req: HttpRequest, res: HttpResponse => res.send("create") })
+        app
+            .route("/book")
+            .get({req: HttpRequest, res: HttpResponse => res.send("list")})
+            .post({req: HttpRequest, res: HttpResponse => res.send("create")})
 
         let getReq = HttpRequest("GET", "/book")
         getReq.path = "/book"
@@ -166,23 +180,32 @@ class AppTest {
     @TestCase
     func testReqLocalsTyped(): Unit {
         let app = wen()
-        app.use({ req: HttpRequest, _: HttpResponse, next: Next =>
-            req.setLocal("user", StashedUser("alice"))
-            next()
-        })
-        app.get("/", { req: HttpRequest, res: HttpResponse =>
-            var name = "?"
-            match (req.local("user")) {
-                case Some(v) => match (v as StashedUser) {
-                    case Some(u) => name = u.name
-                    case None => ()
-                }
-                case None => ()
+        app.use(
+            {
+                req: HttpRequest, _: HttpResponse, next: Next =>
+                    req.setLocal("user", StashedUser("alice"))
+                    next()
             }
-            res.send(name)
-        })
-        let req = HttpRequest("GET", "/"); req.path = "/"
-        let res = HttpResponse(); app.handle(req, res)
+        )
+        app.get(
+            "/",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    var name = "?"
+                    match (req.local("user")) {
+                        case Some(v) => match (v as StashedUser) {
+                            case Some(u) => name = u.name
+                            case None => ()
+                        }
+                        case None => ()
+                    }
+                    res.send(name)
+            }
+        )
+        let req = HttpRequest("GET", "/");
+        req.path = "/"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body, "alice")
     }
 
@@ -213,18 +236,29 @@ class AppTest {
     @TestCase
     func testParamConstraintMatches(): Unit {
         let app = wen()
-        app.get("/users/:id(\\d+)", { req: HttpRequest, res: HttpResponse =>
-            let id = match (req.param("id")) { case Some(v) => v; case None => "?" }
-            res.send(id)
-        })
-        let ok = HttpRequest("GET", "/users/42"); ok.path = "/users/42"
-        let okRes = HttpResponse(); app.handle(ok, okRes)
+        app.get(
+            "/users/:id(\\d+)",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let id = match (req.param("id")) {
+                        case Some(v) => v;
+                        case None => "?"
+                    }
+                    res.send(id)
+            }
+        )
+        let ok = HttpRequest("GET", "/users/42");
+        ok.path = "/users/42"
+        let okRes = HttpResponse();
+        app.handle(ok, okRes)
         @Assert(okRes.statusCode == 200)
         @Assert(okRes.body, "42")
 
         // 非数字的 id 不满足约束，无法匹配该受约束路由，因此返回 404。
-        let bad = HttpRequest("GET", "/users/abc"); bad.path = "/users/abc"
-        let badRes = HttpResponse(); app.handle(bad, badRes)
+        let bad = HttpRequest("GET", "/users/abc");
+        bad.path = "/users/abc"
+        let badRes = HttpResponse();
+        app.handle(bad, badRes)
         @Assert(badRes.statusCode == 404)
     }
 
@@ -235,15 +269,19 @@ class AppTest {
     @TestCase
     func testParamConstraintFallthrough(): Unit {
         let app = wen()
-        app.get("/p/:n(\\d+)", { _: HttpRequest, res: HttpResponse => res.send("num") })
-        app.get("/p/:n", { _: HttpRequest, res: HttpResponse => res.send("any") })
+        app.get("/p/:n(\\d+)", {_: HttpRequest, res: HttpResponse => res.send("num")})
+        app.get("/p/:n", {_: HttpRequest, res: HttpResponse => res.send("any")})
 
-        let r1 = HttpRequest("GET", "/p/7"); r1.path = "/p/7"
-        let s1 = HttpResponse(); app.handle(r1, s1)
+        let r1 = HttpRequest("GET", "/p/7");
+        r1.path = "/p/7"
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
         @Assert(s1.body, "num")
 
-        let r2 = HttpRequest("GET", "/p/hello"); r2.path = "/p/hello"
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let r2 = HttpRequest("GET", "/p/hello");
+        r2.path = "/p/hello"
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.body, "any")
     }
 
@@ -256,8 +294,14 @@ class AppTest {
         h["X-A"] = "1"
         h["X-B"] = "2"
         res.set(h)
-        let a = match (res.headers.get("X-A")) { case Some(v) => v; case None => "" }
-        let b = match (res.headers.get("X-B")) { case Some(v) => v; case None => "" }
+        let a = match (res.headers.get("X-A")) {
+            case Some(v) => v;
+            case None => ""
+        }
+        let b = match (res.headers.get("X-B")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Assert(a, "1")
         @Assert(b, "2")
     }
@@ -268,12 +312,17 @@ class AppTest {
     @TestCase
     func testMethodNotAllowed(): Unit {
         let app = wen()
-        app.get("/x", { _: HttpRequest, res: HttpResponse => res.send("ok") })
-        app.post("/x", { _: HttpRequest, res: HttpResponse => res.send("made") })
-        let req = HttpRequest("PUT", "/x"); req.path = "/x"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get("/x", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        app.post("/x", {_: HttpRequest, res: HttpResponse => res.send("made")})
+        let req = HttpRequest("PUT", "/x");
+        req.path = "/x"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 405)
-        let allow = match (res.get("Allow")) { case Some(v) => v; case None => "" }
+        let allow = match (res.get("Allow")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(allow.contains("GET"))
         @Expect(allow.contains("POST"))
     }
@@ -284,11 +333,16 @@ class AppTest {
     @TestCase
     func testAutoOptions(): Unit {
         let app = wen()
-        app.get("/x", { _: HttpRequest, res: HttpResponse => res.send("ok") })
-        let req = HttpRequest("OPTIONS", "/x"); req.path = "/x"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get("/x", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("OPTIONS", "/x");
+        req.path = "/x"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 204)
-        let allow = match (res.get("Allow")) { case Some(v) => v; case None => "" }
+        let allow = match (res.get("Allow")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(allow.contains("GET"))
         @Expect(allow.contains("OPTIONS"))
         @Expect(allow.contains("HEAD"))
@@ -300,12 +354,17 @@ class AppTest {
     @TestCase
     func testAutoHead(): Unit {
         let app = wen()
-        app.get("/x", { _: HttpRequest, res: HttpResponse => res.send("hello") })
-        let req = HttpRequest("HEAD", "/x"); req.path = "/x"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get("/x", {_: HttpRequest, res: HttpResponse => res.send("hello")})
+        let req = HttpRequest("HEAD", "/x");
+        req.path = "/x"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 200)
         @Assert(res.body, "")
-        let len = match (res.get("Content-Length")) { case Some(v) => v; case None => "" }
+        let len = match (res.get("Content-Length")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Assert(len, "5")
     }
 
@@ -347,9 +406,11 @@ class AppTest {
     @TestCase
     func testUnknownPathStill404(): Unit {
         let app = wen()
-        app.get("/x", { _: HttpRequest, res: HttpResponse => res.send("ok") })
-        let req = HttpRequest("GET", "/nope"); req.path = "/nope"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get("/x", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("GET", "/nope");
+        req.path = "/nope"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 404)
     }
 
@@ -358,12 +419,21 @@ class AppTest {
     @TestCase
     func testParamUrlDecoded(): Unit {
         let app = wen()
-        app.get("/u/:name", { req: HttpRequest, res: HttpResponse =>
-            let n = match (req.param("name")) { case Some(v) => v; case None => "?" }
-            res.send(n)
-        })
-        let req = HttpRequest("GET", "/u/john%20doe"); req.path = "/u/john%20doe"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get(
+            "/u/:name",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let n = match (req.param("name")) {
+                        case Some(v) => v;
+                        case None => "?"
+                    }
+                    res.send(n)
+            }
+        )
+        let req = HttpRequest("GET", "/u/john%20doe");
+        req.path = "/u/john%20doe"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body, "john doe")
     }
 
@@ -373,12 +443,21 @@ class AppTest {
     func testReqApp(): Unit {
         let app = wen()
         app.set("title", "wen")
-        app.get("/", { req: HttpRequest, res: HttpResponse =>
-            let t = match (req.setting("title")) { case Some(v) => v; case None => "?" }
-            res.send(t)
-        })
-        let req = HttpRequest("GET", "/"); req.path = "/"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get(
+            "/",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let t = match (req.setting("title")) {
+                        case Some(v) => v;
+                        case None => "?"
+                    }
+                    res.send(t)
+            }
+        )
+        let req = HttpRequest("GET", "/");
+        req.path = "/"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body, "wen")
     }
 
@@ -388,7 +467,10 @@ class AppTest {
     func testResGet(): Unit {
         let res = HttpResponse()
         res.set("X-Trace", "abc")
-        let v = match (res.get("X-Trace")) { case Some(x) => x; case None => "" }
+        let v = match (res.get("X-Trace")) {
+            case Some(x) => x;
+            case None => ""
+        }
         @Assert(v, "abc")
     }
 
@@ -404,7 +486,10 @@ class AppTest {
         res.locals["k"] = StashedUser("scoped")
         var a = "?"
         match (app.local("svc")) {
-            case Some(v) => match (v as StashedUser) { case Some(u) => a = u.name; case None => () }
+            case Some(v) => match (v as StashedUser) {
+                case Some(u) => a = u.name
+                case None => ()
+            }
             case None => ()
         }
         @Assert(a, "service")
@@ -417,14 +502,19 @@ class AppTest {
     @TestCase
     func testStreamFallback(): Unit {
         let app = wen()
-        app.get("/s", { _: HttpRequest, res: HttpResponse =>
-            res.stream({ w: StreamWriter =>
-                w.write("a")
-                w.write("b")
-            })
+        app.get("/s", {
+            _: HttpRequest, res: HttpResponse => res.stream(
+                {
+                    w: StreamWriter =>
+                        w.write("a")
+                        w.write("b")
+                }
+            )
         })
-        let req = HttpRequest("GET", "/s"); req.path = "/s"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/s");
+        req.path = "/s"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.hijacked)
         @Assert(res.finished)
         @Assert(res.body, "ab")
@@ -436,16 +526,24 @@ class AppTest {
     @TestCase
     func testSseFrames(): Unit {
         let app = wen()
-        app.get("/events", { _: HttpRequest, res: HttpResponse =>
-            res.sse({ s: SseWriter =>
-                s.send("hello")
-                s.event("tick", "1")
-            })
+        app.get("/events", {
+            _: HttpRequest, res: HttpResponse => res.sse(
+                {
+                    s: SseWriter =>
+                        s.send("hello")
+                        s.event("tick", "1")
+                }
+            )
         })
-        let req = HttpRequest("GET", "/events"); req.path = "/events"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/events");
+        req.path = "/events"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.hijacked)
-        let ct = match (res.headers.get("Content-Type")) { case Some(v) => v; case None => "" }
+        let ct = match (res.headers.get("Content-Type")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(ct.contains("text/event-stream"))
         // 默认事件帧形如 "data: hello\n\n"；命名事件帧形如 "event: tick\n" 紧接 "data: 1\n\n"。
         @Expect(res.body.contains("data: hello\n\n"))
@@ -459,7 +557,10 @@ class AppTest {
     func testHostname(): Unit {
         let req = HttpRequest("GET", "/")
         req.headers["host"] = "example.com:8080"
-        let h = match (req.hostname()) { case Some(v) => v; case None => "?" }
+        let h = match (req.hostname()) {
+            case Some(v) => v;
+            case None => "?"
+        }
         @Assert(h, "example.com")
     }
 
@@ -477,13 +578,22 @@ class AppTest {
     func testCookieParser(): Unit {
         let app = wen()
         app.use(cookieParser())
-        app.get("/", { req: HttpRequest, res: HttpResponse =>
-            let sid = match (req.cookie("sid")) { case Some(v) => v; case None => "?" }
-            res.send(sid)
-        })
-        let req = HttpRequest("GET", "/"); req.path = "/"
+        app.get(
+            "/",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let sid = match (req.cookie("sid")) {
+                        case Some(v) => v;
+                        case None => "?"
+                    }
+                    res.send(sid)
+            }
+        )
+        let req = HttpRequest("GET", "/");
+        req.path = "/"
         req.headers["cookie"] = "sid=abc123; theme=dark"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body, "abc123")
     }
 
@@ -538,7 +648,10 @@ class AppTest {
     func testResMimeType(): Unit {
         let res = HttpResponse()
         res.mimeType("json")
-        let ct = match (res.headers.get("Content-Type")) { case Some(v) => v; case None => "" }
+        let ct = match (res.headers.get("Content-Type")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(ct.contains("application/json"))
     }
 
@@ -549,7 +662,10 @@ class AppTest {
         let res = HttpResponse()
         res.append("Vary", "Accept")
         res.append("Vary", "Origin")
-        let v = match (res.headers.get("Vary")) { case Some(x) => x; case None => "" }
+        let v = match (res.headers.get("Vary")) {
+            case Some(x) => x;
+            case None => ""
+        }
         @Assert(v, "Accept, Origin")
     }
 
@@ -563,7 +679,10 @@ class AppTest {
         let res = HttpResponse()
         res.sendFile(path)
         @Assert(res.finished)
-        let ct = match (res.headers.get("Content-Type")) { case Some(v) => v; case None => "" }
+        let ct = match (res.headers.get("Content-Type")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(ct.contains("text/html"))
         remove(path)
     }
@@ -575,8 +694,8 @@ class AppTest {
     func testSendFileBinary(): Unit {
         let path = "._cjx_sendfile_bin_test.png"
         // PNG 文件签名后接若干并非合法 UTF-8 的字节；这些字节必须原样保留不被破坏。
-        let data: Array<UInt8> = [UInt8(137), UInt8(80), UInt8(78), UInt8(71),
-                                  UInt8(13), UInt8(10), UInt8(26), UInt8(10), UInt8(255), UInt8(200)]
+        let data: Array<UInt8> = [UInt8(137), UInt8(80), UInt8(78), UInt8(71), UInt8(13), UInt8(10), UInt8(26),
+            UInt8(10), UInt8(255), UInt8(200)]
         File.writeTo(path, data)
         let res = HttpResponse()
         res.sendFile(path)
@@ -595,7 +714,10 @@ class AppTest {
                 @Assert(same)
             case None => @Assert(false)
         }
-        let ct = match (res.headers.get("Content-Type")) { case Some(v) => v; case None => "" }
+        let ct = match (res.headers.get("Content-Type")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(ct.contains("image/png"))
         remove(path)
     }
@@ -610,9 +732,10 @@ class AppTest {
         File.writeTo(name, data)
         // 临时文件名以 "." 开头(便于 gitignore),故显式允许 dotfiles 以验证二进制传输。
         let mw = staticFiles(".", dotfiles: "allow")
-        let req = HttpRequest("GET", "/${name}"); req.path = "/${name}"
+        let req = HttpRequest("GET", "/${name}");
+        req.path = "/${name}"
         let res = HttpResponse()
-        mw(req, res, { => () })
+        mw(req, res, {=> ()})
         @Assert(res.finished)
         match (res.bodyBytes) {
             case Some(b) =>
@@ -637,12 +760,14 @@ class AppTest {
     @TestCase
     func testSendFileMissingThrows(): Unit {
         let app = wen()
-        app.get("/f", { _: HttpRequest, res: HttpResponse => res.sendFile("public/nope.xyz") })
-        app.use({ _: Exception, _: HttpRequest, res: HttpResponse, _: Next =>
-            res.status(404).send("no file")
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile("public/nope.xyz")})
+        app.use({
+            _: Exception, _: HttpRequest, res: HttpResponse, _: Next => res.status(404).send("no file")
         })
-        let req = HttpRequest("GET", "/f"); req.path = "/f"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/f");
+        req.path = "/f"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 404)
         @Assert(res.body, "no file")
     }
@@ -653,14 +778,18 @@ class AppTest {
     @TestCase
     func testErrorHandlerCatches(): Unit {
         let app = wen()
-        app.get("/boom", { _: HttpRequest, _: HttpResponse =>
-            throw Exception("kaboom")
+        app.get("/boom", {
+            _: HttpRequest, _: HttpResponse => throw Exception("kaboom")
         })
-        app.use({ e: Exception, _: HttpRequest, res: HttpResponse, _: Next =>
-            res.status(500).json("{\"error\":\"${e.message}\"}")
+        app.use({
+            e: Exception, _: HttpRequest, res: HttpResponse, _: Next => res
+                .status(500)
+                .json("{\"error\":\"${e.message}\"}")
         })
-        let req = HttpRequest("GET", "/boom"); req.path = "/boom"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/boom");
+        req.path = "/boom"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 500)
         @Expect(res.body.contains("kaboom"))
     }
@@ -670,11 +799,13 @@ class AppTest {
     @TestCase
     func testErrorDefault500(): Unit {
         let app = wen()
-        app.get("/boom", { _: HttpRequest, _: HttpResponse =>
-            throw Exception("kaboom")
+        app.get("/boom", {
+            _: HttpRequest, _: HttpResponse => throw Exception("kaboom")
         })
-        let req = HttpRequest("GET", "/boom"); req.path = "/boom"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/boom");
+        req.path = "/boom"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 500)
     }
 
@@ -684,12 +815,14 @@ class AppTest {
     @TestCase
     func testErrorHandlerSkippedOnSuccess(): Unit {
         let app = wen()
-        app.get("/ok", { _: HttpRequest, res: HttpResponse => res.send("fine") })
-        app.use({ _: Exception, _: HttpRequest, res: HttpResponse, _: Next =>
-            res.status(500).send("should-not-run")
+        app.get("/ok", {_: HttpRequest, res: HttpResponse => res.send("fine")})
+        app.use({
+            _: Exception, _: HttpRequest, res: HttpResponse, _: Next => res.status(500).send("should-not-run")
         })
-        let req = HttpRequest("GET", "/ok"); req.path = "/ok"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/ok");
+        req.path = "/ok"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 200)
         @Assert(res.body, "fine")
     }
@@ -701,13 +834,15 @@ class AppTest {
     func testErrorFromMountedRouter(): Unit {
         let app = wen()
         let sub = Router()
-        sub.get("/explode", { _: HttpRequest, _: HttpResponse => throw Exception("sub-fail") })
+        sub.get("/explode", {_: HttpRequest, _: HttpResponse => throw Exception("sub-fail")})
         app.use("/api", sub)
-        app.use({ e: Exception, _: HttpRequest, res: HttpResponse, _: Next =>
-            res.status(500).send(e.message)
+        app.use({
+            e: Exception, _: HttpRequest, res: HttpResponse, _: Next => res.status(500).send(e.message)
         })
-        let req = HttpRequest("GET", "/api/explode"); req.path = "/api/explode"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/api/explode");
+        req.path = "/api/explode"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 500)
         @Assert(res.body, "sub-fail")
     }
@@ -721,24 +856,38 @@ class AppTest {
     func testMountedRouter(): Unit {
         let app = wen()
         let birds = Router()
-        birds.use({ req: HttpRequest, _: HttpResponse, next: Next =>
-            req.attributes["hit"] = "1"
-            next()
-        })
-        birds.get("/", { req: HttpRequest, res: HttpResponse =>
-            let hit = match (req.attribute("hit")) { case Some(v) => v; case None => "0" }
-            res.send("home:${hit}")
-        })
-        birds.get("/about", { _: HttpRequest, res: HttpResponse => res.send("about") })
+        birds.use(
+            {
+                req: HttpRequest, _: HttpResponse, next: Next =>
+                    req.attributes["hit"] = "1"
+                    next()
+            }
+        )
+        birds.get(
+            "/",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let hit = match (req.attribute("hit")) {
+                        case Some(v) => v;
+                        case None => "0"
+                    }
+                    res.send("home:${hit}")
+            }
+        )
+        birds.get("/about", {_: HttpRequest, res: HttpResponse => res.send("about")})
         app.use("/birds", birds)
 
-        let r1 = HttpRequest("GET", "/birds"); r1.path = "/birds"
-        let s1 = HttpResponse(); app.handle(r1, s1)
+        let r1 = HttpRequest("GET", "/birds");
+        r1.path = "/birds"
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
         @Assert(s1.statusCode == 200)
         @Assert(s1.body, "home:1")
 
-        let r2 = HttpRequest("GET", "/birds/about"); r2.path = "/birds/about"
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let r2 = HttpRequest("GET", "/birds/about");
+        r2.path = "/birds/about"
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.statusCode == 200)
         @Assert(s2.body, "about")
     }
@@ -750,11 +899,13 @@ class AppTest {
     func testMountedRouterFallthrough(): Unit {
         let app = wen()
         let birds = Router()
-        birds.get("/about", { _: HttpRequest, res: HttpResponse => res.send("about") })
+        birds.get("/about", {_: HttpRequest, res: HttpResponse => res.send("about")})
         app.use("/birds", birds)
 
-        let req = HttpRequest("GET", "/birds/missing"); req.path = "/birds/missing"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/birds/missing");
+        req.path = "/birds/missing"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 404)
     }
 
@@ -765,14 +916,23 @@ class AppTest {
     func testMountedRouterMergeParams(): Unit {
         let app = wen()
         let sub = Router()
-        sub.get("/info", { req: HttpRequest, res: HttpResponse =>
-            let t = match (req.param("type")) { case Some(v) => v; case None => "?" }
-            res.send(t)
-        })
+        sub.get(
+            "/info",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let t = match (req.param("type")) {
+                        case Some(v) => v;
+                        case None => "?"
+                    }
+                    res.send(t)
+            }
+        )
         app.use("/birds/:type", sub)
 
-        let req = HttpRequest("GET", "/birds/eagle/info"); req.path = "/birds/eagle/info"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/birds/eagle/info");
+        req.path = "/birds/eagle/info"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 200)
         @Assert(res.body, "eagle")
     }
@@ -783,9 +943,9 @@ class AppTest {
     @TestCase
     func testMountRestoresPathForDownstream(): Unit {
         let app = wen()
-        app.use("/api", { _: HttpRequest, _: HttpResponse, next: Next => next() })
-        app.get("/api/health", { req: HttpRequest, res: HttpResponse =>
-            res.send(req.path)
+        app.use("/api", {_: HttpRequest, _: HttpResponse, next: Next => next()})
+        app.get("/api/health", {
+            req: HttpRequest, res: HttpResponse => res.send(req.path)
         })
         let req = HttpRequest("GET", "/api/health")
         req.path = "/api/health"

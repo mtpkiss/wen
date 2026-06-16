@@ -30,11 +30,9 @@ import std.fs.*
 //                   true)。这能让目录内 HTML 的相对路径正确解析(比如 /dir 上的
 //                   <img src="a.png"> 应解析为 /dir/a.png 而非 /a.png)。关闭后目录
 //                   请求一律交给 next()。
-public func staticFiles(root: String, index!: String = "index.html", maxAge!: Int64 = -1,
-                        dotfiles!: String = "ignore", etag!: Bool = true,
-                        lastModified!: Bool = true, immutable!: Bool = false,
-                        setHeaders!: ?(HttpResponse, String) -> Unit = None,
-                        redirect!: Bool = true): Middleware {
+public func staticFiles(root: String, index!: String = "index.html", maxAge!: Int64 = -1, dotfiles!: String = "ignore",
+    etag!: Bool = true, lastModified!: Bool = true, immutable!: Bool = false,
+    setHeaders!: ?(HttpResponse, String) -> Unit = None, redirect!: Bool = true): Middleware {
     // 仓颉的 std.fs 不会处理路径开头的 "./"，因此这里把它去掉，这样调用方
     // 无论传 "public" 还是 "./public" 都能正常工作。
     let base = if (root.startsWith("./")) {
@@ -42,87 +40,91 @@ public func staticFiles(root: String, index!: String = "index.html", maxAge!: In
     } else {
         root
     }
-    return { req: HttpRequest, res: HttpResponse, next: Next =>
-        // 只处理静态资源的 GET/HEAD 请求；其余方法一律放行交给后续中间件。
-        if (req.method != HttpMethod.GET && req.method != HttpMethod.HEAD) {
-            next()
-            return
-        }
+    return {
+        req: HttpRequest, res: HttpResponse, next: Next =>
+            // 只处理静态资源的 GET/HEAD 请求；其余方法一律放行交给后续中间件。
+            if (req.method != HttpMethod.GET && req.method != HttpMethod.HEAD) {
+                next()
+                return
+            }
 
-        var rel = if (req.path.startsWith("/")) {
-            req.path[1..req.path.size]
-        } else {
-            req.path
-        }
+            var rel = if (req.path.startsWith("/")) {
+                req.path[1..req.path.size]
+            } else {
+                req.path
+            }
 
-        // 安全：绝不允许通过 ".." 进行目录穿越、逃出所服务的 root 目录。
-        // 一旦相对路径里出现 ".."，直接放行（next）而不去读文件。
-        if (rel.contains("..")) {
-            next()
-            return
-        }
+            // 安全：绝不允许通过 ".." 进行目录穿越、逃出所服务的 root 目录。
+            // 一旦相对路径里出现 ".."，直接放行（next）而不去读文件。
+            if (rel.contains("..")) {
+                next()
+                return
+            }
 
-        // 目录处理:URL 不以 "/" 结尾、但映射到的真实路径是目录时,默认 301 重定向到
-        // 带斜杠的版本(redirect=true);redirect=false 则交给 next 放行(视作未命中)。
-        // 至于 URL 已带 "/" 的目录请求,则在下面追加 index 后按文件处理。
-        let endsWithSlash = rel.isEmpty() || rel.endsWith("/")
-        if (!endsWithSlash) {
-            let probe = "${base}/${rel}"
-            if (exists(probe) && isDirectoryPath(probe)) {
-                if (redirect) {
-                    sendDirectoryRedirect(req, res)
+            // 目录处理:URL 不以 "/" 结尾、但映射到的真实路径是目录时,默认 301 重定向到
+            // 带斜杠的版本(redirect=true);redirect=false 则交给 next 放行(视作未命中)。
+            // 至于 URL 已带 "/" 的目录请求,则在下面追加 index 后按文件处理。
+            let endsWithSlash = rel.isEmpty() || rel.endsWith("/")
+            if (!endsWithSlash) {
+                let probe = "${base}/${rel}"
+                if (exists(probe) && isDirectoryPath(probe)) {
+                    if (redirect) {
+                        sendDirectoryRedirect(req, res)
+                    } else {
+                        next()
+                    }
+                    return
+                }
+            }
+
+            // 目录请求(空路径或 URL 以 "/" 结尾)补上默认索引文件。
+            if (endsWithSlash) {
+                rel += index
+            }
+
+            // 隐藏文件(任一路径段以 "." 开头)按 dotfiles 策略处理。
+            if (dotfiles != "allow" && hasDotSegment(rel)) {
+                if (dotfiles == "deny") {
+                    res.status(403).send("Forbidden")
                 } else {
                     next()
                 }
                 return
             }
-        }
 
-        // 目录请求(空路径或 URL 以 "/" 结尾)补上默认索引文件。
-        if (endsWithSlash) {
-            rel += index
-        }
+            let path = "${base}/${rel}"
 
-        // 隐藏文件(任一路径段以 "." 开头)按 dotfiles 策略处理。
-        if (dotfiles != "allow" && hasDotSegment(rel)) {
-            if (dotfiles == "deny") {
-                res.status(403).send("Forbidden")
-            } else {
+            // 用 `exists` 检查路径是否存在；不存在的文件（以及无法读取的情况）
+            // 都跳过并交给后续路由处理，不在这里返回。
+            if (!exists(path)) {
                 next()
+                return
             }
-            return
-        }
 
-        let path = "${base}/${rel}"
-
-        // 用 `exists` 检查路径是否存在；不存在的文件（以及无法读取的情况）
-        // 都跳过并交给后续路由处理，不在这里返回。
-        if (!exists(path)) {
-            next()
-            return
-        }
-
-        // 可选的缓存头。
-        if (maxAge >= 0) {
-            var cc = "public, max-age=${maxAge}"
-            if (immutable && maxAge > 0) {
-                cc += ", immutable"
+            // 可选的缓存头。
+            if (maxAge >= 0) {
+                var cc = "public, max-age=${maxAge}"
+                if (immutable && maxAge > 0) {
+                    cc += ", immutable"
+                }
+                res.headers["Cache-Control"] = cc
             }
-            res.headers["Cache-Control"] = cc
-        }
 
-        // 自定义响应头钩子:在文件发送前调用,可任意改写响应头。
-        match (setHeaders) {
-            case Some(cb) => cb(res, path)
-            case None => ()
-        }
+            // 自定义响应头钩子:在文件发送前调用,可任意改写响应头。
+            match (setHeaders) {
+                case Some(cb) => cb(res, path)
+                case None => ()
+            }
 
-        // 经 applyFileResponse 发送文件：原始字节（二进制安全），并统一附带 ETag
-        // 与 Accept-Ranges，支持 If-None-Match 命中回 304、Range 请求回 206 分片。
-        // etag / lastModified 开关被透传过去,用于关闭对应响应头与条件请求支持。
-        let lm: ?String = if (lastModified) { httpDateForFile(path) } else { None }
-        applyFileResponse(res, File.readFrom(path), mimeFor(rel), lm,
-                          etag: etag, sendLastModified: lastModified)
+            // 经 applyFileResponse 发送文件：原始字节（二进制安全），并统一附带 ETag
+            // 与 Accept-Ranges，支持 If-None-Match 命中回 304、Range 请求回 206 分片。
+            // etag / lastModified 开关被透传过去,用于关闭对应响应头与条件请求支持。
+            let lm: ?String = if (lastModified) {
+                httpDateForFile(path)
+            } else {
+                None
+            }
+            applyFileResponse(res, File.readFrom(path), mimeFor(rel), lm, etag: etag, sendLastModified: lastModified)
     }
 }
 
@@ -149,7 +151,11 @@ func isDirectoryPath(path: String): Bool {
 // 把目录请求(无尾斜杠)301 重定向到带斜杠的版本。优先用 originalUrl(以正确处理
 // 经由挂载点的真实 URL),否则退回到 req.path;并保留查询串。
 func sendDirectoryRedirect(req: HttpRequest, res: HttpResponse): Unit {
-    let originalOrPath = if (!req.originalUrl.isEmpty()) { req.originalUrl } else { req.path }
+    let originalOrPath = if (!req.originalUrl.isEmpty()) {
+        req.originalUrl
+    } else {
+        req.path
+    }
     let (pathPart, query) = splitOnce(originalOrPath, "?")
     var target = pathPart + "/"
     if (!query.isEmpty()) {

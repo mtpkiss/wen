@@ -1,6 +1,5 @@
 package wen
 
-
 /*
  * CORS（跨域资源共享）插件。
  *
@@ -21,18 +20,19 @@ public func cors(): Middleware {
 // 只允许某一个明确指定的来源。传入的 origin 会被原样写进
 // Access-Control-Allow-Origin 头（不做校验或多来源匹配）。
 public func cors(origin: String): Middleware {
-    return { req: HttpRequest, res: HttpResponse, next: Next =>
-        res.set("Access-Control-Allow-Origin", origin)
-        res.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
-        res.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    return {
+        req: HttpRequest, res: HttpResponse, next: Next =>
+            res.set("Access-Control-Allow-Origin", origin)
+            res.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
+            res.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-        // 预检请求在这里已被完整应答（204 + 上面设置好的 CORS 头），
-        // 因此直接 return，不再调用 next() 把它传给下游。
-        if (req.method == HttpMethod.OPTIONS) {
-            res.status(204).end()
-            return
-        }
+            // 预检请求在这里已被完整应答（204 + 上面设置好的 CORS 头），
+            // 因此直接 return，不再调用 next() 把它传给下游。
+            if (req.method == HttpMethod.OPTIONS) {
+                res.status(204).end()
+                return
+            }
 
-        next()
+            next()
     }
 }

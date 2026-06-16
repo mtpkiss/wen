@@ -10,16 +10,28 @@ class JsonTest {
     //      内部用 match 显式处理 Some/None，避免依赖 Option 的组合子，
     //      这样断言里能直接拿到裸值，读起来更直观。 -----
     func si(v: JsonValue): Int64 {
-        match (v.asInt()) { case Some(n) => n; case None => -999 }
+        match (v.asInt()) {
+            case Some(n) => n;
+            case None => -999
+        }
     }
     func ss(v: JsonValue): String {
-        match (v.asString()) { case Some(s) => s; case None => "<none>" }
+        match (v.asString()) {
+            case Some(s) => s;
+            case None => "<none>"
+        }
     }
     func field(v: JsonValue, k: String): JsonValue {
-        match (v.get(k)) { case Some(x) => x; case None => JsonNull }
+        match (v.get(k)) {
+            case Some(x) => x;
+            case None => JsonNull
+        }
     }
     func elem(v: JsonValue, i: Int64): JsonValue {
-        match (v.at(i)) { case Some(x) => x; case None => JsonNull }
+        match (v.at(i)) {
+            case Some(x) => x;
+            case None => JsonNull
+        }
     }
 
     // 验证各类标量（整数、布尔、null、字符串）都能被 parseJson 解析成对应的 JSON 类型，
@@ -120,7 +132,10 @@ class JsonTest {
         res.json(JsonObj().put("ok", true).build())
         @Assert(res.finished)
         @Assert(res.body == "{\"ok\":true}")
-        let ct = match (res.headers.get("Content-Type")) { case Some(v) => v; case None => "" }
+        let ct = match (res.headers.get("Content-Type")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(ct.contains("application/json"))
     }
 
@@ -132,20 +147,26 @@ class JsonTest {
     func testJsonParserPopulatesReq(): Unit {
         let app = wen()
         app.use(jsonParser())
-        app.post("/u", { req: HttpRequest, res: HttpResponse =>
-            let name = match (req.json()) {
-                case Some(j) => match (j.get("name")) {
-                    case Some(v) => v.asString() ?? "?"
-                    case None => "?"
-                }
-                case None => "?"
+        app.post(
+            "/u",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let name = match (req.json()) {
+                        case Some(j) => match (j.get("name")) {
+                            case Some(v) => v.asString() ?? "?"
+                            case None => "?"
+                        }
+                        case None => "?"
+                    }
+                    res.send(name)
             }
-            res.send(name)
-        })
-        let req = HttpRequest("POST", "/u"); req.path = "/u"
+        )
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
         req.headers["content-type"] = "application/json"
         req.body = "{\"name\":\"bob\"}"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "bob")
     }
 
@@ -157,14 +178,23 @@ class JsonTest {
     func testJsonParserMalformedIsNone(): Unit {
         let app = wen()
         app.use(jsonParser())
-        app.post("/u", { req: HttpRequest, res: HttpResponse =>
-            let ok = match (req.json()) { case Some(_) => "yes"; case None => "no" }
-            res.send(ok)
-        })
-        let req = HttpRequest("POST", "/u"); req.path = "/u"
+        app.post(
+            "/u",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let ok = match (req.json()) {
+                        case Some(_) => "yes";
+                        case None => "no"
+                    }
+                    res.send(ok)
+            }
+        )
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
         req.headers["content-type"] = "application/json"
         req.body = "{not json"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "no")
     }
 }

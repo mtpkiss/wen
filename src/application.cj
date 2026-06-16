@@ -75,8 +75,8 @@ public class Application {
     // 在其中调用 sub.handleAsMiddleware 来驱动子路由的匹配与执行。
     public func use(path: String, sub: Router): Application {
         sub.mountpath = path
-        router.use(path, { req: HttpRequest, res: HttpResponse, next: Next =>
-            sub.handleAsMiddleware(req, res, next)
+        router.use(path, {
+            req: HttpRequest, res: HttpResponse, next: Next => sub.handleAsMiddleware(req, res, next)
         })
         return this
     }
@@ -109,14 +109,12 @@ public class Application {
         var fileName = name
         let ext = match (fileExt(name)) {
             case Some(e) => e
-            case None =>
-                match (this.setting("view engine")) {
-                    case Some(e) =>
-                        fileName = name + "." + e
-                        e
-                    case None =>
-                        throw Exception("render: 未设置 view engine,且视图名 '${name}' 不含扩展名")
-                }
+            case None => match (this.setting("view engine")) {
+                case Some(e) =>
+                    fileName = name + "." + e
+                    e
+                case None => throw Exception("render: 未设置 view engine,且视图名 '${name}' 不含扩展名")
+            }
         }
         let path = joinViewPath(viewsDir, fileName)
         let eng = match (engines.get(normalizeExt(ext))) {
@@ -128,46 +126,127 @@ public class Application {
 
     // ---- 路由注册（Middleware 形式：处理器带 next）---------------------------
 
-    public func get(path: String, handler: Middleware): Application { router.get(path, handler); return this }
-    public func post(path: String, handler: Middleware): Application { router.post(path, handler); return this }
-    public func put(path: String, handler: Middleware): Application { router.put(path, handler); return this }
-    public func delete(path: String, handler: Middleware): Application { router.delete(path, handler); return this }
-    public func patch(path: String, handler: Middleware): Application { router.patch(path, handler); return this }
-    public func head(path: String, handler: Middleware): Application { router.head(path, handler); return this }
-    public func options(path: String, handler: Middleware): Application { router.options(path, handler); return this }
-    public func all(path: String, handler: Middleware): Application { router.all(path, handler); return this }
+    public func get(path: String, handler: Middleware): Application {
+        router.get(path, handler);
+        return this
+    }
+    public func post(path: String, handler: Middleware): Application {
+        router.post(path, handler);
+        return this
+    }
+    public func put(path: String, handler: Middleware): Application {
+        router.put(path, handler);
+        return this
+    }
+    public func delete(path: String, handler: Middleware): Application {
+        router.delete(path, handler);
+        return this
+    }
+    public func patch(path: String, handler: Middleware): Application {
+        router.patch(path, handler);
+        return this
+    }
+    public func head(path: String, handler: Middleware): Application {
+        router.head(path, handler);
+        return this
+    }
+    public func options(path: String, handler: Middleware): Application {
+        router.options(path, handler);
+        return this
+    }
+    public func all(path: String, handler: Middleware): Application {
+        router.all(path, handler);
+        return this
+    }
 
     // ---- 路由注册（终结 Handler 形式：处理器不带 next）-----------------------
 
-    public func get(path: String, handler: Handler): Application { router.get(path, wrap(handler)); return this }
-    public func post(path: String, handler: Handler): Application { router.post(path, wrap(handler)); return this }
-    public func put(path: String, handler: Handler): Application { router.put(path, wrap(handler)); return this }
-    public func delete(path: String, handler: Handler): Application { router.delete(path, wrap(handler)); return this }
-    public func patch(path: String, handler: Handler): Application { router.patch(path, wrap(handler)); return this }
-    public func head(path: String, handler: Handler): Application { router.head(path, wrap(handler)); return this }
-    public func options(path: String, handler: Handler): Application { router.options(path, wrap(handler)); return this }
-    public func all(path: String, handler: Handler): Application { router.all(path, wrap(handler)); return this }
+    public func get(path: String, handler: Handler): Application {
+        router.get(path, wrap(handler));
+        return this
+    }
+    public func post(path: String, handler: Handler): Application {
+        router.post(path, wrap(handler));
+        return this
+    }
+    public func put(path: String, handler: Handler): Application {
+        router.put(path, wrap(handler));
+        return this
+    }
+    public func delete(path: String, handler: Handler): Application {
+        router.delete(path, wrap(handler));
+        return this
+    }
+    public func patch(path: String, handler: Handler): Application {
+        router.patch(path, wrap(handler));
+        return this
+    }
+    public func head(path: String, handler: Handler): Application {
+        router.head(path, wrap(handler));
+        return this
+    }
+    public func options(path: String, handler: Handler): Application {
+        router.options(path, wrap(handler));
+        return this
+    }
+    public func all(path: String, handler: Handler): Application {
+        router.all(path, wrap(handler));
+        return this
+    }
 
     // ---- 路由注册（多处理器形式：同一路径挂多个中间件，按数组顺序执行）-------
 
-    public func get(path: String, handlers: Array<Middleware>): Application { router.get(path, handlers); return this }
-    public func post(path: String, handlers: Array<Middleware>): Application { router.post(path, handlers); return this }
-    public func put(path: String, handlers: Array<Middleware>): Application { router.put(path, handlers); return this }
-    public func delete(path: String, handlers: Array<Middleware>): Application { router.delete(path, handlers); return this }
-    public func patch(path: String, handlers: Array<Middleware>): Application { router.patch(path, handlers); return this }
-    public func head(path: String, handlers: Array<Middleware>): Application { router.head(path, handlers); return this }
-    public func options(path: String, handlers: Array<Middleware>): Application { router.options(path, handlers); return this }
-    public func all(path: String, handlers: Array<Middleware>): Application { router.all(path, handlers); return this }
+    public func get(path: String, handlers: Array<Middleware>): Application {
+        router.get(path, handlers);
+        return this
+    }
+    public func post(path: String, handlers: Array<Middleware>): Application {
+        router.post(path, handlers);
+        return this
+    }
+    public func put(path: String, handlers: Array<Middleware>): Application {
+        router.put(path, handlers);
+        return this
+    }
+    public func delete(path: String, handlers: Array<Middleware>): Application {
+        router.delete(path, handlers);
+        return this
+    }
+    public func patch(path: String, handlers: Array<Middleware>): Application {
+        router.patch(path, handlers);
+        return this
+    }
+    public func head(path: String, handlers: Array<Middleware>): Application {
+        router.head(path, handlers);
+        return this
+    }
+    public func options(path: String, handlers: Array<Middleware>): Application {
+        router.options(path, handlers);
+        return this
+    }
+    public func all(path: String, handlers: Array<Middleware>): Application {
+        router.all(path, handlers);
+        return this
+    }
 
     // 一次挂载多个全局 / 前缀中间件。
-    public func use(handlers: Array<Middleware>): Application { router.use(handlers); return this }
-    public func use(path: String, handlers: Array<Middleware>): Application { router.use(path, handlers); return this }
+    public func use(handlers: Array<Middleware>): Application {
+        router.use(handlers);
+        return this
+    }
+    public func use(path: String, handlers: Array<Middleware>): Application {
+        router.use(path, handlers);
+        return this
+    }
 
     // 注册参数预处理回调，对应 Express 的 app.param(name, fn)。
-    public func param(name: String, handler: ParamHandler): Application { router.param(name, handler); return this }
+    public func param(name: String, handler: ParamHandler): Application {
+        router.param(name, handler);
+        return this
+    }
 
     private func wrap(handler: Handler): Middleware {
-        return { req: HttpRequest, res: HttpResponse, _: Next => handler(req, res) }
+        return {req: HttpRequest, res: HttpResponse, _: Next => handler(req, res)}
     }
 
     // ---- 路由分组 -----------------------------------------------------------
@@ -201,15 +280,23 @@ public class Application {
     // 布尔设置的语法糖(对应 Express 的 app.enable/disable/enabled/disabled):
     // enable/disable 把设置置为 "true"/"false";enabled/disabled 判断其布尔值
     // (未设置视为 false / 未启用)。
-    public func enable(key: String): Application { settings[key] = "true"; return this }
-    public func disable(key: String): Application { settings[key] = "false"; return this }
+    public func enable(key: String): Application {
+        settings[key] = "true"
+        return this
+    }
+    public func disable(key: String): Application {
+        settings[key] = "false"
+        return this
+    }
     public func enabled(key: String): Bool {
         match (settings.get(key)) {
             case Some(v) => return v == "true"
             case None => return false
         }
     }
-    public func disabled(key: String): Bool { return !enabled(key) }
+    public func disabled(key: String): Bool {
+        return !enabled(key)
+    }
 
     // ---- 请求分发 / 启动服务 ------------------------------------------------
 

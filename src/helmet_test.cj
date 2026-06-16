@@ -7,16 +7,21 @@ import std.unittest.testmacro.*
 @Test
 class HelmetTest {
     func hv(res: HttpResponse, name: String): String {
-        match (res.get(name)) { case Some(v) => return v; case None => return "" }
+        match (res.get(name)) {
+            case Some(v) => return v;
+            case None => return ""
+        }
     }
 
     // 运行一次带 helmet 的请求,返回响应供断言。
     func run(mw: Middleware): HttpResponse {
         let app = wen()
         app.use(mw)
-        app.get("/", { _: HttpRequest, res: HttpResponse => res.send("ok") })
-        let req = HttpRequest("GET", "/"); req.path = "/"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get("/", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("GET", "/");
+        req.path = "/"
+        let res = HttpResponse();
+        app.handle(req, res)
         return res
     }
 

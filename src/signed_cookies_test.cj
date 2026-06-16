@@ -10,7 +10,6 @@ import std.unittest.testmacro.*
  * 已存在的 SessionTest 覆盖了 signedCookie(name) 的单值取用,本文件聚焦整表映射:
  * 验证哪些条目进入结果、哪些被剔除,以及无密钥 / 无 cookies 时的边界行为。
  */
-
 @Test
 class SignedCookiesMapTest {
     // 用给定密钥为 value 现算一个合法签名串,形如 "<value>.<sig>"。
@@ -50,7 +49,7 @@ class SignedCookiesMapTest {
         let bag = HashMap<String, String>()
         bag["good"] = sign("k", "ok")
         bag["bad"] = "tampered.0000000000000000000000000000000000000000000000000000000000000000"
-        bag["plain"] = "no-dot-no-sig"   // 形态不对(无 "."),验签失败
+        bag["plain"] = "no-dot-no-sig" // 形态不对(无 "."),验签失败
         let m = reqOn(app, bag).signedCookies()
         @Assert(m.size == 1)
         @Assert(m["good"] == "ok")
@@ -116,7 +115,7 @@ class SignedCookiesMapTest {
         app.cookieSecret = "k"
         let bag = HashMap<String, String>()
         bag["good"] = sign("k", "y")
-        bag["bad"]  = "x.deadbeef"
+        bag["bad"] = "x.deadbeef"
         let req = reqOn(app, bag)
         let m = req.signedCookies()
         match (req.signedCookie("good")) {

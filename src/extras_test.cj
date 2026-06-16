@@ -7,7 +7,10 @@ import std.unittest.testmacro.*
 @Test
 class ExtrasTest {
     func hv(res: HttpResponse, name: String): String {
-        match (res.get(name)) { case Some(v) => return v; case None => return "" }
+        match (res.get(name)) {
+            case Some(v) => return v;
+            case None => return ""
+        }
     }
 
     // res.vary 追加且去重。
@@ -16,7 +19,7 @@ class ExtrasTest {
         let res = HttpResponse()
         res.vary("Accept")
         res.vary("Accept-Encoding")
-        res.vary("accept")                 // 大小写不敏感,不重复
+        res.vary("accept") // 大小写不敏感,不重复
         @Assert(hv(res, "Vary") == "Accept, Accept-Encoding")
     }
 

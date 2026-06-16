@@ -11,8 +11,8 @@ import std.collection.*
  */
 public class HttpRequest {
     public var method: String
-    public var url: String          // 原始请求目标(request target),包含查询串,例如 "/a?x=1"
-    public var path: String         // 仅路径部分(已剥离查询串),例如 "/a"
+    public var url: String // 原始请求目标(request target),包含查询串,例如 "/a?x=1"
+    public var path: String // 仅路径部分(已剥离查询串),例如 "/a"
     public var httpVersion: String
 
     // 始终保留客户端发来的原始请求 URL(含查询串),不随中间件对 url/path 的修改而改变。
@@ -435,15 +435,22 @@ public class HttpRequest {
 
         let inm = this.header("if-none-match")
         let ims = this.header("if-modified-since")
-        let hasInm = match (inm) { case Some(_) => true; case None => false }
-        let hasIms = match (ims) { case Some(_) => true; case None => false }
+        let hasInm = match (inm) {
+            case Some(_) => true;
+            case None => false
+        }
+        let hasIms = match (ims) {
+            case Some(_) => true;
+            case None => false
+        }
         if (!hasInm && !hasIms) {
             return false
         }
         match (this.header("cache-control")) {
-            case Some(cc) => if (cc.toAsciiLower().contains("no-cache")) {
-                return false
-            }
+            case Some(cc) =>
+                if (cc.toAsciiLower().contains("no-cache")) {
+                    return false
+                }
             case None => ()
         }
         // If-None-Match:"*" 视为命中;否则需与响应 ETag 匹配(无 ETag 则判为不新鲜)。
@@ -451,9 +458,10 @@ public class HttpRequest {
             case Some(v) =>
                 if (v.trimAscii() != "*") {
                     match (responseHeaderCI(res, "etag")) {
-                        case Some(etag) => if (!etagMatches(v, etag)) {
-                            return false
-                        }
+                        case Some(etag) =>
+                            if (!etagMatches(v, etag)) {
+                                return false
+                            }
                         case None => return false
                     }
                 }
@@ -461,13 +469,13 @@ public class HttpRequest {
         }
         // If-Modified-Since:保守地只在与响应 Last-Modified 完全相等时才算未变。
         match (ims) {
-            case Some(v) =>
-                match (responseHeaderCI(res, "last-modified")) {
-                    case Some(lm) => if (v.trimAscii() != lm.trimAscii()) {
+            case Some(v) => match (responseHeaderCI(res, "last-modified")) {
+                case Some(lm) =>
+                    if (v.trimAscii() != lm.trimAscii()) {
                         return false
                     }
-                    case None => return false
-                }
+                case None => return false
+            }
             case None => ()
         }
         return true
@@ -517,13 +525,12 @@ public class HttpRequest {
         let out = ArrayList<String>()
         if (trustProxy()) {
             match (this.header("x-forwarded-for")) {
-                case Some(v) =>
-                    for (part in v.split(",")) {
-                        let p = part.trimAscii()
-                        if (!p.isEmpty()) {
-                            out.add(p)
-                        }
+                case Some(v) => for (part in v.split(",")) {
+                    let p = part.trimAscii()
+                    if (!p.isEmpty()) {
+                        out.add(p)
                     }
+                }
                 case None => ()
             }
         }
@@ -709,15 +716,14 @@ public class HttpRequest {
         }
         cookiesParsed = true
         match (header("cookie")) {
-            case Some(raw) =>
-                for (pair in raw.split(";")) {
-                    let p = pair.trimAscii()
-                    if (p.isEmpty()) {
-                        continue
-                    }
-                    let (k, v) = splitOnce(p, "=")
-                    this.cookies[k.trimAscii()] = v.trimAscii()
+            case Some(raw) => for (pair in raw.split(";")) {
+                let p = pair.trimAscii()
+                if (p.isEmpty()) {
+                    continue
                 }
+                let (k, v) = splitOnce(p, "=")
+                this.cookies[k.trimAscii()] = v.trimAscii()
+            }
             case None => ()
         }
     }

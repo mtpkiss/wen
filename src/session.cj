@@ -112,15 +112,16 @@ public class MemorySessionStore <: SessionStore {
 
 // 构造 session 中间件,使用指定的存储后端。
 public func session(store: SessionStore): Middleware {
-    return { req: HttpRequest, res: HttpResponse, next: Next =>
-        let sess = loadOrCreateSession(req, store)
-        req.session = Some(sess)
-        next()
-        // 请求处理完毕后回存会话;新会话再下发一枚签名的 sid Cookie。
-        store.save(sess.id, sess.values)
-        if (sess.isNew) {
-            res.cookie("sid", sess.id, httpOnly: true, path: "/", signed: true)
-        }
+    return {
+        req: HttpRequest, res: HttpResponse, next: Next =>
+            let sess = loadOrCreateSession(req, store)
+            req.session = Some(sess)
+            next()
+            // 请求处理完毕后回存会话;新会话再下发一枚签名的 sid Cookie。
+            store.save(sess.id, sess.values)
+            if (sess.isNew) {
+                res.cookie("sid", sess.id, httpOnly: true, path: "/", signed: true)
+            }
     }
 }
 
@@ -132,11 +133,10 @@ public func session(): Middleware {
 // 依据签名 sid Cookie 载入既有会话,或新建一个会话。
 func loadOrCreateSession(req: HttpRequest, store: SessionStore): Session {
     match (req.signedCookie("sid")) {
-        case Some(id) =>
-            match (store.load(id)) {
-                case Some(vals) => return Session(id, vals, false)
-                case None => return Session(store.newId(), HashMap<String, String>(), true)
-            }
+        case Some(id) => match (store.load(id)) {
+            case Some(vals) => return Session(id, vals, false)
+            case None => return Session(store.newId(), HashMap<String, String>(), true)
+        }
         case None => return Session(store.newId(), HashMap<String, String>(), true)
     }
 }

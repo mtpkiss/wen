@@ -11,7 +11,8 @@ class ReqProxyTest {
     @TestCase
     func testProtocolDefaultHttp(): Unit {
         let app = wen()
-        let req = HttpRequest("GET", "/"); req.app = Some(app)
+        let req = HttpRequest("GET", "/");
+        req.app = Some(app)
         req.headers["x-forwarded-proto"] = "https"
         @Assert(req.protocol() == "http")
         @Assert(!req.secure())
@@ -22,7 +23,8 @@ class ReqProxyTest {
     func testProtocolForwardedWithTrust(): Unit {
         let app = wen()
         app.trustProxy = true
-        let req = HttpRequest("GET", "/"); req.app = Some(app)
+        let req = HttpRequest("GET", "/");
+        req.app = Some(app)
         req.headers["x-forwarded-proto"] = "https"
         @Assert(req.protocol() == "https")
         @Assert(req.secure())
@@ -32,7 +34,8 @@ class ReqProxyTest {
     @TestCase
     func testIpsEmptyWithoutTrust(): Unit {
         let app = wen()
-        let req = HttpRequest("GET", "/"); req.app = Some(app)
+        let req = HttpRequest("GET", "/");
+        req.app = Some(app)
         req.ip = "10.0.0.9"
         req.headers["x-forwarded-for"] = "1.1.1.1, 2.2.2.2"
         @Assert(req.ips().size == 0)
@@ -44,7 +47,8 @@ class ReqProxyTest {
     func testIpsWithTrust(): Unit {
         let app = wen()
         app.trustProxy = true
-        let req = HttpRequest("GET", "/"); req.app = Some(app)
+        let req = HttpRequest("GET", "/");
+        req.app = Some(app)
         req.ip = "10.0.0.9"
         req.headers["x-forwarded-for"] = "1.1.1.1, 2.2.2.2"
         let chain = req.ips()
@@ -59,10 +63,14 @@ class ReqProxyTest {
     func testHostnameForwarded(): Unit {
         let app = wen()
         app.trustProxy = true
-        let req = HttpRequest("GET", "/"); req.app = Some(app)
+        let req = HttpRequest("GET", "/");
+        req.app = Some(app)
         req.headers["host"] = "internal:8080"
         req.headers["x-forwarded-host"] = "public.example.com"
-        let h = match (req.hostname()) { case Some(v) => v; case None => "?" }
+        let h = match (req.hostname()) {
+            case Some(v) => v;
+            case None => "?"
+        }
         @Assert(h == "public.example.com")
     }
 
@@ -90,7 +98,8 @@ class ReqProxyTest {
     func testSubdomainOffsetSetting(): Unit {
         let app = wen()
         app.set("subdomain offset", "3")
-        let req = HttpRequest("GET", "/"); req.app = Some(app)
+        let req = HttpRequest("GET", "/");
+        req.app = Some(app)
         req.headers["host"] = "a.b.example.com"
         // 去掉末尾 3 段(b.example.com 中的 3 段?)—— a.b.example.com 共 4 段,
         // 扣除 3 段后只剩 "a"。

@@ -81,13 +81,29 @@ public func base64Encode(data: Array<UInt8>): String {
     var i = 0
     while (i < n) {
         let b0 = Int64(data[i])
-        let b1 = if (i + 1 < n) { Int64(data[i + 1]) } else { 0 }
-        let b2 = if (i + 2 < n) { Int64(data[i + 2]) } else { 0 }
+        let b1 = if (i + 1 < n) {
+            Int64(data[i + 1])
+        } else {
+            0
+        }
+        let b2 = if (i + 2 < n) {
+            Int64(data[i + 2])
+        } else {
+            0
+        }
         let triple = (b0 << 16) | (b1 << 8) | b2
         out.add(B64_TABLE[(triple >> 18) & 0x3F])
         out.add(B64_TABLE[(triple >> 12) & 0x3F])
-        if (i + 1 < n) { out.add(B64_TABLE[(triple >> 6) & 0x3F]) } else { out.add(UInt8(61)) }   // '='
-        if (i + 2 < n) { out.add(B64_TABLE[triple & 0x3F]) } else { out.add(UInt8(61)) }
+        if (i + 1 < n) {
+            out.add(B64_TABLE[(triple >> 6) & 0x3F])
+        } else {
+            out.add(UInt8(61))
+        } // '='
+        if (i + 2 < n) {
+            out.add(B64_TABLE[triple & 0x3F])
+        } else {
+            out.add(UInt8(61))
+        }
         i += 3
     }
     return String.fromUtf8(out.toArray())
@@ -115,11 +131,21 @@ public func base64Decode(s: String): Array<UInt8> {
 
 // 单个 base64 字符的数值(0..63);非 base64 字符返回 -1。
 func b64Val(c: UInt8): Int64 {
-    if (c >= UInt8(65) && c <= UInt8(90)) { return Int64(c) - 65 }          // A-Z
-    if (c >= UInt8(97) && c <= UInt8(122)) { return Int64(c) - 97 + 26 }    // a-z
-    if (c >= UInt8(48) && c <= UInt8(57)) { return Int64(c) - 48 + 52 }     // 0-9
-    if (c == UInt8(43)) { return 62 }                                       // +
-    if (c == UInt8(47)) { return 63 }                                       // /
+    if (c >= UInt8(65) && c <= UInt8(90)) {
+        return Int64(c) - 65
+    } // A-Z
+    if (c >= UInt8(97) && c <= UInt8(122)) {
+        return Int64(c) - 97 + 26
+    } // a-z
+    if (c >= UInt8(48) && c <= UInt8(57)) {
+        return Int64(c) - 48 + 52
+    } // 0-9
+    if (c == UInt8(43)) {
+        return 62
+    } // +
+    if (c == UInt8(47)) {
+        return 63
+    } // /
     return -1
 }
 

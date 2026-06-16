@@ -12,17 +12,26 @@ class AutoParseTest {
     @TestCase
     func testJsonAutoParsed(): Unit {
         let app = wen()
-        app.post("/u", { req: HttpRequest, res: HttpResponse =>
-            let name = match (req.json()) {
-                case Some(j) => match (j.get("name")) { case Some(v) => v.asString() ?? "?"; case None => "?" }
-                case None => "none"
+        app.post(
+            "/u",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let name = match (req.json()) {
+                        case Some(j) => match (j.get("name")) {
+                            case Some(v) => v.asString() ?? "?";
+                            case None => "?"
+                        }
+                        case None => "none"
+                    }
+                    res.send(name)
             }
-            res.send(name)
-        })
-        let req = HttpRequest("POST", "/u"); req.path = "/u"
+        )
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
         req.headers["content-type"] = "application/json"
         req.body = "{\"name\":\"bob\"}"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "bob")
     }
 
@@ -30,13 +39,18 @@ class AutoParseTest {
     @TestCase
     func testJsonAutoMalformedIsNone(): Unit {
         let app = wen()
-        app.post("/u", { req: HttpRequest, res: HttpResponse =>
-            res.send(match (req.json()) { case Some(_) => "yes"; case None => "no" })
+        app.post("/u", {
+            req: HttpRequest, res: HttpResponse => res.send(match (req.json()) {
+                case Some(_) => "yes";
+                case None => "no"
+            })
         })
-        let req = HttpRequest("POST", "/u"); req.path = "/u"
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
         req.headers["content-type"] = "application/json"
         req.body = "{bad"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "no")
     }
 
@@ -44,13 +58,15 @@ class AutoParseTest {
     @TestCase
     func testUrlencodedAutoParsed(): Unit {
         let app = wen()
-        app.post("/f", { req: HttpRequest, res: HttpResponse =>
-            res.send(req.attribute("city") ?? "none")
+        app.post("/f", {
+            req: HttpRequest, res: HttpResponse => res.send(req.attribute("city") ?? "none")
         })
-        let req = HttpRequest("POST", "/f"); req.path = "/f"
+        let req = HttpRequest("POST", "/f");
+        req.path = "/f"
         req.headers["content-type"] = "application/x-www-form-urlencoded"
         req.body = "city=hangzhou&n=1"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "hangzhou")
     }
 
@@ -58,12 +74,14 @@ class AutoParseTest {
     @TestCase
     func testCookieAutoParsed(): Unit {
         let app = wen()
-        app.get("/c", { req: HttpRequest, res: HttpResponse =>
-            res.send(req.cookie("sid") ?? "none")
+        app.get("/c", {
+            req: HttpRequest, res: HttpResponse => res.send(req.cookie("sid") ?? "none")
         })
-        let req = HttpRequest("GET", "/c"); req.path = "/c"
+        let req = HttpRequest("GET", "/c");
+        req.path = "/c"
         req.headers["cookie"] = "sid=abc; theme=dark"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "abc")
     }
 
@@ -77,16 +95,18 @@ class AutoParseTest {
             buf.add(b)
         }
         let app = wen()
-        app.post("/up", { req: HttpRequest, res: HttpResponse =>
-            match (req.file("f")) {
+        app.post("/up", {
+            req: HttpRequest, res: HttpResponse => match (req.file("f")) {
                 case Some(uf) => res.send("${uf.filename}:${uf.size()}")
                 case None => res.send("none")
             }
         })
-        let req = HttpRequest("POST", "/up"); req.path = "/up"
+        let req = HttpRequest("POST", "/up");
+        req.path = "/up"
         req.headers["content-type"] = "multipart/form-data; boundary=${boundary}"
         req.bodyBytes = buf.toArray()
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "a.txt:2")
     }
 
@@ -101,14 +121,20 @@ class AutoParseTest {
         }
         let app = wen()
         app.use(multipart())
-        app.post("/up", { req: HttpRequest, res: HttpResponse =>
-            req.file("f")            // 再次触发:应被闸门拦下,不重复解析
-            res.send("${req.files.size}")
-        })
-        let req = HttpRequest("POST", "/up"); req.path = "/up"
+        app.post(
+            "/up",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    req.file("f") // 再次触发:应被闸门拦下,不重复解析
+                    res.send("${req.files.size}")
+            }
+        )
+        let req = HttpRequest("POST", "/up");
+        req.path = "/up"
         req.headers["content-type"] = "multipart/form-data; boundary=${boundary}"
         req.bodyBytes = buf.toArray()
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "1")
     }
 }

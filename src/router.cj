@@ -21,7 +21,6 @@ import std.regex.*
  *                        路径的「前缀」——模式的所有段都能在请求路径开头依次匹配
  *                        上即可，请求路径后面可以还有更多段。
  */
-
 enum SegKind {
     | Literal
     | Param
@@ -30,9 +29,9 @@ enum SegKind {
 
 class Segment {
     let kind: SegKind
-    let value: String           // 对字面量段是其文本内容；对参数段是参数名
-    let constraint: ?Regex      // 仅参数段可能用到：一个已加锚定的可选正则约束
-    let optional: Bool          // 仅参数段可能用到：该段是否可缺省（":name?" 写法）
+    let value: String // 对字面量段是其文本内容；对参数段是参数名
+    let constraint: ?Regex // 仅参数段可能用到：一个已加锚定的可选正则约束
+    let optional: Bool // 仅参数段可能用到：该段是否可缺省（":name?" 写法）
 
     init(kind: SegKind, value: String) {
         this.kind = kind
@@ -92,8 +91,7 @@ public class PathPattern {
                         } else {
                             segs.add(Segment(Param, spec, None, optional))
                         }
-                    case None =>
-                        segs.add(Segment(Param, spec, None, optional))
+                    case None => segs.add(Segment(Param, spec, None, optional))
                 }
             } else {
                 segs.add(Segment(Literal, raw))
@@ -132,8 +130,8 @@ public class PathPattern {
     // 并把沿途捕获的参数写入 params;失败返回 false。
     // 之所以用回溯而非简单的线性扫描，是为了正确处理可缺省参数(":name?"):碰到
     // 可缺省段时，先试「消费一段」，若后续匹配不下去再回退试「跳过该段」。
-    private func matchFrom(si: Int64, parts: Array<String>, pi: Int64, prefix: Bool,
-                          params: HashMap<String, String>, caseSensitive: Bool): Bool {
+    private func matchFrom(si: Int64, parts: Array<String>, pi: Int64, prefix: Bool, params: HashMap<String, String>,
+        caseSensitive: Bool): Bool {
         if (si >= segments.size) {
             // 模式已全部用完。前缀匹配:请求路径还剩多余段也算成功;精确匹配:
             // 请求路径必须正好也用完。
@@ -198,7 +196,7 @@ public class PathPattern {
 // 条件、编译好的路径模式、要执行的处理器，以及它是否是挂载式(前缀)中间件。
 // 路由器内部就是按注册顺序维护一串这样的 Layer。
 class Layer {
-    let method: ?String        // None 表示不限方法，任意请求方法都匹配
+    let method: ?String // None 表示不限方法，任意请求方法都匹配
     let pattern: PathPattern
     let handler: Middleware
     let isPrefix: Bool
@@ -223,7 +221,7 @@ class Layer {
     init(errorHandler: ErrorHandler) {
         this.method = None
         this.pattern = PathPattern.compile("/")
-        this.handler = { _: HttpRequest, _: HttpResponse, _: Next => () }
+        this.handler = {_: HttpRequest, _: HttpResponse, _: Next => ()}
         this.isPrefix = false
         this.isError = true
         this.errorHandler = Some(errorHandler)
@@ -309,36 +307,84 @@ public class Router {
         add(None, path, handler, true)
     }
 
-    public func get(path: String, handler: Middleware): Unit { add(Some(HttpMethod.GET), path, handler, false) }
-    public func post(path: String, handler: Middleware): Unit { add(Some(HttpMethod.POST), path, handler, false) }
-    public func put(path: String, handler: Middleware): Unit { add(Some(HttpMethod.PUT), path, handler, false) }
-    public func delete(path: String, handler: Middleware): Unit { add(Some(HttpMethod.DELETE), path, handler, false) }
-    public func patch(path: String, handler: Middleware): Unit { add(Some(HttpMethod.PATCH), path, handler, false) }
-    public func head(path: String, handler: Middleware): Unit { add(Some(HttpMethod.HEAD), path, handler, false) }
-    public func options(path: String, handler: Middleware): Unit { add(Some(HttpMethod.OPTIONS), path, handler, false) }
-    public func all(path: String, handler: Middleware): Unit { add(Some(HttpMethod.ALL), path, handler, false) }
+    public func get(path: String, handler: Middleware): Unit {
+        add(Some(HttpMethod.GET), path, handler, false)
+    }
+    public func post(path: String, handler: Middleware): Unit {
+        add(Some(HttpMethod.POST), path, handler, false)
+    }
+    public func put(path: String, handler: Middleware): Unit {
+        add(Some(HttpMethod.PUT), path, handler, false)
+    }
+    public func delete(path: String, handler: Middleware): Unit {
+        add(Some(HttpMethod.DELETE), path, handler, false)
+    }
+    public func patch(path: String, handler: Middleware): Unit {
+        add(Some(HttpMethod.PATCH), path, handler, false)
+    }
+    public func head(path: String, handler: Middleware): Unit {
+        add(Some(HttpMethod.HEAD), path, handler, false)
+    }
+    public func options(path: String, handler: Middleware): Unit {
+        add(Some(HttpMethod.OPTIONS), path, handler, false)
+    }
+    public func all(path: String, handler: Middleware): Unit {
+        add(Some(HttpMethod.ALL), path, handler, false)
+    }
 
     // 终结式 Handler 形态(处理器签名里没有 `next`)。与 Application 上的同名重载
     // 对应，方便直接写「只产生响应、不再向后传递」的处理器。
-    public func get(path: String, handler: Handler): Unit { add(Some(HttpMethod.GET), path, wrap(handler), false) }
-    public func post(path: String, handler: Handler): Unit { add(Some(HttpMethod.POST), path, wrap(handler), false) }
-    public func put(path: String, handler: Handler): Unit { add(Some(HttpMethod.PUT), path, wrap(handler), false) }
-    public func delete(path: String, handler: Handler): Unit { add(Some(HttpMethod.DELETE), path, wrap(handler), false) }
-    public func patch(path: String, handler: Handler): Unit { add(Some(HttpMethod.PATCH), path, wrap(handler), false) }
-    public func head(path: String, handler: Handler): Unit { add(Some(HttpMethod.HEAD), path, wrap(handler), false) }
-    public func options(path: String, handler: Handler): Unit { add(Some(HttpMethod.OPTIONS), path, wrap(handler), false) }
-    public func all(path: String, handler: Handler): Unit { add(Some(HttpMethod.ALL), path, wrap(handler), false) }
+    public func get(path: String, handler: Handler): Unit {
+        add(Some(HttpMethod.GET), path, wrap(handler), false)
+    }
+    public func post(path: String, handler: Handler): Unit {
+        add(Some(HttpMethod.POST), path, wrap(handler), false)
+    }
+    public func put(path: String, handler: Handler): Unit {
+        add(Some(HttpMethod.PUT), path, wrap(handler), false)
+    }
+    public func delete(path: String, handler: Handler): Unit {
+        add(Some(HttpMethod.DELETE), path, wrap(handler), false)
+    }
+    public func patch(path: String, handler: Handler): Unit {
+        add(Some(HttpMethod.PATCH), path, wrap(handler), false)
+    }
+    public func head(path: String, handler: Handler): Unit {
+        add(Some(HttpMethod.HEAD), path, wrap(handler), false)
+    }
+    public func options(path: String, handler: Handler): Unit {
+        add(Some(HttpMethod.OPTIONS), path, wrap(handler), false)
+    }
+    public func all(path: String, handler: Handler): Unit {
+        add(Some(HttpMethod.ALL), path, wrap(handler), false)
+    }
 
     // 多处理器形态:一次给同一方法/路径挂多个中间件,按数组顺序依次执行(前者
     // 调用 next() 推进到后者)。常用于「前置校验 + 业务处理」这类组合。
-    public func get(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.GET), path, handlers, false) }
-    public func post(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.POST), path, handlers, false) }
-    public func put(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.PUT), path, handlers, false) }
-    public func delete(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.DELETE), path, handlers, false) }
-    public func patch(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.PATCH), path, handlers, false) }
-    public func head(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.HEAD), path, handlers, false) }
-    public func options(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.OPTIONS), path, handlers, false) }
-    public func all(path: String, handlers: Array<Middleware>): Unit { addAll(Some(HttpMethod.ALL), path, handlers, false) }
+    public func get(path: String, handlers: Array<Middleware>): Unit {
+        addAll(Some(HttpMethod.GET), path, handlers, false)
+    }
+    public func post(path: String, handlers: Array<Middleware>): Unit {
+        addAll(Some(HttpMethod.POST), path, handlers, false)
+    }
+    public func put(path: String, handlers: Array<Middleware>): Unit {
+        addAll(Some(HttpMethod.PUT), path, handlers, false)
+    }
+    public func delete(path: String, handlers: Array<Middleware>): Unit {
+        addAll(Some(HttpMethod.DELETE), path, handlers, false)
+    }
+    public func patch(path: String, handlers: Array<Middleware>): Unit {
+        addAll(Some(HttpMethod.PATCH), path, handlers, false)
+    }
+    public func head(path: String, handlers: Array<Middleware>): Unit {
+        addAll(Some(HttpMethod.HEAD), path, handlers, false)
+    }
+    public func options(path: String, handlers: Array<Middleware>): Unit {
+        addAll(Some(HttpMethod.OPTIONS), path, handlers, false)
+    }
+    public func all(path: String, handlers: Array<Middleware>): Unit {
+        addAll(Some(HttpMethod.ALL), path, handlers, false)
+    }
 
     // 把一个子路由（Router）作为「迷你应用」挂载到 `path` 前缀下，对应 Express
     // 的 `router.use('/v1', subRouter)`。行为与 Application.use(path, sub) 一致：
@@ -346,17 +392,21 @@ public class Router {
     // 同时把挂载前缀记录到 sub.mountpath(对应 Express 的 router.mountpath)。
     public func use(path: String, sub: Router): Unit {
         sub.mountpath = path
-        add(None, path, { req: HttpRequest, res: HttpResponse, next: Next =>
-            sub.handleAsMiddleware(req, res, next)
+        add(None, path, {
+            req: HttpRequest, res: HttpResponse, next: Next => sub.handleAsMiddleware(req, res, next)
         }, true)
     }
 
     // 一次挂载多个全局/前缀中间件。
-    public func use(handlers: Array<Middleware>): Unit { addAll(None, "/", handlers, true) }
-    public func use(path: String, handlers: Array<Middleware>): Unit { addAll(None, path, handlers, true) }
+    public func use(handlers: Array<Middleware>): Unit {
+        addAll(None, "/", handlers, true)
+    }
+    public func use(path: String, handlers: Array<Middleware>): Unit {
+        addAll(None, path, handlers, true)
+    }
 
     private func wrap(handler: Handler): Middleware {
-        return { req: HttpRequest, res: HttpResponse, _: Next => handler(req, res) }
+        return {req: HttpRequest, res: HttpResponse, _: Next => handler(req, res)}
     }
 
     // 注册一个错误处理中间件。它只在有异常正在链中传递时才会被调用;由于链是按
@@ -371,8 +421,8 @@ public class Router {
     // Allow 头。另外，若是 HEAD 请求但没有对应的 HEAD 路由，则回退去走 GET 路由，
     // 最终只回头部、不回正文。
     public func handle(req: HttpRequest, res: HttpResponse): Unit {
-        if (req.method == HttpMethod.HEAD && !hasMethodForPath(HttpMethod.HEAD, req.path) &&
-            hasMethodForPath(HttpMethod.GET, req.path)) {
+        if (req.method == HttpMethod.HEAD && !hasMethodForPath(HttpMethod.HEAD, req.path) && hasMethodForPath(
+            HttpMethod.GET, req.path)) {
             req.method = HttpMethod.GET
             dispatchTop(req, res)
             req.method = HttpMethod.HEAD
@@ -392,8 +442,8 @@ public class Router {
     }
 
     private func dispatchTop(req: HttpRequest, res: HttpResponse): Unit {
-        let onExhausted: Next = { =>
-            if (!res.finished) {
+        let onExhausted: Next = {
+            => if (!res.finished) {
                 let methods = methodsForPath(req.path)
                 if (methods.isEmpty()) {
                     res.status(404).send("Cannot ${req.method} ${req.path}")
@@ -404,8 +454,8 @@ public class Router {
                 }
             }
         }
-        let onError: (Exception) -> Unit = { _: Exception =>
-            if (!res.finished) {
+        let onError: (Exception) -> Unit = {
+            _: Exception => if (!res.finished) {
                 res.status(500).send("Internal Server Error")
             }
         }
@@ -484,7 +534,7 @@ public class Router {
     // 若内部没有任何层把响应处理完结，就调用 `next` 把控制权交还给父级链，让父链
     // 继续往下走;而内部未被捕获的错误则被重新抛出，交给父级的错误处理流水线去管。
     func handleAsMiddleware(req: HttpRequest, res: HttpResponse, next: Next): Unit {
-        let onError: (Exception) -> Unit = { e: Exception => throw e }
+        let onError: (Exception) -> Unit = {e: Exception => throw e}
         runChain(req, res, next, onError)
     }
 
@@ -499,8 +549,8 @@ public class Router {
         dispatch(matched, 0, req, res, onExhausted, onError, None)
     }
 
-    func dispatch(matched: ArrayList<Layer>, index: Int64, req: HttpRequest, res: HttpResponse,
-                  onExhausted: Next, onError: (Exception) -> Unit, err: ?Exception): Unit {
+    func dispatch(matched: ArrayList<Layer>, index: Int64, req: HttpRequest, res: HttpResponse, onExhausted: Next,
+        onError: (Exception) -> Unit, err: ?Exception): Unit {
         if (res.finished) {
             return
         }
@@ -519,7 +569,7 @@ public class Router {
                     dispatch(matched, index + 1, req, res, onExhausted, onError, err)
                     return
                 }
-                let next: Next = { => dispatch(matched, index + 1, req, res, onExhausted, onError, Some(e)) }
+                let next: Next = {=> dispatch(matched, index + 1, req, res, onExhausted, onError, Some(e))}
                 try {
                     match (layer.errorHandler) {
                         case Some(h) => h(e, req, res, next)
@@ -539,7 +589,7 @@ public class Router {
     }
 
     private func runNormal(matched: ArrayList<Layer>, index: Int64, layer: Layer, req: HttpRequest, res: HttpResponse,
-                           onExhausted: Next, onError: (Exception) -> Unit): Unit {
+        onExhausted: Next, onError: (Exception) -> Unit): Unit {
         // 重新运行本层的匹配以取回它捕获的参数并写入 req.params。之所以要在此重新
         // 匹配，是因为不同的层可能捕获不同的参数名/值，需在执行该层处理器前对齐。
         var captured = HashMap<String, String>()
@@ -576,12 +626,13 @@ public class Router {
         }
         // 处理 next("route"):跳过与本层 routeId 相同的后续层(即本条路由的其余
         // 处理器),从下一条不同的路由继续。
-        let skipRoute: Next = { =>
-            var j = index + 1
-            while (j < matched.size && matched[j].routeId == layer.routeId) {
-                j += 1
-            }
-            dispatch(matched, j, req, res, onExhausted, onError, None)
+        let skipRoute: Next = {
+            =>
+                var j = index + 1
+                while (j < matched.size && matched[j].routeId == layer.routeId) {
+                    j += 1
+                }
+                dispatch(matched, j, req, res, onExhausted, onError, None)
         }
         // 挂载式中间件(use(path, mw))在执行时，看到的 req.path 是「已剥掉挂载前缀」
         // 的相对路径，这与 Express 的行为一致。这里先保存原始路径并临时替换为剥掉前缀
@@ -595,10 +646,11 @@ public class Router {
             let mountPrefix = buildMountPrefix(req.path, layer.pattern.segments.size)
             req.path = stripMountPath(req.path, layer.pattern.segments.size)
             req.baseUrl = savedBaseUrl + mountPrefix
-            let next: Next = { =>
-                req.path = savedPath
-                req.baseUrl = savedBaseUrl
-                dispatch(matched, index + 1, req, res, onExhausted, onError, None)
+            let next: Next = {
+                =>
+                    req.path = savedPath
+                    req.baseUrl = savedBaseUrl
+                    dispatch(matched, index + 1, req, res, onExhausted, onError, None)
             }
             try {
                 layer.handler(req, res, next)
@@ -614,7 +666,7 @@ public class Router {
                 skipRoute()
             }
         } else {
-            let next: Next = { => dispatch(matched, index + 1, req, res, onExhausted, onError, None) }
+            let next: Next = {=> dispatch(matched, index + 1, req, res, onExhausted, onError, None)}
             try {
                 layer.handler(req, res, next)
             } catch (ex: Exception) {
@@ -650,7 +702,11 @@ public class Router {
     // 若段数不足则返回路径本身。
     func buildMountPrefix(path: String, mountSegments: Int64): String {
         let parts = pathSegments(path)
-        let take = if (mountSegments < parts.size) { mountSegments } else { parts.size }
+        let take = if (mountSegments < parts.size) {
+            mountSegments
+        } else {
+            parts.size
+        }
         var prefix = ""
         var i = Int64(0)
         while (i < take) {

@@ -145,7 +145,8 @@ func negotiateAccept(header: ?String, offered: Array<String>, languageMode: Bool
 
 // 为单个候选 token 在已解析的 Accept 条目里打分,返回 (q, 具体程度 spec)。
 // spec:2 精确相等 > 1 语言前缀 > 0 通配 "*";-1 表示无任何匹配。
-func acceptTokenScore(offered: String, items: ArrayList<AcceptItem>, languageMode: Bool, encodingMode: Bool): (Float64, Int64) {
+func acceptTokenScore(offered: String, items: ArrayList<AcceptItem>, languageMode: Bool, encodingMode: Bool): (Float64, 
+    Int64) {
     let o = offered.toAsciiLower()
     var bestQ = 0.0
     var bestSpec = -1

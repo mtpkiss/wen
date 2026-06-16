@@ -17,31 +17,44 @@ class AuthTest {
     @TestCase
     func testBasicAuth(): Unit {
         let app = wen()
-        app.get("/secret", [
-            basicAuth({ u: String, p: String => u == "admin" && p == "secret" }),
-            { req: HttpRequest, res: HttpResponse, _: Next =>
-                let who = match (req.attribute("authUser")) { case Some(v) => v; case None => "?" }
-                res.send("hi ${who}")
-            }
-        ])
+        app.get(
+            "/secret",
+            [
+                basicAuth({u: String, p: String => u == "admin" && p == "secret"}),
+                {
+                    req: HttpRequest, res: HttpResponse, _: Next =>
+                        let who = match (req.attribute("authUser")) {
+                            case Some(v) => v;
+                            case None => "?"
+                        }
+                        res.send("hi ${who}")
+                }
+            ]
+        )
 
         // 缺凭据 -> 401。
-        let r0 = HttpRequest("GET", "/secret"); r0.path = "/secret"
-        let s0 = HttpResponse(); app.handle(r0, s0)
+        let r0 = HttpRequest("GET", "/secret");
+        r0.path = "/secret"
+        let s0 = HttpResponse();
+        app.handle(r0, s0)
         @Assert(s0.statusCode == 401)
         @Expect((match (s0.get("WWW-Authenticate")) { case Some(v) => v; case None => "" }).contains("Basic"))
 
         // 正确凭据 -> 200。
-        let r1 = HttpRequest("GET", "/secret"); r1.path = "/secret"
+        let r1 = HttpRequest("GET", "/secret");
+        r1.path = "/secret"
         r1.headers["authorization"] = "Basic " + base64Encode("admin:secret".toArray())
-        let s1 = HttpResponse(); app.handle(r1, s1)
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
         @Assert(s1.statusCode == 200)
         @Assert(s1.body == "hi admin")
 
         // 错误密码 -> 401。
-        let r2 = HttpRequest("GET", "/secret"); r2.path = "/secret"
+        let r2 = HttpRequest("GET", "/secret");
+        r2.path = "/secret"
         r2.headers["authorization"] = "Basic " + base64Encode("admin:wrong".toArray())
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.statusCode == 401)
     }
 
@@ -49,23 +62,32 @@ class AuthTest {
     @TestCase
     func testBearerAuth(): Unit {
         let app = wen()
-        app.get("/api", [
-            bearerAuth({ t: String => t == "good-token" }),
-            { _: HttpRequest, res: HttpResponse, _: Next => res.send("ok") }
-        ])
+        app.get(
+            "/api",
+            [
+                bearerAuth({t: String => t == "good-token"}),
+                {_: HttpRequest, res: HttpResponse, _: Next => res.send("ok")}
+            ]
+        )
 
-        let r1 = HttpRequest("GET", "/api"); r1.path = "/api"
+        let r1 = HttpRequest("GET", "/api");
+        r1.path = "/api"
         r1.headers["authorization"] = "Bearer good-token"
-        let s1 = HttpResponse(); app.handle(r1, s1)
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
         @Assert(s1.statusCode == 200)
 
-        let r2 = HttpRequest("GET", "/api"); r2.path = "/api"
+        let r2 = HttpRequest("GET", "/api");
+        r2.path = "/api"
         r2.headers["authorization"] = "Bearer bad"
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.statusCode == 401)
 
-        let r3 = HttpRequest("GET", "/api"); r3.path = "/api"
-        let s3 = HttpResponse(); app.handle(r3, s3)
+        let r3 = HttpRequest("GET", "/api");
+        r3.path = "/api"
+        let s3 = HttpResponse();
+        app.handle(r3, s3)
         @Assert(s3.statusCode == 401)
     }
 
@@ -74,22 +96,36 @@ class AuthTest {
     func testRequestId(): Unit {
         let app = wen()
         app.use(requestId())
-        app.get("/", { req: HttpRequest, res: HttpResponse =>
-            let id = match (req.requestId()) { case Some(v) => v; case None => "" }
-            res.send(id)
-        })
+        app.get(
+            "/",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let id = match (req.requestId()) {
+                        case Some(v) => v;
+                        case None => ""
+                    }
+                    res.send(id)
+            }
+        )
 
         // 无头:生成一个非空 ID,并写回 X-Request-Id。
-        let r1 = HttpRequest("GET", "/"); r1.path = "/"
-        let s1 = HttpResponse(); app.handle(r1, s1)
+        let r1 = HttpRequest("GET", "/");
+        r1.path = "/"
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
         @Expect(!s1.body.isEmpty())
-        let hid = match (s1.get("X-Request-Id")) { case Some(v) => v; case None => "" }
+        let hid = match (s1.get("X-Request-Id")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Assert(hid == s1.body)
 
         // 有头:沿用上游传入的 ID。
-        let r2 = HttpRequest("GET", "/"); r2.path = "/"
+        let r2 = HttpRequest("GET", "/");
+        r2.path = "/"
         r2.headers["x-request-id"] = "trace-123"
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.body == "trace-123")
         @Assert((match (s2.get("X-Request-Id")) { case Some(v) => v; case None => "" }) == "trace-123")
     }

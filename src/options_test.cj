@@ -16,7 +16,7 @@ class OptionsTest {
         let c = res.setCookies[0]
         @Expect(c.contains("Domain=example.com"))
         @Expect(c.contains("Max-Age=3600"))
-        @Expect(c.contains("Expires="))         // 由 maxAge 自动推导
+        @Expect(c.contains("Expires=")) // 由 maxAge 自动推导
         @Expect(c.contains("GMT"))
     }
 
@@ -28,7 +28,7 @@ class OptionsTest {
         @Expect(res.setCookies[0].contains("Expires=Wed, 01 Jan 2025 00:00:00 GMT"))
 
         let res2 = HttpResponse()
-        res2.cookie("b", "2")                    // 无 maxAge、无 expires
+        res2.cookie("b", "2") // 无 maxAge、无 expires
         @Expect(!res2.setCookies[0].contains("Expires="))
     }
 
@@ -45,24 +45,33 @@ class OptionsTest {
         let mwCache = staticFiles(dir, maxAge: 600, dotfiles: "deny")
 
         // 目录请求("/")补 index.html,并带 Cache-Control。
-        let r1 = HttpRequest("GET", "/"); r1.path = "/"
-        let s1 = HttpResponse(); s1.req = Some(r1)
-        mwCache(r1, s1, { => () })
+        let r1 = HttpRequest("GET", "/");
+        r1.path = "/"
+        let s1 = HttpResponse();
+        s1.req = Some(r1)
+        mwCache(r1, s1, {=> ()})
         @Assert(s1.finished)
-        let cc = match (s1.get("Cache-Control")) { case Some(v) => v; case None => "" }
+        let cc = match (s1.get("Cache-Control")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Assert(cc == "public, max-age=600")
 
         // dotfiles=deny:请求 .secret 回 403。
-        let r2 = HttpRequest("GET", "/.secret"); r2.path = "/.secret"
-        let s2 = HttpResponse(); s2.req = Some(r2)
-        mwCache(r2, s2, { => () })
+        let r2 = HttpRequest("GET", "/.secret");
+        r2.path = "/.secret"
+        let s2 = HttpResponse();
+        s2.req = Some(r2)
+        mwCache(r2, s2, {=> ()})
         @Assert(s2.statusCode == 403)
 
         // dotfiles=ignore(默认):隐藏文件当作不存在,放行(响应未结束)。
         let mwIgnore = staticFiles(dir)
-        let r3 = HttpRequest("GET", "/.secret"); r3.path = "/.secret"
-        let s3 = HttpResponse(); s3.req = Some(r3)
-        mwIgnore(r3, s3, { => () })
+        let r3 = HttpRequest("GET", "/.secret");
+        r3.path = "/.secret"
+        let s3 = HttpResponse();
+        s3.req = Some(r3)
+        mwIgnore(r3, s3, {=> ()})
         @Assert(!s3.finished)
 
         remove("${dir}/index.html")

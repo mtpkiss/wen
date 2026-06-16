@@ -75,7 +75,7 @@ class MountpathTest {
     func testAppUseSetsMountpath(): Unit {
         let app = wen()
         let sub = Router()
-        sub.get("/", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        sub.get("/", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         app.use("/api", sub)
         @Assert(sub.mountpath == "/api")
     }
@@ -108,7 +108,7 @@ class CaseSensitiveRoutingTest {
     @TestCase
     func testDefaultCaseInsensitive(): Unit {
         let app = wen()
-        app.get("/users", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        app.get("/users", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         let req = HttpRequest("GET", "/Users")
         req.path = "/Users"
         let res = HttpResponse()
@@ -121,7 +121,7 @@ class CaseSensitiveRoutingTest {
     func testEnabledRejectsDifferentCase(): Unit {
         let app = wen()
         app.enable("case sensitive routing")
-        app.get("/users", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        app.get("/users", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         let req = HttpRequest("GET", "/Users")
         req.path = "/Users"
         let res = HttpResponse()
@@ -134,7 +134,7 @@ class CaseSensitiveRoutingTest {
     func testEnabledSameCaseMatches(): Unit {
         let app = wen()
         app.enable("case sensitive routing")
-        app.get("/users", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        app.get("/users", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         let req = HttpRequest("GET", "/users")
         req.path = "/users"
         let res = HttpResponse()
@@ -151,7 +151,7 @@ class StrictRoutingTest {
     @TestCase
     func testDefaultIgnoresTrailingSlash(): Unit {
         let app = wen()
-        app.get("/foo", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        app.get("/foo", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         let req = HttpRequest("GET", "/foo/")
         req.path = "/foo/"
         let res = HttpResponse()
@@ -164,7 +164,7 @@ class StrictRoutingTest {
     func testEnabledRejectsTrailingSlashMismatch(): Unit {
         let app = wen()
         app.enable("strict routing")
-        app.get("/foo", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        app.get("/foo", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         let req = HttpRequest("GET", "/foo/")
         req.path = "/foo/"
         let res = HttpResponse()
@@ -177,7 +177,7 @@ class StrictRoutingTest {
     func testEnabledPatternWithSlashRejectsBare(): Unit {
         let app = wen()
         app.enable("strict routing")
-        app.get("/foo/", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        app.get("/foo/", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         let req = HttpRequest("GET", "/foo")
         req.path = "/foo"
         let res = HttpResponse()
@@ -190,7 +190,7 @@ class StrictRoutingTest {
     func testEnabledSameTrailingMatches(): Unit {
         let app = wen()
         app.enable("strict routing")
-        app.get("/foo/", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        app.get("/foo/", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         let req = HttpRequest("GET", "/foo/")
         req.path = "/foo/"
         let res = HttpResponse()

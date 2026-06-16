@@ -144,9 +144,9 @@ public class HttpResponse {
     //   signed   —— 为 true 时对值做 HMAC 签名(形如 "<value>.<sig>"),使客户端无法
     //               篡改;需先设置 app.cookieSecret,否则抛异常。读取时用
     //               req.signedCookie(name) 验签。
-    public func cookie(name: String, value: String, path!: String = "/", maxAge!: Int64 = -1,
-                       httpOnly!: Bool = false, secure!: Bool = false, sameSite!: String = "",
-                       domain!: String = "", expires!: String = "", signed!: Bool = false): HttpResponse {
+    public func cookie(name: String, value: String, path!: String = "/", maxAge!: Int64 = -1, httpOnly!: Bool = false,
+        secure!: Bool = false, sameSite!: String = "", domain!: String = "", expires!: String = "",
+        signed!: Bool = false): HttpResponse {
         let actualValue = if (signed) {
             let secret = cookieSecretOrThrow()
             "${value}.${hmacSha256Hex(secret, value)}"
@@ -281,7 +281,7 @@ public class HttpResponse {
         this.headers["Content-Type"] = "text/event-stream; charset=utf-8"
         this.headers["Cache-Control"] = "no-cache"
         this.headers["Connection"] = "keep-alive"
-        this.stream({ w: StreamWriter => body(SseWriter(w)) })
+        this.stream({w: StreamWriter => body(SseWriter(w))})
     }
 
     // 发送一个 JSON 响应体(传入的是已经序列化好的 JSON 字符串)并结束响应。
@@ -393,13 +393,19 @@ public class HttpResponse {
         }
         // 该响应随 Accept 头而变,补上 Vary 以利缓存正确性。
         match (this.headers.get("Vary")) {
-            case Some(v) => if (!v.contains("Accept")) { this.headers["Vary"] = "${v}, Accept" }
+            case Some(v) =>
+                if (!v.contains("Accept")) {
+                    this.headers["Vary"] = "${v}, Accept"
+                }
             case None => this.headers["Vary"] = "Accept"
         }
         var chosen: ?String = None
         match (this.req) {
             case Some(r) => chosen = r.accepts(offered.toArray())
-            case None => if (offered.size > 0) { chosen = Some(offered[0]) }
+            case None =>
+                if (offered.size > 0) {
+                    chosen = Some(offered[0])
+                }
         }
         match (chosen) {
             case Some(t) =>
@@ -436,11 +442,10 @@ public class HttpResponse {
     // 因此必须是经 app.handle 派发的响应;直接构造的 res 没有该关联,抛异常提示。
     private func resolveApp(): Application {
         match (this.req) {
-            case Some(r) =>
-                match (r.app) {
-                    case Some(a) => return a
-                    case None => throw Exception("render: 响应未关联 Application")
-                }
+            case Some(r) => match (r.app) {
+                case Some(a) => return a
+                case None => throw Exception("render: 响应未关联 Application")
+            }
             case None => throw Exception("render: 响应未关联请求/Application")
         }
     }

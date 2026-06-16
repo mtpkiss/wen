@@ -10,18 +10,28 @@ class Routing4Test {
     @TestCase
     func testMultipleHandlers(): Unit {
         let app = wen()
-        app.get("/admin", [
-            { req: HttpRequest, _: HttpResponse, next: Next =>
-                req.attributes["seen"] = "1"
-                next()
-            },
-            { req: HttpRequest, res: HttpResponse, _: Next =>
-                let seen = match (req.attribute("seen")) { case Some(v) => v; case None => "0" }
-                res.send("admin:${seen}")
-            }
-        ])
-        let req = HttpRequest("GET", "/admin"); req.path = "/admin"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get(
+            "/admin",
+            [
+                {
+                    req: HttpRequest, _: HttpResponse, next: Next =>
+                        req.attributes["seen"] = "1"
+                        next()
+                },
+                {
+                    req: HttpRequest, res: HttpResponse, _: Next =>
+                        let seen = match (req.attribute("seen")) {
+                            case Some(v) => v;
+                            case None => "0"
+                        }
+                        res.send("admin:${seen}")
+                }
+            ]
+        )
+        let req = HttpRequest("GET", "/admin");
+        req.path = "/admin"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 200)
         @Assert(res.body == "admin:1")
     }
@@ -30,16 +40,21 @@ class Routing4Test {
     @TestCase
     func testMultipleHandlersShortCircuit(): Unit {
         let app = wen()
-        app.get("/admin", [
-            { _: HttpRequest, res: HttpResponse, _: Next =>
-                res.status(401).send("denied")
-            },
-            { _: HttpRequest, res: HttpResponse, _: Next =>
-                res.send("should-not-run")
-            }
-        ])
-        let req = HttpRequest("GET", "/admin"); req.path = "/admin"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get(
+            "/admin",
+            [
+                {
+                    _: HttpRequest, res: HttpResponse, _: Next => res.status(401).send("denied")
+                },
+                {
+                    _: HttpRequest, res: HttpResponse, _: Next => res.send("should-not-run")
+                }
+            ]
+        )
+        let req = HttpRequest("GET", "/admin");
+        req.path = "/admin"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 401)
         @Assert(res.body == "denied")
     }
@@ -49,19 +64,24 @@ class Routing4Test {
     @TestCase
     func testNextRoute(): Unit {
         let app = wen()
-        app.get("/item", [
-            { req: HttpRequest, _: HttpResponse, _: Next =>
-                req.nextRoute()
-            },
-            { _: HttpRequest, res: HttpResponse, _: Next =>
-                res.send("first-route-second-handler")
-            }
-        ])
-        app.get("/item", { _: HttpRequest, res: HttpResponse =>
-            res.send("second-route")
+        app.get(
+            "/item",
+            [
+                {
+                    req: HttpRequest, _: HttpResponse, _: Next => req.nextRoute()
+                },
+                {
+                    _: HttpRequest, res: HttpResponse, _: Next => res.send("first-route-second-handler")
+                }
+            ]
+        )
+        app.get("/item", {
+            _: HttpRequest, res: HttpResponse => res.send("second-route")
         })
-        let req = HttpRequest("GET", "/item"); req.path = "/item"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/item");
+        req.path = "/item"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "second-route")
     }
 
@@ -69,17 +89,28 @@ class Routing4Test {
     @TestCase
     func testOptionalParamPresentAndAbsent(): Unit {
         let app = wen()
-        app.get("/users/:id?", { req: HttpRequest, res: HttpResponse =>
-            let id = match (req.param("id")) { case Some(v) => v; case None => "all" }
-            res.send(id)
-        })
+        app.get(
+            "/users/:id?",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let id = match (req.param("id")) {
+                        case Some(v) => v;
+                        case None => "all"
+                    }
+                    res.send(id)
+            }
+        )
 
-        let r1 = HttpRequest("GET", "/users/42"); r1.path = "/users/42"
-        let s1 = HttpResponse(); app.handle(r1, s1)
+        let r1 = HttpRequest("GET", "/users/42");
+        r1.path = "/users/42"
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
         @Assert(s1.body == "42")
 
-        let r2 = HttpRequest("GET", "/users"); r2.path = "/users"
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let r2 = HttpRequest("GET", "/users");
+        r2.path = "/users"
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.statusCode == 200)
         @Assert(s2.body == "all")
     }
@@ -90,8 +121,7 @@ class Routing4Test {
         let pat = PathPattern.compile("/files/:name?/info")
         // "/files/info" 应匹配(name 缺省)。
         match (pat.matchExact("/files/info")) {
-            case Some(p) =>
-                @Assert(!p.contains("name"))
+            case Some(p) => @Assert(!p.contains("name"))
             case None => @Assert(false)
         }
         // "/files/readme/info" 应匹配且 name == "readme"。
@@ -105,21 +135,34 @@ class Routing4Test {
     @TestCase
     func testOptionalConstrainedParam(): Unit {
         let app = wen()
-        app.get("/p/:n(\\d+)?", { req: HttpRequest, res: HttpResponse =>
-            let n = match (req.param("n")) { case Some(v) => v; case None => "none" }
-            res.send(n)
-        })
-        let r1 = HttpRequest("GET", "/p/7"); r1.path = "/p/7"
-        let s1 = HttpResponse(); app.handle(r1, s1)
+        app.get(
+            "/p/:n(\\d+)?",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let n = match (req.param("n")) {
+                        case Some(v) => v;
+                        case None => "none"
+                    }
+                    res.send(n)
+            }
+        )
+        let r1 = HttpRequest("GET", "/p/7");
+        r1.path = "/p/7"
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
         @Assert(s1.body == "7")
 
-        let r2 = HttpRequest("GET", "/p"); r2.path = "/p"
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let r2 = HttpRequest("GET", "/p");
+        r2.path = "/p"
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.body == "none")
 
         // 非数字不满足约束,既不能消费也无字面量可退,整体不匹配 -> 404。
-        let r3 = HttpRequest("GET", "/p/abc"); r3.path = "/p/abc"
-        let s3 = HttpResponse(); app.handle(r3, s3)
+        let r3 = HttpRequest("GET", "/p/abc");
+        r3.path = "/p/abc"
+        let s3 = HttpResponse();
+        app.handle(r3, s3)
         @Assert(s3.statusCode == 404)
     }
 
@@ -127,15 +170,24 @@ class Routing4Test {
     @TestCase
     func testParamCallback(): Unit {
         let app = wen()
-        app.param("id", { req: HttpRequest, _: HttpResponse, value: String =>
-            req.attributes["loaded"] = "user-${value}"
+        app.param("id", {
+            req: HttpRequest, _: HttpResponse, value: String => req.attributes["loaded"] = "user-${value}"
         })
-        app.get("/users/:id", { req: HttpRequest, res: HttpResponse =>
-            let loaded = match (req.attribute("loaded")) { case Some(v) => v; case None => "none" }
-            res.send(loaded)
-        })
-        let req = HttpRequest("GET", "/users/7"); req.path = "/users/7"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get(
+            "/users/:id",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let loaded = match (req.attribute("loaded")) {
+                        case Some(v) => v;
+                        case None => "none"
+                    }
+                    res.send(loaded)
+            }
+        )
+        let req = HttpRequest("GET", "/users/7");
+        req.path = "/users/7"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.body == "user-7")
     }
 
@@ -143,14 +195,16 @@ class Routing4Test {
     @TestCase
     func testParamCallbackShortCircuit(): Unit {
         let app = wen()
-        app.param("id", { _: HttpRequest, res: HttpResponse, value: String =>
-            if (value == "0") {
+        app.param("id", {
+            _: HttpRequest, res: HttpResponse, value: String => if (value == "0") {
                 res.status(404).send("no such id")
             }
         })
-        app.get("/users/:id", { _: HttpRequest, res: HttpResponse => res.send("ok") })
-        let req = HttpRequest("GET", "/users/0"); req.path = "/users/0"
-        let res = HttpResponse(); app.handle(req, res)
+        app.get("/users/:id", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("GET", "/users/0");
+        req.path = "/users/0"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 404)
         @Assert(res.body == "no such id")
     }

@@ -40,7 +40,7 @@ public class JsonException <: Exception {
 public enum JsonValue {
     | JsonNull
     | JsonBool(Bool)
-    | JsonNumber(String)        // 数字以原始词法字面量（lexeme）形式逐字保留，不做数值化转换，避免精度/格式丢失
+    | JsonNumber(String) // 数字以原始词法字面量（lexeme）形式逐字保留，不做数值化转换，避免精度/格式丢失
     | JsonString(String)
     | JsonArray(ArrayList<JsonValue>)
     | JsonObject(ArrayList<(String, JsonValue)>)
@@ -63,14 +63,22 @@ public enum JsonValue {
 
     public func asInt(): ?Int64 {
         match (this) {
-            case JsonNumber(n) => try { Some(Int64.parse(n)) } catch (_: Exception) { None }
+            case JsonNumber(n) => try {
+                Some(Int64.parse(n))
+            } catch (_: Exception) {
+                None
+            }
             case _ => None
         }
     }
 
     public func asFloat(): ?Float64 {
         match (this) {
-            case JsonNumber(n) => try { Some(Float64.parse(n)) } catch (_: Exception) { None }
+            case JsonNumber(n) => try {
+                Some(Float64.parse(n))
+            } catch (_: Exception) {
+                None
+            }
             case _ => None
         }
     }
@@ -121,7 +129,9 @@ public enum JsonValue {
     public func keys(): ArrayList<String> {
         let out = ArrayList<String>()
         match (this) {
-            case JsonObject(pairs) => for ((k, _) in pairs) { out.add(k) }
+            case JsonObject(pairs) => for ((k, _) in pairs) {
+                out.add(k)
+            }
             case _ => ()
         }
         return out
@@ -136,7 +146,11 @@ public enum JsonValue {
     public func toJsonString(): String {
         match (this) {
             case JsonNull => return "null"
-            case JsonBool(b) => return if (b) { "true" } else { "false" }
+            case JsonBool(b) => return if (b) {
+                "true"
+            } else {
+                "false"
+            }
             case JsonNumber(n) => return n
             case JsonString(s) => return "\"" + escapeJson(s) + "\""
             case JsonArray(items) =>
@@ -170,12 +184,29 @@ public enum JsonValue {
 // 一组便捷的重载工厂函数，把仓颉的原生值快速包装成对应的 JsonValue 分支。
 // 注意数字一律先 toString() 成词法字面量再存入 JsonNumber，与上面"逐字保留"的
 // 设计保持一致。
-public func jsonOf(v: String): JsonValue { return JsonString(v) }
-public func jsonOf(v: Int64): JsonValue { return JsonNumber(v.toString()) }
-public func jsonOf(v: Float64): JsonValue { return JsonNumber(v.toString()) }
-public func jsonOf(v: Bool): JsonValue { return JsonBool(v) }
-public func jsonNull(): JsonValue { return JsonNull }
-public func jsonArray(items: ArrayList<JsonValue>): JsonValue { return JsonArray(items) }
+public func jsonOf(v: String): JsonValue {
+    return JsonString(v)
+}
+
+public func jsonOf(v: Int64): JsonValue {
+    return JsonNumber(v.toString())
+}
+
+public func jsonOf(v: Float64): JsonValue {
+    return JsonNumber(v.toString())
+}
+
+public func jsonOf(v: Bool): JsonValue {
+    return JsonBool(v)
+}
+
+public func jsonNull(): JsonValue {
+    return JsonNull
+}
+
+public func jsonArray(items: ArrayList<JsonValue>): JsonValue {
+    return JsonArray(items)
+}
 
 // 符合人体工学的"有序对象"链式构建器，可链式调用并最终 build：
 // JsonObj().put("id", 42).put("name", "a").build()
@@ -186,14 +217,33 @@ public class JsonObj {
 
     public init() {}
 
-    public func put(key: String, value: JsonValue): JsonObj { pairs.add((key, value)); return this }
-    public func put(key: String, value: String): JsonObj { pairs.add((key, JsonString(value))); return this }
-    public func put(key: String, value: Int64): JsonObj { pairs.add((key, JsonNumber(value.toString()))); return this }
-    public func put(key: String, value: Float64): JsonObj { pairs.add((key, JsonNumber(value.toString()))); return this }
-    public func put(key: String, value: Bool): JsonObj { pairs.add((key, JsonBool(value))); return this }
+    public func put(key: String, value: JsonValue): JsonObj {
+        pairs.add((key, value));
+        return this
+    }
+    public func put(key: String, value: String): JsonObj {
+        pairs.add((key, JsonString(value)));
+        return this
+    }
+    public func put(key: String, value: Int64): JsonObj {
+        pairs.add((key, JsonNumber(value.toString())));
+        return this
+    }
+    public func put(key: String, value: Float64): JsonObj {
+        pairs.add((key, JsonNumber(value.toString())));
+        return this
+    }
+    public func put(key: String, value: Bool): JsonObj {
+        pairs.add((key, JsonBool(value)));
+        return this
+    }
 
-    public func build(): JsonValue { return JsonObject(pairs) }
-    public func toJsonString(): String { return build().toJsonString() }
+    public func build(): JsonValue {
+        return JsonObject(pairs)
+    }
+    public func toJsonString(): String {
+        return build().toJsonString()
+    }
 }
 
 // ---- 对外入口 ---------------------------------------------------
@@ -215,22 +265,32 @@ public func parseJson(text: String): JsonValue {
 func escapeJson(s: String): String {
     let out = ArrayList<UInt8>()
     for (b in s.toArray()) {
-        if (b == UInt8(34)) {                  // 双引号 "
-            out.add(UInt8(92)); out.add(UInt8(34))
-        } else if (b == UInt8(92)) {           // 反斜杠 \
-            out.add(UInt8(92)); out.add(UInt8(92))
-        } else if (b == UInt8(8)) {            // 退格 backspace -> \b
-            out.add(UInt8(92)); out.add(UInt8(98))
-        } else if (b == UInt8(12)) {           // 换页 form feed -> \f
-            out.add(UInt8(92)); out.add(UInt8(102))
-        } else if (b == UInt8(10)) {           // 换行 -> \n
-            out.add(UInt8(92)); out.add(UInt8(110))
-        } else if (b == UInt8(13)) {           // 回车 -> \r
-            out.add(UInt8(92)); out.add(UInt8(114))
-        } else if (b == UInt8(9)) {            // 制表符 -> \t
-            out.add(UInt8(92)); out.add(UInt8(116))
-        } else if (b < UInt8(32)) {            // 其他控制字符 -> \u00XX 六字符转义
-            out.add(UInt8(92)); out.add(UInt8(117)); out.add(UInt8(48)); out.add(UInt8(48))
+        if (b == UInt8(34)) { // 双引号 "
+            out.add(UInt8(92));
+            out.add(UInt8(34))
+        } else if (b == UInt8(92)) { // 反斜杠 \
+            out.add(UInt8(92));
+            out.add(UInt8(92))
+        } else if (b == UInt8(8)) { // 退格 backspace -> \b
+            out.add(UInt8(92));
+            out.add(UInt8(98))
+        } else if (b == UInt8(12)) { // 换页 form feed -> \f
+            out.add(UInt8(92));
+            out.add(UInt8(102))
+        } else if (b == UInt8(10)) { // 换行 -> \n
+            out.add(UInt8(92));
+            out.add(UInt8(110))
+        } else if (b == UInt8(13)) { // 回车 -> \r
+            out.add(UInt8(92));
+            out.add(UInt8(114))
+        } else if (b == UInt8(9)) { // 制表符 -> \t
+            out.add(UInt8(92));
+            out.add(UInt8(116))
+        } else if (b < UInt8(32)) { // 其他控制字符 -> \u00XX 六字符转义
+            out.add(UInt8(92));
+            out.add(UInt8(117));
+            out.add(UInt8(48));
+            out.add(UInt8(48))
             out.add(hexDigit(Int64(b) / 16))
             out.add(hexDigit(Int64(b) % 16))
         } else {
@@ -243,9 +303,9 @@ func escapeJson(s: String): String {
 // 把 0..15 的数值转成对应的十六进制 ASCII 字符（小写）。
 func hexDigit(v: Int64): UInt8 {
     if (v < 10) {
-        return UInt8(48 + v)        // '0'..'9'
+        return UInt8(48 + v) // '0'..'9'
     }
-    return UInt8(97 + v - 10)       // 'a'..'f'
+    return UInt8(97 + v - 10) // 'a'..'f'
 }
 
 // ---- 解析器 ---------------------------------------------------------------
@@ -302,13 +362,27 @@ class JsonParser {
         if (c < 0) {
             throw JsonException("unexpected end of input")
         }
-        if (c == 123) { return parseObject() }       // { 对象起始
-        if (c == 91) { return parseArray() }         // [ 数组起始
-        if (c == 34) { return JsonString(parseStringRaw()) } // " 字符串起始
-        if (c == 116) { return parseLiteral("true", JsonBool(true)) }   // t -> true
-        if (c == 102) { return parseLiteral("false", JsonBool(false)) } // f -> false
-        if (c == 110) { return parseLiteral("null", JsonNull) }         // n -> null
-        if (c == 45 || (c >= 48 && c <= 57)) { return parseNumber() } // '-' 或数字，按数字解析
+        if (c == 123) {
+            return parseObject()
+        } // { 对象起始
+        if (c == 91) {
+            return parseArray()
+        } // [ 数组起始
+        if (c == 34) {
+            return JsonString(parseStringRaw())
+        } // " 字符串起始
+        if (c == 116) {
+            return parseLiteral("true", JsonBool(true))
+        } // t -> true
+        if (c == 102) {
+            return parseLiteral("false", JsonBool(false))
+        } // f -> false
+        if (c == 110) {
+            return parseLiteral("null", JsonNull)
+        } // n -> null
+        if (c == 45 || (c >= 48 && c <= 57)) {
+            return parseNumber()
+        } // '-' 或数字，按数字解析
         throw JsonException("unexpected character at offset ${pos}")
     }
 
@@ -333,18 +407,26 @@ class JsonParser {
     // JsonNumber（与"逐字保留数字"的设计一致）。若结果为空或仅有一个负号则视为非法数字。
     func parseNumber(): JsonValue {
         let start = pos
-        if (peek() == 45) {                  // 负号 -
+        if (peek() == 45) { // 负号 -
             pos += 1
         }
-        while (pos < buf.size && isDigit(buf[pos])) { pos += 1 }
-        if (pos < buf.size && buf[pos] == UInt8(46)) {        // 小数点 .
+        while (pos < buf.size && isDigit(buf[pos])) {
             pos += 1
-            while (pos < buf.size && isDigit(buf[pos])) { pos += 1 }
         }
-        if (pos < buf.size && (buf[pos] == UInt8(101) || buf[pos] == UInt8(69))) {  // 指数标志 e / E
+        if (pos < buf.size && buf[pos] == UInt8(46)) { // 小数点 .
             pos += 1
-            if (pos < buf.size && (buf[pos] == UInt8(43) || buf[pos] == UInt8(45))) { pos += 1 } // 指数可带 + / - 符号
-            while (pos < buf.size && isDigit(buf[pos])) { pos += 1 }
+            while (pos < buf.size && isDigit(buf[pos])) {
+                pos += 1
+            }
+        }
+        if (pos < buf.size && (buf[pos] == UInt8(101) || buf[pos] == UInt8(69))) { // 指数标志 e / E
+            pos += 1
+            if (pos < buf.size && (buf[pos] == UInt8(43) || buf[pos] == UInt8(45))) {
+                pos += 1
+            } // 指数可带 + / - 符号
+            while (pos < buf.size && isDigit(buf[pos])) {
+                pos += 1
+            }
         }
         let lex = String.fromUtf8(sliceBytes(buf, start, pos))
         if (lex.isEmpty() || lex == "-") {
@@ -358,33 +440,62 @@ class JsonParser {
     // 还原成对应字节；\u 形式交给 appendUnicodeEscape 处理（含代理对）。遇到闭合
     // 双引号结束；中途到达输入末尾则报"字符串未闭合"。最终把累积的 UTF-8 字节转回字符串。
     func parseStringRaw(): String {
-        pos += 1                              // 跳过起始双引号 "
+        pos += 1 // 跳过起始双引号 "
         let out = ArrayList<UInt8>()
         while (true) {
             if (pos >= buf.size) {
                 throw JsonException("unterminated string")
             }
             let c = buf[pos]
-            if (c == UInt8(34)) {             // 闭合双引号 "
+            if (c == UInt8(34)) { // 闭合双引号 "
                 pos += 1
                 break
             }
-            if (c == UInt8(92)) {             // 反斜杠，转义序列开始
+            if (c == UInt8(92)) { // 反斜杠，转义序列开始
                 pos += 1
                 if (pos >= buf.size) {
                     throw JsonException("bad escape")
                 }
                 let e = buf[pos]
-                if (e == UInt8(34)) { out.add(UInt8(34)); pos += 1 }        // \" -> "
-                else if (e == UInt8(92)) { out.add(UInt8(92)); pos += 1 }   // \\ -> \
-                else if (e == UInt8(47)) { out.add(UInt8(47)); pos += 1 }   // \/ -> /
-                else if (e == UInt8(98)) { out.add(UInt8(8)); pos += 1 }    // \b -> 退格
-                else if (e == UInt8(102)) { out.add(UInt8(12)); pos += 1 }  // \f -> 换页
-                else if (e == UInt8(110)) { out.add(UInt8(10)); pos += 1 }  // \n -> 换行
-                else if (e == UInt8(114)) { out.add(UInt8(13)); pos += 1 }  // \r -> 回车
-                else if (e == UInt8(116)) { out.add(UInt8(9)); pos += 1 }   // \t -> 制表符
-                else if (e == UInt8(117)) { pos += 1; appendUnicodeEscape(out) } // \u 后接 4 位十六进制码点
-                else { throw JsonException("invalid escape at offset ${pos}") }
+                if (e == UInt8(34)) {
+                    out.add(UInt8(34));
+                    pos += 1
+                } // \" -> "
+                    else if (e == UInt8(92)) {
+                    out.add(UInt8(92));
+                    pos += 1
+                } // \\ -> \
+                    else if (e == UInt8(47)) {
+                    out.add(UInt8(47));
+                    pos += 1
+                } // \/ -> /
+                    else if (e == UInt8(98)) {
+                    out.add(UInt8(8));
+                    pos += 1
+                } // \b -> 退格
+                    else if (e == UInt8(102)) {
+                    out.add(UInt8(12));
+                    pos += 1
+                } // \f -> 换页
+                    else if (e == UInt8(110)) {
+                    out.add(UInt8(10));
+                    pos += 1
+                } // \n -> 换行
+                    else if (e == UInt8(114)) {
+                    out.add(UInt8(13));
+                    pos += 1
+                } // \r -> 回车
+                    else if (e == UInt8(116)) {
+                    out.add(UInt8(9));
+                    pos += 1
+                } // \t -> 制表符
+                    else if (e == UInt8(117)) {
+                    pos += 1
+                    appendUnicodeEscape(out)
+                } // \u 后接 4 位十六进制码点
+                    else {
+                    throw JsonException("invalid escape at offset ${pos}")
+                }
             } else {
                 out.add(c)
                 pos += 1
@@ -402,17 +513,17 @@ class JsonParser {
     // 容错策略用替换字符 U+FFFD 顶替，保证解析不崩溃。
     func appendUnicodeEscape(out: ArrayList<UInt8>): Unit {
         var code = readHex4()
-        if (code >= 0xD800 && code <= 0xDBFF) {              // 高位代理
+        if (code >= 0xD800 && code <= 0xDBFF) { // 高位代理
             if (pos + 1 < buf.size && buf[pos] == UInt8(92) && buf[pos + 1] == UInt8(117)) { // 紧跟 \u
                 pos += 2
                 let low = readHex4()
-                if (low >= 0xDC00 && low <= 0xDFFF) {        // 合法低位代理
+                if (low >= 0xDC00 && low <= 0xDFFF) { // 合法低位代理
                     code = 0x10000 + ((code - 0xD800) * 0x400) + (low - 0xDC00)
                 } else {
-                    code = 0xFFFD                            // 低位代理非法，用替换字符
+                    code = 0xFFFD // 低位代理非法，用替换字符
                 }
             } else {
-                code = 0xFFFD                                // 缺少配对的低位代理，用替换字符
+                code = 0xFFFD // 缺少配对的低位代理，用替换字符
             }
         }
         encodeUtf8(code, out)
@@ -439,30 +550,36 @@ class JsonParser {
     // 把键值对按出现顺序追加到 pairs（这正是保序的来源）。每对之后遇逗号则继续下一对，
     // 遇 '}' 则结束，其余字符报错。键必须是字符串。
     func parseObject(): JsonValue {
-        pos += 1                              // 跳过 {
+        pos += 1 // 跳过 {
         let pairs = ArrayList<(String, JsonValue)>()
         skipWs()
-        if (peek() == 125) {                  // 空对象 }
+        if (peek() == 125) { // 空对象 }
             pos += 1
             return JsonObject(pairs)
         }
         while (true) {
             skipWs()
-            if (peek() != 34) {               // 键必须以双引号开头
+            if (peek() != 34) { // 键必须以双引号开头
                 throw JsonException("expected string key at offset ${pos}")
             }
             let key = parseStringRaw()
             skipWs()
-            if (peek() != 58) {               // 键与值之间的冒号 :
+            if (peek() != 58) { // 键与值之间的冒号 :
                 throw JsonException("expected ':' at offset ${pos}")
             }
             pos += 1
             skipWs()
-            pairs.add((key, parseValue()))    // 递归解析值，按顺序追加，保持插入顺序
+            pairs.add((key, parseValue())) // 递归解析值，按顺序追加，保持插入顺序
             skipWs()
             let c = peek()
-            if (c == 44) { pos += 1; continue }    // 逗号 , -> 继续下一对
-            if (c == 125) { pos += 1; break }      // 右花括号 } -> 对象结束
+            if (c == 44) {
+                pos += 1
+                continue
+            } // 逗号 , -> 继续下一对
+            if (c == 125) {
+                pos += 1
+                break
+            } // 右花括号 } -> 对象结束
             throw JsonException("expected ',' or '}' at offset ${pos}")
         }
         return JsonObject(pairs)
@@ -472,20 +589,26 @@ class JsonParser {
     // parseValue 解析一个元素并按顺序追加到 items（嵌套结构由递归自然处理）。每个元素
     // 之后遇逗号则继续，遇 ']' 则结束，其余字符报错。
     func parseArray(): JsonValue {
-        pos += 1                              // 跳过 [
+        pos += 1 // 跳过 [
         let items = ArrayList<JsonValue>()
         skipWs()
-        if (peek() == 93) {                   // 空数组 ]
+        if (peek() == 93) { // 空数组 ]
             pos += 1
             return JsonArray(items)
         }
         while (true) {
             skipWs()
-            items.add(parseValue())           // 递归解析元素
+            items.add(parseValue()) // 递归解析元素
             skipWs()
             let c = peek()
-            if (c == 44) { pos += 1; continue }    // 逗号 , -> 继续下一个元素
-            if (c == 93) { pos += 1; break }       // 右方括号 ] -> 数组结束
+            if (c == 44) {
+                pos += 1
+                continue
+            } // 逗号 , -> 继续下一个元素
+            if (c == 93) {
+                pos += 1
+                break
+            } // 右方括号 ] -> 数组结束
             throw JsonException("expected ',' or ']' at offset ${pos}")
         }
         return JsonArray(items)

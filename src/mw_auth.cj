@@ -16,8 +16,8 @@ package wen
 
 // HTTP Basic 认证。
 public func basicAuth(verify: (String, String) -> Bool, realm!: String = "Restricted"): Middleware {
-    return { req: HttpRequest, res: HttpResponse, next: Next =>
-        match (authScheme(req, "Basic ")) {
+    return {
+        req: HttpRequest, res: HttpResponse, next: Next => match (authScheme(req, "Basic ")) {
             case Some(b64) =>
                 let decoded = String.fromUtf8(base64Decode(b64))
                 let (user, pass) = splitOnce(decoded, ":")
@@ -34,8 +34,8 @@ public func basicAuth(verify: (String, String) -> Bool, realm!: String = "Restri
 
 // Bearer Token 认证。
 public func bearerAuth(verify: (String) -> Bool, realm!: String = "Restricted"): Middleware {
-    return { req: HttpRequest, res: HttpResponse, next: Next =>
-        match (authScheme(req, "Bearer ")) {
+    return {
+        req: HttpRequest, res: HttpResponse, next: Next => match (authScheme(req, "Bearer ")) {
             case Some(token) =>
                 if (verify(token)) {
                     next()

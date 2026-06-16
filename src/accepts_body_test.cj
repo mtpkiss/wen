@@ -133,7 +133,7 @@ class BodyParserExtrasTest {
 
     func runMw(mw: Middleware, req: HttpRequest): Unit {
         let res = HttpResponse()
-        mw(req, res, { => })
+        mw(req, res, {=>})
     }
 
     // textParser:匹配 text/plain 时把文本体放入 "text" 属性。

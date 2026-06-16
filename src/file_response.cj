@@ -22,9 +22,9 @@ import std.time.*
 
 // Range 头解析结果的三种情形。
 enum RangeResult {
-    | RangeOk(Int64, Int64)   // 合法区间 [start, end](闭区间,含两端)
-    | RangeUnsatisfiable      // 语法合法但无法满足(越界等)-> 416
-    | RangeIgnore             // 不识别 / 多区间 / 非法,忽略 Range,照常发整体
+    | RangeOk(Int64, Int64) // 合法区间 [start, end](闭区间,含两端)
+    | RangeUnsatisfiable // 语法合法但无法满足(越界等)-> 416
+    | RangeIgnore // 不识别 / 多区间 / 非法,忽略 Range,照常发整体
 }
 
 // 把文件字节按文件响应语义写入 res 并结束响应:设置 Content-Type / ETag /
@@ -33,7 +33,7 @@ enum RangeResult {
 // 可选关键字参数 etag / sendLastModified 用于关闭对应响应头与条件请求支持(静态
 // 中间件选项化时,把对应开关传到这里实现)。
 func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: String, lastModified: ?String,
-                       etag!: Bool = true, sendLastModified!: Bool = true): Unit {
+    etag!: Bool = true, sendLastModified!: Bool = true): Unit {
     res.headers["Content-Type"] = contentType
     res.headers["Accept-Ranges"] = "bytes"
     var etagValue = ""
@@ -66,45 +66,47 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
     // 对应方向的条件判断也一并跳过(否则与已不发送的头部对照,语义不一致)。
     // 启用 etag 且带 If-None-Match 时,仅以 INM 判定(命中→304;不命中→照常发送,
     // 依规范不再回退 IMS);否则(未启用 etag,或无 INM)再看 If-Modified-Since。
-    let inm: ?String = if (etag) { req.header("if-none-match") } else { None }
+    let inm: ?String = if (etag) {
+        req.header("if-none-match")
+    } else {
+        None
+    }
     match (inm) {
         case Some(v) =>
             if (etagMatches(v, etagValue)) {
                 send304(res)
                 return
             }
-        case None =>
-            match (effectiveLastModified) {
-                case Some(lm) =>
-                    match (req.header("if-modified-since")) {
-                        case Some(ims) => if (ims.trimAscii() == lm) {
-                            send304(res)
-                            return
-                        }
-                        case None => ()
+        case None => match (effectiveLastModified) {
+            case Some(lm) => match (req.header("if-modified-since")) {
+                case Some(ims) =>
+                    if (ims.trimAscii() == lm) {
+                        send304(res)
+                        return
                     }
                 case None => ()
             }
+            case None => ()
+        }
     }
 
     // Range 分片请求。
     match (req.header("range")) {
-        case Some(rangeHeader) =>
-            match (parseRange(rangeHeader, data.size)) {
-                case RangeOk(start, end) =>
-                    res.status(206)
-                    res.headers["Content-Range"] = "bytes ${start}-${end}/${data.size}"
-                    res.bodyBytes = Some(sliceBytes(data, start, end + 1))
-                    res.finished = true
-                    return
-                case RangeUnsatisfiable =>
-                    res.status(416)
-                    res.headers["Content-Range"] = "bytes */${data.size}"
-                    res.bodyBytes = Some(Array<UInt8>())
-                    res.finished = true
-                    return
-                case RangeIgnore => ()
-            }
+        case Some(rangeHeader) => match (parseRange(rangeHeader, data.size)) {
+            case RangeOk(start, end) =>
+                res.status(206)
+                res.headers["Content-Range"] = "bytes ${start}-${end}/${data.size}"
+                res.bodyBytes = Some(sliceBytes(data, start, end + 1))
+                res.finished = true
+                return
+            case RangeUnsatisfiable =>
+                res.status(416)
+                res.headers["Content-Range"] = "bytes */${data.size}"
+                res.bodyBytes = Some(Array<UInt8>())
+                res.finished = true
+                return
+            case RangeIgnore => ()
+        }
         case None => ()
     }
 
@@ -135,10 +137,18 @@ func httpDateForFile(path: String): ?String {
 func formatHttpDate(t: DateTime): String {
     let dow = t.dayOfWeek.toString()
     let mon = t.month.toString()
-    let dowAbbr = if (dow.size >= 3) { dow[0..3] } else { dow }
-    let monAbbr = if (mon.size >= 3) { mon[0..3] } else { mon }
+    let dowAbbr = if (dow.size >= 3) {
+        dow[0..3]
+    } else {
+        dow
+    }
+    let monAbbr = if (mon.size >= 3) {
+        mon[0..3]
+    } else {
+        mon
+    }
     return "${dowAbbr}, ${pad2(t.dayOfMonth)} ${monAbbr} ${t.year} " +
-           "${pad2(t.hour)}:${pad2(t.minute)}:${pad2(t.second)} GMT"
+        "${pad2(t.hour)}:${pad2(t.minute)}:${pad2(t.second)} GMT"
 }
 
 // 把 0..99 的整数补足成两位十进制字符串。

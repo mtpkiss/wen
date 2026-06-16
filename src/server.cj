@@ -249,8 +249,7 @@ public class HttpServer {
     func indexOfHeaderEndArr(buf: Array<UInt8>): ?Int64 {
         var i = 0
         while (i + 3 < buf.size) {
-            if (buf[i] == UInt8(13) && buf[i + 1] == UInt8(10) &&
-                buf[i + 2] == UInt8(13) && buf[i + 3] == UInt8(10)) {
+            if (buf[i] == UInt8(13) && buf[i + 1] == UInt8(10) && buf[i + 2] == UInt8(13) && buf[i + 3] == UInt8(10)) {
                 return Some(i)
             }
             i += 1
@@ -495,8 +494,7 @@ class ConnReader {
 func headerSeparatorIndex(buf: ArrayList<UInt8>): Int64 {
     var i = 0
     while (i + 3 < buf.size) {
-        if (buf[i] == UInt8(13) && buf[i + 1] == UInt8(10) &&
-            buf[i + 2] == UInt8(13) && buf[i + 3] == UInt8(10)) {
+        if (buf[i] == UInt8(13) && buf[i + 1] == UInt8(10) && buf[i + 2] == UInt8(13) && buf[i + 3] == UInt8(10)) {
             return i
         }
         i += 1
@@ -683,12 +681,12 @@ public func urlDecode(s: String): String {
     var i = 0
     while (i < bytes.size) {
         let c = bytes[i]
-        if (c == UInt8(37) && i + 2 < bytes.size) {        // 字节 37 即 '%'，后面跟两位十六进制
+        if (c == UInt8(37) && i + 2 < bytes.size) { // 字节 37 即 '%'，后面跟两位十六进制
             let code = hexVal(bytes[i + 1]) * 16 + hexVal(bytes[i + 2])
             out.add(UInt8(code))
             i += 3
-        } else if (c == UInt8(43)) {                       // 字节 43 即 '+'
-            out.add(UInt8(32))                             // 还原为字节 32，即空格
+        } else if (c == UInt8(43)) { // 字节 43 即 '+'
+            out.add(UInt8(32)) // 还原为字节 32，即空格
             i += 1
         } else {
             out.add(c)

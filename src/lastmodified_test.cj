@@ -14,20 +14,27 @@ class LastModifiedTest {
         let path = "._cjx_lm_test.txt"
         File.writeTo(path, "data".toArray())
         let app = wen()
-        app.get("/f", { _: HttpRequest, res: HttpResponse => res.sendFile(path) })
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
 
         // 首次请求:取回 Last-Modified。
-        let r1 = HttpRequest("GET", "/f"); r1.path = "/f"
-        let s1 = HttpResponse(); app.handle(r1, s1)
+        let r1 = HttpRequest("GET", "/f");
+        r1.path = "/f"
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
         @Assert(s1.statusCode == 200)
-        let lm = match (s1.get("Last-Modified")) { case Some(v) => v; case None => "" }
+        let lm = match (s1.get("Last-Modified")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(!lm.isEmpty())
         @Expect(lm.contains("GMT"))
 
         // 带 If-Modified-Since 再请求:未修改 -> 304。
-        let r2 = HttpRequest("GET", "/f"); r2.path = "/f"
+        let r2 = HttpRequest("GET", "/f");
+        r2.path = "/f"
         r2.headers["if-modified-since"] = lm
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.statusCode == 304)
         remove(path)
     }

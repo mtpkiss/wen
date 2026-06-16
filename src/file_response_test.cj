@@ -26,19 +26,26 @@ class FileResponseTest {
     func testSendFileEtagAnd304(): Unit {
         let path = writeTemp("._cjx_fr_etag.txt")
         let app = wen()
-        app.get("/f", { _: HttpRequest, res: HttpResponse => res.sendFile(path) })
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
 
         // 首次请求:拿到内容与 ETag。
-        let r1 = HttpRequest("GET", "/f"); r1.path = "/f"
-        let s1 = HttpResponse(); app.handle(r1, s1)
+        let r1 = HttpRequest("GET", "/f");
+        r1.path = "/f"
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
         @Assert(s1.statusCode == 200)
-        let etag = match (s1.get("ETag")) { case Some(v) => v; case None => "" }
+        let etag = match (s1.get("ETag")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(!etag.isEmpty())
 
         // 带 If-None-Match 再请求:内容未变,应回 304 且无响应体。
-        let r2 = HttpRequest("GET", "/f"); r2.path = "/f"
+        let r2 = HttpRequest("GET", "/f");
+        r2.path = "/f"
         r2.headers["if-none-match"] = etag
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.statusCode == 304)
         @Assert(bytesOf(s2) == "")
         remove(path)
@@ -49,14 +56,19 @@ class FileResponseTest {
     func testSendFileRange206(): Unit {
         let path = writeTemp("._cjx_fr_range.txt")
         let app = wen()
-        app.get("/f", { _: HttpRequest, res: HttpResponse => res.sendFile(path) })
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
 
-        let req = HttpRequest("GET", "/f"); req.path = "/f"
+        let req = HttpRequest("GET", "/f");
+        req.path = "/f"
         req.headers["range"] = "bytes=2-5"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 206)
         @Assert(bytesOf(res) == "2345")
-        let cr = match (res.get("Content-Range")) { case Some(v) => v; case None => "" }
+        let cr = match (res.get("Content-Range")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Assert(cr == "bytes 2-5/10")
         remove(path)
     }
@@ -66,14 +78,19 @@ class FileResponseTest {
     func testSendFileRangeSuffix(): Unit {
         let path = writeTemp("._cjx_fr_suffix.txt")
         let app = wen()
-        app.get("/f", { _: HttpRequest, res: HttpResponse => res.sendFile(path) })
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
 
-        let req = HttpRequest("GET", "/f"); req.path = "/f"
+        let req = HttpRequest("GET", "/f");
+        req.path = "/f"
         req.headers["range"] = "bytes=-3"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 206)
         @Assert(bytesOf(res) == "789")
-        let cr = match (res.get("Content-Range")) { case Some(v) => v; case None => "" }
+        let cr = match (res.get("Content-Range")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Assert(cr == "bytes 7-9/10")
         remove(path)
     }
@@ -83,13 +100,18 @@ class FileResponseTest {
     func testSendFileRangeUnsatisfiable(): Unit {
         let path = writeTemp("._cjx_fr_416.txt")
         let app = wen()
-        app.get("/f", { _: HttpRequest, res: HttpResponse => res.sendFile(path) })
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
 
-        let req = HttpRequest("GET", "/f"); req.path = "/f"
+        let req = HttpRequest("GET", "/f");
+        req.path = "/f"
         req.headers["range"] = "bytes=100-200"
-        let res = HttpResponse(); app.handle(req, res)
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 416)
-        let cr = match (res.get("Content-Range")) { case Some(v) => v; case None => "" }
+        let cr = match (res.get("Content-Range")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Assert(cr == "bytes */10")
         remove(path)
     }
@@ -99,10 +121,16 @@ class FileResponseTest {
     func testAttachmentHeader(): Unit {
         let res = HttpResponse()
         res.attachment("report.txt")
-        let cd = match (res.get("Content-Disposition")) { case Some(v) => v; case None => "" }
+        let cd = match (res.get("Content-Disposition")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(cd.contains("attachment"))
         @Expect(cd.contains("filename=\"report.txt\""))
-        let ct = match (res.get("Content-Type")) { case Some(v) => v; case None => "" }
+        let ct = match (res.get("Content-Type")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(ct.contains("text/plain"))
     }
 
@@ -112,13 +140,18 @@ class FileResponseTest {
     func testDownloadSendsFile(): Unit {
         let path = writeTemp("._cjx_fr_download.txt")
         let app = wen()
-        app.get("/d", { _: HttpRequest, res: HttpResponse => res.download(path) })
+        app.get("/d", {_: HttpRequest, res: HttpResponse => res.download(path)})
 
-        let req = HttpRequest("GET", "/d"); req.path = "/d"
-        let res = HttpResponse(); app.handle(req, res)
+        let req = HttpRequest("GET", "/d");
+        req.path = "/d"
+        let res = HttpResponse();
+        app.handle(req, res)
         @Assert(res.statusCode == 200)
         @Assert(bytesOf(res) == "0123456789")
-        let cd = match (res.get("Content-Disposition")) { case Some(v) => v; case None => "" }
+        let cd = match (res.get("Content-Disposition")) {
+            case Some(v) => v;
+            case None => ""
+        }
         @Expect(cd.contains("attachment"))
         @Expect(cd.contains("._cjx_fr_download.txt"))
         remove(path)

@@ -29,10 +29,10 @@ import std.fs.*
 
 // 一个已上传的文件。bytes 是其原始字节;可用 text() 取文本视图,或 saveTo 落盘。
 public class UploadedFile {
-    public let fieldName: String       // 表单字段名(Content-Disposition 的 name)
-    public let filename: String        // 客户端给出的原始文件名
-    public let contentType: String     // 该 part 的 Content-Type(缺省按八位字节流)
-    public let bytes: Array<UInt8>     // 文件的原始字节内容
+    public let fieldName: String // 表单字段名(Content-Disposition 的 name)
+    public let filename: String // 客户端给出的原始文件名
+    public let contentType: String // 该 part 的 Content-Type(缺省按八位字节流)
+    public let bytes: Array<UInt8> // 文件的原始字节内容
 
     init(fieldName: String, filename: String, contentType: String, bytes: Array<UInt8>) {
         this.fieldName = fieldName
@@ -60,9 +60,10 @@ public class UploadedFile {
 // multipart/form-data 解析中间件(兼容保留)。解析现在是内置的——首次通过 req.file(name) /
 // req.files 访问时自动解析(见 HttpRequest.ensureBody),本中间件已非必需,内部仅提前触发解析。
 public func multipart(): Middleware {
-    return { req: HttpRequest, _: HttpResponse, next: Next =>
-        req.ensureBody()
-        next()
+    return {
+        req: HttpRequest, _: HttpResponse, next: Next =>
+            req.ensureBody()
+            next()
     }
 }
 
@@ -81,10 +82,10 @@ func extractBoundary(ct: String): ?String {
 // 在 req.bodyBytes 上按 boundary 切分并解析各个 part。
 func parseMultipart(req: HttpRequest, boundary: String): Unit {
     let body = req.bodyBytes
-    let dash = ("--" + boundary).toArray()      // 分隔符:--BOUNDARY
+    let dash = ("--" + boundary).toArray() // 分隔符:--BOUNDARY
     let crlf = "\r\n".toArray()
     let dashdash = "--".toArray()
-    let sep = "\r\n\r\n".toArray()              // part 内的「头/体」分隔
+    let sep = "\r\n\r\n".toArray() // part 内的「头/体」分隔
 
     // 先找出所有分隔符出现的位置(包含结尾的 --BOUNDARY-- 也会命中 --BOUNDARY)。
     let occ = ArrayList<Int64>()
@@ -127,7 +128,7 @@ func parseMultipart(req: HttpRequest, boundary: String): Unit {
 func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, sep: Array<UInt8>): Unit {
     let headerEnd = indexOfBytes(body, sep, start)
     if (headerEnd < 0 || headerEnd >= end) {
-        return                                  // 残缺 part,跳过
+        return // 残缺 part,跳过
     }
     let headerText = String.fromUtf8(sliceBytes(body, start, headerEnd))
     let content = sliceBytes(body, headerEnd + 4, end)

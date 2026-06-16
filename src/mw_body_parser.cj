@@ -1,6 +1,5 @@
 package wen
 
-
 /*
  * 请求体解析中间件工厂。
  *
@@ -15,18 +14,20 @@ package wen
 // (兼容保留)表单解析。解析已内置,本中间件仅提前触发 req.ensureBody();
 // url-encoded 字段经 req.attribute(name) 读取。
 public func urlencodedParser(): Middleware {
-    return { req: HttpRequest, _: HttpResponse, next: Next =>
-        req.ensureBody()
-        next()
+    return {
+        req: HttpRequest, _: HttpResponse, next: Next =>
+            req.ensureBody()
+            next()
     }
 }
 
 // (兼容保留)JSON 解析。解析已内置,本中间件仅提前触发 req.ensureBody();
 // 解析结果经 req.json() 读取(空体 / 非法 JSON 时为 None,不会让请求失败)。
 public func jsonParser(): Middleware {
-    return { req: HttpRequest, _: HttpResponse, next: Next =>
-        req.ensureBody()
-        next()
+    return {
+        req: HttpRequest, _: HttpResponse, next: Next =>
+            req.ensureBody()
+            next()
     }
 }
 
@@ -35,15 +36,16 @@ public func jsonParser(): Middleware {
 // req.attributes["text"],便于与 jsonParser 的 "json" 入口对称地取用(req.body 本身
 // 始终保有该文本)。Content-Type 不匹配的请求原样放行、不写入。
 public func textParser(contentType!: String = "text/plain"): Middleware {
-    return { req: HttpRequest, _: HttpResponse, next: Next =>
-        match (req.header("content-type")) {
-            case Some(ct) =>
-                if (ct.toAsciiLower().contains(contentType.toAsciiLower())) {
-                    req.setAttribute("text", req.body)
-                }
-            case None => ()
-        }
-        next()
+    return {
+        req: HttpRequest, _: HttpResponse, next: Next =>
+            match (req.header("content-type")) {
+                case Some(ct) =>
+                    if (ct.toAsciiLower().contains(contentType.toAsciiLower())) {
+                        req.setAttribute("text", req.body)
+                    }
+                case None => ()
+            }
+            next()
     }
 }
 
@@ -52,14 +54,15 @@ public func textParser(contentType!: String = "text/plain"): Middleware {
 // UTF-8 编解码往返)存入 req.locals["raw"](取用:req.local("raw") 再向下转型为
 // Array<UInt8>;也可始终用 req.bodyBytes 直接读取)。常用于 Webhook 按原文验签等场景。
 public func rawParser(contentType!: String = "application/octet-stream"): Middleware {
-    return { req: HttpRequest, _: HttpResponse, next: Next =>
-        match (req.header("content-type")) {
-            case Some(ct) =>
-                if (ct.toAsciiLower().contains(contentType.toAsciiLower())) {
-                    req.setLocal("raw", req.bodyBytes)
-                }
-            case None => ()
-        }
-        next()
+    return {
+        req: HttpRequest, _: HttpResponse, next: Next =>
+            match (req.header("content-type")) {
+                case Some(ct) =>
+                    if (ct.toAsciiLower().contains(contentType.toAsciiLower())) {
+                        req.setLocal("raw", req.bodyBytes)
+                    }
+                case None => ()
+            }
+            next()
     }
 }

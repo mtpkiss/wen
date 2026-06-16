@@ -28,23 +28,34 @@ class SessionTest {
         let app = wen()
         app.cookieSecret = "s3cr3t"
         app.use(cookieParser())
-        app.get("/set", { _: HttpRequest, res: HttpResponse =>
-            res.cookie("token", "abc123", signed: true).send("ok")
+        app.get("/set", {
+            _: HttpRequest, res: HttpResponse => res.cookie("token", "abc123", signed: true).send("ok")
         })
-        app.get("/get", { req: HttpRequest, res: HttpResponse =>
-            let v = match (req.signedCookie("token")) { case Some(x) => x; case None => "INVALID" }
-            res.send(v)
-        })
+        app.get(
+            "/get",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let v = match (req.signedCookie("token")) {
+                        case Some(x) => x;
+                        case None => "INVALID"
+                    }
+                    res.send(v)
+            }
+        )
 
-        let r1 = HttpRequest("GET", "/set"); r1.path = "/set"
-        let s1 = HttpResponse(); app.handle(r1, s1)
-        let signed = sidFrom(s1)              // "abc123.<sig>"
+        let r1 = HttpRequest("GET", "/set");
+        r1.path = "/set"
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
+        let signed = sidFrom(s1) // "abc123.<sig>"
         @Expect(signed.contains("abc123."))
 
         // 回送该签名 Cookie -> 验签通过,取回原值。
-        let r2 = HttpRequest("GET", "/get"); r2.path = "/get"
+        let r2 = HttpRequest("GET", "/get");
+        r2.path = "/get"
         r2.headers["cookie"] = "token=${signed}"
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.body == "abc123")
     }
 
@@ -54,14 +65,23 @@ class SessionTest {
         let app = wen()
         app.cookieSecret = "s3cr3t"
         app.use(cookieParser())
-        app.get("/get", { req: HttpRequest, res: HttpResponse =>
-            let v = match (req.signedCookie("token")) { case Some(x) => x; case None => "INVALID" }
-            res.send(v)
-        })
-        let r = HttpRequest("GET", "/get"); r.path = "/get"
+        app.get(
+            "/get",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let v = match (req.signedCookie("token")) {
+                        case Some(x) => x;
+                        case None => "INVALID"
+                    }
+                    res.send(v)
+            }
+        )
+        let r = HttpRequest("GET", "/get");
+        r.path = "/get"
         // 值被改成 evil,但签名仍是旧的 -> 不匹配。
         r.headers["cookie"] = "token=evil.0000000000000000000000000000000000000000000000000000000000000000"
-        let res = HttpResponse(); app.handle(r, res)
+        let res = HttpResponse();
+        app.handle(r, res)
         @Assert(res.body == "INVALID")
     }
 
@@ -73,32 +93,47 @@ class SessionTest {
         let store = MemorySessionStore()
         app.use(cookieParser())
         app.use(session(store))
-        app.get("/login", { req: HttpRequest, res: HttpResponse =>
-            match (req.session) {
-                case Some(s) => s.set("user", "alice")
-                case None => ()
+        app.get(
+            "/login",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    match (req.session) {
+                        case Some(s) => s.set("user", "alice")
+                        case None => ()
+                    }
+                    res.send("logged-in")
             }
-            res.send("logged-in")
-        })
-        app.get("/who", { req: HttpRequest, res: HttpResponse =>
-            let u = match (req.session) {
-                case Some(s) => match (s.get("user")) { case Some(v) => v; case None => "anon" }
-                case None => "no-session"
+        )
+        app.get(
+            "/who",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let u = match (req.session) {
+                        case Some(s) => match (s.get("user")) {
+                            case Some(v) => v;
+                            case None => "anon"
+                        }
+                        case None => "no-session"
+                    }
+                    res.send(u)
             }
-            res.send(u)
-        })
+        )
 
         // 1) 登录:写会话,响应应带 Set-Cookie(签名 sid)。
-        let r1 = HttpRequest("GET", "/login"); r1.path = "/login"
-        let s1 = HttpResponse(); app.handle(r1, s1)
+        let r1 = HttpRequest("GET", "/login");
+        r1.path = "/login"
+        let s1 = HttpResponse();
+        app.handle(r1, s1)
         @Assert(s1.setCookies.size == 1)
         let sid = sidFrom(s1)
         @Expect(!sid.isEmpty())
 
         // 2) 带 sid 再访问:应读到上一步写入的 user=alice。
-        let r2 = HttpRequest("GET", "/who"); r2.path = "/who"
+        let r2 = HttpRequest("GET", "/who");
+        r2.path = "/who"
         r2.headers["cookie"] = "sid=${sid}"
-        let s2 = HttpResponse(); app.handle(r2, s2)
+        let s2 = HttpResponse();
+        app.handle(r2, s2)
         @Assert(s2.body == "alice")
 
         // 既有会话不再重复下发 Set-Cookie。
@@ -112,16 +147,25 @@ class SessionTest {
         app.cookieSecret = "k"
         app.use(cookieParser())
         app.use(session())
-        app.get("/who", { req: HttpRequest, res: HttpResponse =>
-            let u = match (req.session) {
-                case Some(s) => match (s.get("user")) { case Some(v) => v; case None => "anon" }
-                case None => "no-session"
+        app.get(
+            "/who",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let u = match (req.session) {
+                        case Some(s) => match (s.get("user")) {
+                            case Some(v) => v;
+                            case None => "anon"
+                        }
+                        case None => "no-session"
+                    }
+                    res.send(u)
             }
-            res.send(u)
-        })
-        let r = HttpRequest("GET", "/who"); r.path = "/who"
-        let res = HttpResponse(); app.handle(r, res)
+        )
+        let r = HttpRequest("GET", "/who");
+        r.path = "/who"
+        let res = HttpResponse();
+        app.handle(r, res)
         @Assert(res.body == "anon")
-        @Assert(res.setCookies.size == 1)     // 新会话下发 sid
+        @Assert(res.setCookies.size == 1) // 新会话下发 sid
     }
 }

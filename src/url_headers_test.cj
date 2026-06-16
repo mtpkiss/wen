@@ -16,10 +16,14 @@ class OriginalUrlTest {
     @TestCase
     func testOriginalUrlTopLevel(): Unit {
         let app = wen()
-        app.get("/hello", { req: HttpRequest, res: HttpResponse =>
-            req.attributes["captured"] = req.originalUrl
-            res.send("ok")
-        })
+        app.get(
+            "/hello",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    req.attributes["captured"] = req.originalUrl
+                    res.send("ok")
+            }
+        )
         let req = HttpRequest("GET", "/hello?foo=bar")
         req.path = "/hello"
         req.query["foo"] = "bar"
@@ -40,29 +44,48 @@ class OriginalUrlTest {
         let app = wen()
 
         let sub = Router()
-        sub.get("/users", { req: HttpRequest, res: HttpResponse =>
-            req.attributes["innerOriginal"] = req.originalUrl
-            req.attributes["innerPath"]     = req.path
-            req.attributes["innerBaseUrl"]  = req.baseUrl
-            res.send("ok")
-        })
-        app.use({ req: HttpRequest, _: HttpResponse, next: Next =>
-            req.attributes["outerOriginal"] = req.originalUrl
-            next()
-        })
+        sub.get(
+            "/users",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    req.attributes["innerOriginal"] = req.originalUrl
+                    req.attributes["innerPath"] = req.path
+                    req.attributes["innerBaseUrl"] = req.baseUrl
+                    res.send("ok")
+            }
+        )
+        app.use(
+            {
+                req: HttpRequest, _: HttpResponse, next: Next =>
+                    req.attributes["outerOriginal"] = req.originalUrl
+                    next()
+            }
+        )
         app.use("/api", sub)
 
         let req = HttpRequest("GET", "/api/users")
         req.path = "/api/users"
-        req.originalUrl = "/api/users"  // 模拟 server.cj 行为
+        req.originalUrl = "/api/users" // 模拟 server.cj 行为
 
         let res = HttpResponse()
         app.handle(req, res)
 
-        let outerOriginal = match (req.attribute("outerOriginal")) { case Some(v) => v; case None => "" }
-        let innerOriginal = match (req.attribute("innerOriginal")) { case Some(v) => v; case None => "" }
-        let innerPath     = match (req.attribute("innerPath"))     { case Some(v) => v; case None => "" }
-        let innerBaseUrl  = match (req.attribute("innerBaseUrl"))  { case Some(v) => v; case None => "" }
+        let outerOriginal = match (req.attribute("outerOriginal")) {
+            case Some(v) => v;
+            case None => ""
+        }
+        let innerOriginal = match (req.attribute("innerOriginal")) {
+            case Some(v) => v;
+            case None => ""
+        }
+        let innerPath = match (req.attribute("innerPath")) {
+            case Some(v) => v;
+            case None => ""
+        }
+        let innerBaseUrl = match (req.attribute("innerBaseUrl")) {
+            case Some(v) => v;
+            case None => ""
+        }
 
         // originalUrl 始终是完整路径
         @Assert(outerOriginal == "/api/users")
@@ -79,11 +102,15 @@ class OriginalUrlTest {
         let app = wen()
 
         let inner = Router()
-        inner.get("/detail", { req: HttpRequest, res: HttpResponse =>
-            req.attributes["capturedBaseUrl"] = req.baseUrl
-            req.attributes["capturedPath"]    = req.path
-            res.send("ok")
-        })
+        inner.get(
+            "/detail",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    req.attributes["capturedBaseUrl"] = req.baseUrl
+                    req.attributes["capturedPath"] = req.path
+                    res.send("ok")
+            }
+        )
 
         let outer = Router()
         outer.use("/v1", inner)
@@ -96,8 +123,14 @@ class OriginalUrlTest {
         let res = HttpResponse()
         app.handle(req, res)
 
-        let gotPath    = match (req.attribute("capturedPath"))    { case Some(v) => v; case None => "" }
-        let gotBaseUrl = match (req.attribute("capturedBaseUrl")) { case Some(v) => v; case None => "" }
+        let gotPath = match (req.attribute("capturedPath")) {
+            case Some(v) => v;
+            case None => ""
+        }
+        let gotBaseUrl = match (req.attribute("capturedBaseUrl")) {
+            case Some(v) => v;
+            case None => ""
+        }
 
         @Assert(gotPath    == "/detail")
         @Assert(gotBaseUrl == "/api/v1")
@@ -107,17 +140,24 @@ class OriginalUrlTest {
     @TestCase
     func testBaseUrlEmptyAtTopLevel(): Unit {
         let app = wen()
-        app.get("/", { req: HttpRequest, res: HttpResponse =>
-            req.attributes["capturedBaseUrl"] = req.baseUrl
-            res.send("ok")
-        })
+        app.get(
+            "/",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    req.attributes["capturedBaseUrl"] = req.baseUrl
+                    res.send("ok")
+            }
+        )
         let req = HttpRequest("GET", "/")
         req.path = "/"
         req.originalUrl = "/"
         let res = HttpResponse()
         app.handle(req, res)
 
-        let gotBaseUrl = match (req.attribute("capturedBaseUrl")) { case Some(v) => v; case None => "NOT_SET" }
+        let gotBaseUrl = match (req.attribute("capturedBaseUrl")) {
+            case Some(v) => v;
+            case None => "NOT_SET"
+        }
         @Assert(gotBaseUrl == "")
     }
 
@@ -125,12 +165,16 @@ class OriginalUrlTest {
     @TestCase
     func testBaseUrlInMountedMiddleware(): Unit {
         let app = wen()
-        app.use("/prefix", { req: HttpRequest, _: HttpResponse, next: Next =>
-            req.attributes["middlewareBaseUrl"] = req.baseUrl
-            req.attributes["middlewarePath"]    = req.path
-            next()
-        })
-        app.get("/prefix/page", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        app.use(
+            "/prefix",
+            {
+                req: HttpRequest, _: HttpResponse, next: Next =>
+                    req.attributes["middlewareBaseUrl"] = req.baseUrl
+                    req.attributes["middlewarePath"] = req.path
+                    next()
+            }
+        )
+        app.get("/prefix/page", {_: HttpRequest, res: HttpResponse => res.send("ok")})
 
         let req = HttpRequest("GET", "/prefix/page")
         req.path = "/prefix/page"
@@ -138,8 +182,14 @@ class OriginalUrlTest {
         let res = HttpResponse()
         app.handle(req, res)
 
-        let gotBaseUrl = match (req.attribute("middlewareBaseUrl")) { case Some(v) => v; case None => "" }
-        let gotPath    = match (req.attribute("middlewarePath"))    { case Some(v) => v; case None => "" }
+        let gotBaseUrl = match (req.attribute("middlewareBaseUrl")) {
+            case Some(v) => v;
+            case None => ""
+        }
+        let gotPath = match (req.attribute("middlewarePath")) {
+            case Some(v) => v;
+            case None => ""
+        }
 
         @Assert(gotBaseUrl == "/prefix")
         @Assert(gotPath    == "/page")
@@ -154,18 +204,29 @@ class HeadersSentTest {
     @TestCase
     func testHeadersSentFalseInTestMode(): Unit {
         let app = wen()
-        app.get("/test", { req: HttpRequest, res: HttpResponse =>
-            // 处理器执行时响应头尚未发送，将其记录到 attributes 中
-            req.attributes["sentDuringHandler"] = if (res.headersSent) { "true" } else { "false" }
-            res.send("ok")
-        })
+        app.get(
+            "/test",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    // 处理器执行时响应头尚未发送，将其记录到 attributes 中
+                    req.attributes["sentDuringHandler"] = if (res.headersSent) {
+                        "true"
+                    } else {
+                        "false"
+                    }
+                    res.send("ok")
+            }
+        )
         let req = HttpRequest("GET", "/test")
         req.path = "/test"
         req.originalUrl = "/test"
         let res = HttpResponse()
         app.handle(req, res)
 
-        let sentDuring = match (req.attribute("sentDuringHandler")) { case Some(v) => v; case None => "none" }
+        let sentDuring = match (req.attribute("sentDuringHandler")) {
+            case Some(v) => v;
+            case None => "none"
+        }
         // 在测试场景（无 conn）下，处理器内 headersSent 应为 false
         @Assert(sentDuring == "false")
         // 测试模式不写 socket，所以 app.handle 后 headersSent 仍为 false
@@ -177,11 +238,14 @@ class HeadersSentTest {
     @TestCase
     func testHeadersSentTrueAfterStream(): Unit {
         let app = wen()
-        app.get("/stream", { _: HttpRequest, res: HttpResponse =>
-            res.stream({ w: StreamWriter =>
-                w.write("chunk1")
-                w.write("chunk2")
-            })
+        app.get("/stream", {
+            _: HttpRequest, res: HttpResponse => res.stream(
+                {
+                    w: StreamWriter =>
+                        w.write("chunk1")
+                        w.write("chunk2")
+                }
+            )
         })
         let req = HttpRequest("GET", "/stream")
         req.path = "/stream"
@@ -197,9 +261,9 @@ class HeadersSentTest {
     @TestCase
     func testHeadersSentTrueAfterSse(): Unit {
         let app = wen()
-        app.get("/sse", { _: HttpRequest, res: HttpResponse =>
-            res.sse({ w: SseWriter =>
-                w.send("hello")
+        app.get("/sse", {
+            _: HttpRequest, res: HttpResponse => res.sse({
+                w: SseWriter => w.send("hello")
             })
         })
         let req = HttpRequest("GET", "/sse")
@@ -216,14 +280,21 @@ class HeadersSentTest {
     func testHeadersSentInErrorHandler(): Unit {
         let app = wen()
 
-        app.get("/boom", { _: HttpRequest, _: HttpResponse, _: Next =>
-            throw Exception("intentional error")
+        app.get("/boom", {
+            _: HttpRequest, _: HttpResponse, _: Next => throw Exception("intentional error")
         })
         // 使用 app.use(handler: ErrorHandler) 而非不存在的 app.useError
-        app.use({ e: Exception, req: HttpRequest, res: HttpResponse, _: Next =>
-            req.attributes["headersSentInHandler"] = if (res.headersSent) { "true" } else { "false" }
-            res.status(500).send("error caught")
-        })
+        app.use(
+            {
+                e: Exception, req: HttpRequest, res: HttpResponse, _: Next =>
+                    req.attributes["headersSentInHandler"] = if (res.headersSent) {
+                        "true"
+                    } else {
+                        "false"
+                    }
+                    res.status(500).send("error caught")
+            }
+        )
 
         let req = HttpRequest("GET", "/boom")
         req.path = "/boom"
@@ -231,7 +302,10 @@ class HeadersSentTest {
         let res = HttpResponse()
         app.handle(req, res)
 
-        let sentInHandler = match (req.attribute("headersSentInHandler")) { case Some(v) => v; case None => "none" }
+        let sentInHandler = match (req.attribute("headersSentInHandler")) {
+            case Some(v) => v;
+            case None => "none"
+        }
         // 在非流式处理器中抛出异常时，响应头尚未发送
         @Assert(sentInHandler == "false")
         @Assert(res.statusCode == 500)
