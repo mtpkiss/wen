@@ -64,38 +64,27 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
     // 见 serializeResponse 对 304 的处理:既不发 body 也不发 Content-Length);
     // ETag / Last-Modified 头仍保留在响应里。当 etag/sendLastModified 关闭时,
     // 对应方向的条件判断也一并跳过(否则与已不发送的头部对照,语义不一致)。
-    if (etag) {
-        match (req.header("if-none-match")) {
-            case Some(inm) =>
-                if (etagMatches(inm, etagValue)) {
-                    send304(res)
-                    return
-                }
-            case None =>
-                match (effectiveLastModified) {
-                    case Some(lm) =>
-                        match (req.header("if-modified-since")) {
-                            case Some(ims) => if (ims.trimAscii() == lm) {
-                                send304(res)
-                                return
-                            }
-                            case None => ()
+    // 启用 etag 且带 If-None-Match 时,仅以 INM 判定(命中→304;不命中→照常发送,
+    // 依规范不再回退 IMS);否则(未启用 etag,或无 INM)再看 If-Modified-Since。
+    let inm: ?String = if (etag) { req.header("if-none-match") } else { None }
+    match (inm) {
+        case Some(v) =>
+            if (etagMatches(v, etagValue)) {
+                send304(res)
+                return
+            }
+        case None =>
+            match (effectiveLastModified) {
+                case Some(lm) =>
+                    match (req.header("if-modified-since")) {
+                        case Some(ims) => if (ims.trimAscii() == lm) {
+                            send304(res)
+                            return
                         }
-                    case None => ()
-                }
-        }
-    } else {
-        match (effectiveLastModified) {
-            case Some(lm) =>
-                match (req.header("if-modified-since")) {
-                    case Some(ims) => if (ims.trimAscii() == lm) {
-                        send304(res)
-                        return
+                        case None => ()
                     }
-                    case None => ()
-                }
-            case None => ()
-        }
+                case None => ()
+            }
     }
 
     // Range 分片请求。
