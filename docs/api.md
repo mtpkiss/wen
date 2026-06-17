@@ -36,7 +36,9 @@
 ### 派发与启动
 
 - `handle(req, res)` —— 跑完整条链(便于无 socket 测试)
-- `listen(port)` / `listen(port, onReady)`
+- `listen(port)` / `listen(port, onReady)` —— 阻塞调用,通常在协程里 `spawn`
+- `close(timeoutMs! = 5000)` —— 优雅关闭:停接新连接,等在途请求 drain 完成或超时;
+  幂等;listen 之前调用是无操作
 
 ## HttpRequest
 

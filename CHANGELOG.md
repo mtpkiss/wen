@@ -6,6 +6,11 @@
 
 围绕「保持简单、可扩展」收敛范围、减少样板(含破坏性变更):
 
+- **新增 `app.close(timeoutMs!)` 优雅关闭**:对应 Express + Node 生态里的 SIGTERM 排空。
+  机制:置 shutdown 信号 → 关 server socket(中断阻塞的 accept)→ 在途连接处理完
+  当前请求并断开 keep-alive(响应自动加 `Connection: close`)→ 等 drain 完成或
+  `timeoutMs` 超时。重复调用幂等。典型用法:在另一协程里 `spawn { app.listen(8080) }`,
+  收到关闭信号时主线程 `app.close(timeoutMs: 5000)`,容器 / k8s 滚动发布从此不丢请求。
 - **`helmet` HSTS 三档可调**:新增 `hstsMaxAge!`(默认 15552000 / 180 天,保持向后兼容)、
   `hstsIncludeSubDomains!`(默认 true)、`hstsPreload!`(默认 false)三个具名参数。
   preload 是不可撤销的浏览器内置承诺,默认关闭以免误开;生产 preload 标配可写

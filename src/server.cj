@@ -68,6 +68,19 @@ public class HttpServer {
     // 多出来的连接会在 accept 之前被挡住，不会无限制地创建线程而把资源耗尽。
     public var maxConnections: Int64 = 1024
 
+    // ---- 优雅关闭相关状态 ----
+    // 关闭信号:置 true 后,accept 循环退出,handleConnection 不再复用 keep-alive。
+    let shutdownRequested: AtomicBool = AtomicBool(false)
+    // 当前在途的连接数(每条 TCP 连接一个,无论它处理了几次 keep-alive 请求)。
+    // shutdown() 会等到它降为 0 或超时为止。
+    let inflight: AtomicInt64 = AtomicInt64(0)
+    // drain 完成 / 超时的通知闸门。release 一次即可让 shutdown() 中阻塞的 acquire 返回;
+    // drainSignaled 防止重复 release 把信号量计数推高,影响后续(虽然 shutdown 期望只调一次)。
+    let drainGate: Semaphore = Semaphore(0)
+    let drainSignaled: AtomicBool = AtomicBool(false)
+    // 当前监听的 server socket;listen 期间存在,shutdown 时关闭以中断阻塞的 accept。
+    var serverSocket: ?TcpServerSocket = None
+
     public init(app: Application) {
         this.app = app
     }
@@ -75,6 +88,16 @@ public class HttpServer {
     public func listen(port: Int64): Unit {
         let server = TcpServerSocket(bindAt: UInt16(port))
         server.bind()
+        this.serverSocket = Some(server)
+        // 若 shutdown() 在 listen() 之前被调用过(罕见但合法),这里立即退出。
+        if (shutdownRequested.load()) {
+            try {
+                server.close()
+            } catch (_: Exception) {
+                ()
+            }
+            return
+        }
         // 用信号量给并发量设上限：accept 循环每次循环前先 acquire 一个槽位，
         // 当 maxConnections 个连接都在处理中（槽位耗尽）时，acquire 会阻塞，
         // 整个 accept 循环随之暂停——此时尚未被 accept 的连接会暂存在操作系统的
@@ -82,16 +105,88 @@ public class HttpServer {
         // 归还槽位，循环便恢复继续 accept。这样无论涌入多少连接，同时存活的
         // 处理线程数都不会超过 maxConnections，杜绝了线程被无限 spawn 的风险。
         let slots = Semaphore(maxConnections)
-        while (true) {
+        while (!shutdownRequested.load()) {
             slots.acquire()
-            let client = server.accept()
+            // 第二次检查:acquire 阻塞期间可能进入 shutdown。
+            if (shutdownRequested.load()) {
+                slots.release()
+                break
+            }
+            // shutdown 期间 server.close() 会让阻塞的 accept 抛异常,这里 break;
+            // 非 shutdown 期间的 accept 异常则视为致命,跳出循环。
+            let client = try {
+                server.accept()
+            } catch (_: Exception) {
+                slots.release()
+                break
+            }
+            inflight.fetchAdd(1)
             spawn {
                 try {
                     handleConnection(client)
                 } finally {
                     slots.release()
+                    // 关键:在 shutdown 且 inflight 降至 0 时通知 drain 闸门。
+                    // fetchSub 的返回值是 *修改前* 的旧值,旧值 1 即对应新值 0。
+                    let prev = inflight.fetchSub(1)
+                    if (prev == 1 && shutdownRequested.load()) {
+                        signalDrainOnce()
+                    }
                 }
             }
+        }
+        // 走出 accept 循环:如果是 shutdown 触发,且 inflight 已经为 0,
+        // shutdown() 那边可能还在 acquire 上阻塞,这里兜一次。
+        if (shutdownRequested.load() && inflight.load() == 0) {
+            signalDrainOnce()
+        }
+    }
+
+    // 优雅关闭:停止接受新连接,等待在途连接处理完当前请求(并断开 keep-alive),
+    // 至多等 timeoutMs 毫秒;timeoutMs <= 0 表示不等(立即返回,留着进程兜底)。
+    //
+    // 关闭语义:
+    //   1. shutdownRequested 置 true:accept 循环退出;keep-alive 连接处理完
+    //      当前这次请求后不再复用,响应自动加 `Connection: close`。
+    //   2. 关闭 server socket,让阻塞在 accept 上的 listen 协程立即退出。
+    //   3. 等 drainGate:在「inflight 降至 0」或「timeoutMs 到」两种事件中谁先发生
+    //      谁先唤醒。第一种=优雅完成;第二种=超时强退(在途连接会随进程终结)。
+    //
+    // 重复调用幂等:已 shutdown 时立即返回 0(无需等待)。
+    public func shutdown(timeoutMs!: Int64 = 5000): Unit {
+        let already = shutdownRequested.swap(true)
+        if (already) {
+            return
+        }
+        // 关 server socket -> accept 异常 -> listen 退出。
+        match (this.serverSocket) {
+            case Some(s) => try {
+                s.close()
+            } catch (_: Exception) {
+                ()
+            }
+            case None => ()
+        }
+        // 立即就绪:目前 inflight=0,无需等待。
+        if (inflight.load() == 0) {
+            return
+        }
+        if (timeoutMs <= 0) {
+            return
+        }
+        // watchdog:超时后释放 drainGate,让主 acquire 解阻塞返回。
+        spawn {
+            sleep(Duration.millisecond * timeoutMs)
+            signalDrainOnce()
+        }
+        drainGate.acquire()
+    }
+
+    // 让 drainGate 只 release 一次:防止 watchdog 与 inflight==0 两条路径都触发,
+    // 把 Semaphore 计数推到 > 0 而影响后续语义(虽然本 server 实例一般只 shutdown 一次)。
+    func signalDrainOnce(): Unit {
+        if (!drainSignaled.swap(true)) {
+            drainGate.release()
         }
     }
 
@@ -123,7 +218,9 @@ public class HttpServer {
                 if (res.hijacked) {
                     break
                 }
-                let keepAlive = shouldKeepAlive(req)
+                // shutdown 期间不再续 keep-alive:让客户端干脆切到新连接(它会落到
+                // 已关闭的 accept 上、被 OS 拒绝;客户端通常会 fallback 到别的实例)。
+                let keepAlive = shouldKeepAlive(req) && !shutdownRequested.load()
                 res.headers["Connection"] = if (keepAlive) {
                     "keep-alive"
                 } else {

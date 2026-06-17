@@ -327,14 +327,35 @@ public class Application {
     public var readTimeoutMs: Int64 = 15000
     public var maxConnections: Int64 = 1024
 
+    // 当前进程内最近一次 listen() 所构建并启动的 HttpServer 引用;close() 据此触发
+    // 优雅关闭。listen() 之前为 None,此时 close() 是无操作。
+    var httpServer: ?HttpServer = None
+
     public func listen(port: Int64): Unit {
-        buildServer().listen(port)
+        let server = buildServer()
+        this.httpServer = Some(server)
+        server.listen(port)
     }
 
     public func listen(port: Int64, onReady: () -> Unit): Unit {
         let server = buildServer()
+        this.httpServer = Some(server)
         onReady()
         server.listen(port)
+    }
+
+    // 优雅关闭:停止接受新连接,等待在途连接结束当前请求(并断开 keep-alive),
+    // 至多等 timeoutMs 毫秒。重复调用幂等;listen() 还未启动时是无操作。
+    //
+    // 典型用法是在另一协程里调用(主线程 listen 阻塞中):
+    //   spawn { app.listen(8080) }
+    //   // ... 收到 SIGTERM ...
+    //   app.close(timeoutMs: 5000)
+    public func close(timeoutMs!: Int64 = 5000): Unit {
+        match (this.httpServer) {
+            case Some(s) => s.shutdown(timeoutMs: timeoutMs)
+            case None => ()
+        }
     }
 
     private func buildServer(): HttpServer {
