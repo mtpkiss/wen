@@ -4,7 +4,14 @@
 
 ## [Unreleased]
 
-围绕「保持简单、可扩展」收敛范围、减少样板(含破坏性变更):
+(尚无未发布的改动)
+
+## [0.3.0] - 2026-06-17
+
+定位升级为「面向原生高性能」的一个版本:Router 改 trie 索引(派发耗时与路由表规模
+解耦),补齐 graceful shutdown、CSRF / methodOverride / multipart 配额等生产关切的
+中间件,并收敛默认行为(helmet 改 opt-in、移出 compression / rateLimit / res.links
+等越界功能)。**包含破坏性变更**,详见下方。
 
 - **Router 改 trie 索引,派发耗时 O(M)(M=请求段数),不随路由表规模线性增长**:
   在不破坏 Layer 抽象的前提下,给 Router 加三档索引——`prefixLayerIndices`(中间件,
