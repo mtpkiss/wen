@@ -228,18 +228,9 @@ class Layer {
         this.routeId = 0
     }
 
-    // 判断本层是否匹配该请求:匹配则返回捕获到的参数表，否则返回 None。
-    // caseSensitive / strict 由所在 Router 在派发时传入(对应 Express 的
-    // `case sensitive routing` / `strict routing` 设置)。
-    func tryMatch(req: HttpRequest, caseSensitive: Bool, strict: Bool): ?HashMap<String, String> {
-        if (!this.methodMatches(req.method)) {
-            return None
-        }
-        return this.tryMatchPath(req, caseSensitive, strict)
-    }
-
-    // 仅按路径匹配,不查方法。供 runChain 预收集使用:为了让 method-override 这类
-    // 中间件能在链中改写 req.method,方法检查推迟到 dispatch 执行时实时进行。
+    // 仅按路径匹配,不查方法。trie 圈出精确路由候选后,Router 用本方法对 prefix 中间件
+    // 与 trie 候选做二次路径验证;method 检查仍推迟到 dispatch 阶段,以便 methodOverride
+    // 这类中间件在链中改写 req.method 后,后续 layer 按新方法实时判定。
     func tryMatchPath(req: HttpRequest, caseSensitive: Bool, strict: Bool): ?HashMap<String, String> {
         if (this.isError) {
             return Some(HashMap<String, String>())
@@ -270,6 +261,16 @@ public class Router {
     // app.param 注册的参数预处理回调表,键为参数名。
     let paramCallbacks: HashMap<String, ParamHandler> = HashMap<String, ParamHandler>()
 
+    // ---- 三档索引:由 add/addAll/useError 在注册时同步维护,runChain 用它们以 O(M)
+    // 量级完成派发查询(M 为请求路径段数),替代原来在 layers 上 O(N) 的线性扫描。
+    //   prefixLayerIndices : use(...) 注册的前缀中间件,保留注册顺序;运行时逐条做 prefix 匹配。
+    //   errorLayerIndices  : useError(...) 注册的错误层,数量极少,顺序扫即可。
+    //   routeTrie          : get/post/... 注册的精确路由 layerIndex 索引,trie 圈定候选;
+    //                        真实参数捕获与 caseSensitive / strict 校验仍由 PathPattern.matchExact 完成。
+    let prefixLayerIndices: ArrayList<Int64> = ArrayList<Int64>()
+    let errorLayerIndices: ArrayList<Int64> = ArrayList<Int64>()
+    let routeTrie: RouteNode = RouteNode()
+
     // 当本 Router 被挂载到某 Application/Router 的某前缀下时,该前缀路径(对应 Express 的
     // app.mountpath)。顶级 Router 默认为空串。Application.use(path, sub)/Router.use(path, sub)
     // 会自动设置;多次挂载时以最后一次为准。
@@ -290,7 +291,10 @@ public class Router {
     }
 
     func add(method: ?String, path: String, handler: Middleware, isPrefix: Bool): Unit {
-        layers.add(Layer(method, path, handler, isPrefix, freshRouteId()))
+        let idx = layers.size
+        let layer = Layer(method, path, handler, isPrefix, freshRouteId())
+        layers.add(layer)
+        indexLayer(layer, idx)
     }
 
     // 一次注册多个处理器到同一方法/路径:它们按顺序排成相邻的多个 Layer，共享同一个
@@ -299,7 +303,21 @@ public class Router {
     func addAll(method: ?String, path: String, handlers: Array<Middleware>, isPrefix: Bool): Unit {
         let id = freshRouteId()
         for (h in handlers) {
-            layers.add(Layer(method, path, h, isPrefix, id))
+            let idx = layers.size
+            let layer = Layer(method, path, h, isPrefix, id)
+            layers.add(layer)
+            indexLayer(layer, idx)
+        }
+    }
+
+    // 把新注册的 layer 同步索引到三档桶之一。精确路由额外插入 trie。
+    func indexLayer(layer: Layer, idx: Int64): Unit {
+        if (layer.isError) {
+            errorLayerIndices.add(idx)
+        } else if (layer.isPrefix) {
+            prefixLayerIndices.add(idx)
+        } else {
+            insertRouteIntoTrie(routeTrie, layer.pattern.segments, idx)
         }
     }
 
@@ -425,7 +443,10 @@ public class Router {
     // 注册一个错误处理中间件。它只在有异常正在链中传递时才会被调用;由于链是按
     // 注册顺序执行的，所以要把它注册在「希望被它捕获其错误的那些路由」之后。
     public func useError(handler: ErrorHandler): Unit {
-        layers.add(Layer(handler))
+        let idx = layers.size
+        let layer = Layer(handler)
+        layers.add(layer)
+        indexLayer(layer, idx)
     }
 
     // 对一个请求运行整条中间件/路由链。若链跑完仍没有任何层产生响应，则按以下
@@ -487,10 +508,14 @@ public class Router {
     }
 
     // 收集所有「路径能精确匹配该 path」的路由层上显式声明的、互不重复的方法名。
-    // 会跳过中间件层、错误处理层，以及方法为通配的 `all` 路由(它们不算某个具体方法)。
+    // trie 圈候选 + matchExact 二次验证,O(M + K) 代替原来扫全部 layer。
     func methodsForPath(path: String): ArrayList<String> {
         let out = ArrayList<String>()
-        for (layer in layers) {
+        let parts = pathSegments(path)
+        let cands = collectTrieCandidates(routeTrie, parts)
+        for (i in cands) {
+            let layer = layers[i]
+            // trie 只索引非中间件、非错误层,但保险起见仍判一次。
             if (layer.isError || layer.isPrefix) {
                 continue
             }
@@ -513,7 +538,10 @@ public class Router {
     }
 
     func hasMethodForPath(method: String, path: String): Bool {
-        for (layer in layers) {
+        let parts = pathSegments(path)
+        let cands = collectTrieCandidates(routeTrie, parts)
+        for (i in cands) {
+            let layer = layers[i]
             if (layer.isError || layer.isPrefix) {
                 continue
             }
@@ -563,17 +591,74 @@ public class Router {
     }
 
     private func runChain(req: HttpRequest, res: HttpResponse, onExhausted: Next, onError: (Exception) -> Unit): Unit {
-        // 预收集只按路径匹配的 layer,方法检查推迟到 dispatch 阶段。这样位于路由
-        // 之前的中间件(如 methodOverride)改写 req.method 后,后续 layer 才会按
-        // 新方法实时判定是否执行。
+        // 用 trie 圈定精确路由候选,顺序扫前缀中间件,加入全部错误层(其执行由 dispatch
+        // 阶段按 err 状态过滤)。三组 layer 索引合并、按注册顺序排序后进入 dispatch。
+        // 方法检查仍推迟到 dispatch 阶段进行,以便 methodOverride 类中间件在链中改写
+        // req.method 后,后续 layer 按新方法实时判定。
+        let matchedIndices = collectMatchedLayerIndices(req)
+        sortInt64Ascending(matchedIndices)
         let matched = ArrayList<Layer>()
-        for (layer in layers) {
-            match (layer.tryMatchPath(req, this.caseSensitive, this.strict)) {
-                case Some(_) => matched.add(layer)
+        for (i in matchedIndices) {
+            matched.add(layers[i])
+        }
+        dispatch(matched, 0, req, res, onExhausted, onError, None)
+    }
+
+    // 同时被 runChain / hasMethodForPath / methodsForPath 复用:返回该请求路径上「路径匹配」的
+    // 所有 layer 索引(去重、未排序)。method 校验由调用方在拿到结果后自行处理。
+    func collectMatchedLayerIndices(req: HttpRequest): ArrayList<Int64> {
+        let out = ArrayList<Int64>()
+        let seen = HashSet<Int64>()
+        // 1. 前缀中间件:逐条做 prefix 匹配(数量通常远少于精确路由,顺序扫描可接受)。
+        for (i in prefixLayerIndices) {
+            let layer = layers[i]
+            match (layer.pattern.matchPrefix(req.path, caseSensitive: this.caseSensitive)) {
+                case Some(_) =>
+                    if (!seen.contains(i)) {
+                        seen.add(i)
+                        out.add(i)
+                    }
                 case None => ()
             }
         }
-        dispatch(matched, 0, req, res, onExhausted, onError, None)
+        // 2. 精确路由:trie 圈候选,二次用 matchExact 验证(caseSensitive/strict/正则约束都在这里生效)。
+        let parts = pathSegments(req.path)
+        let cands = collectTrieCandidates(routeTrie, parts)
+        for (i in cands) {
+            let layer = layers[i]
+            match (layer.pattern.matchExact(req.path, caseSensitive: this.caseSensitive, strict: this.strict)) {
+                case Some(_) =>
+                    if (!seen.contains(i)) {
+                        seen.add(i)
+                        out.add(i)
+                    }
+                case None => ()
+            }
+        }
+        // 3. 错误层:与路径无关,全部加入;dispatch 在 err 状态下才会执行它们。
+        for (i in errorLayerIndices) {
+            if (!seen.contains(i)) {
+                seen.add(i)
+                out.add(i)
+            }
+        }
+        return out
+    }
+
+    // 升序排序一个 Int64 列表(用于把三档索引合并后还原为 layer 注册顺序)。简单插入排序:
+    // matched 列表通常 < 20 条,与 O(N log N) 的快排相比常数更小、代码更稳。
+    func sortInt64Ascending(list: ArrayList<Int64>): Unit {
+        var i = 1
+        while (i < list.size) {
+            let cur = list[i]
+            var j = i - 1
+            while (j >= 0 && list[j] > cur) {
+                list[j + 1] = list[j]
+                j -= 1
+            }
+            list[j + 1] = cur
+            i += 1
+        }
     }
 
     func dispatch(matched: ArrayList<Layer>, index: Int64, req: HttpRequest, res: HttpResponse, onExhausted: Next,

@@ -6,6 +6,17 @@
 
 围绕「保持简单、可扩展」收敛范围、减少样板(含破坏性变更):
 
+- **Router 改 trie 索引,派发耗时 O(M)(M=请求段数),不随路由表规模线性增长**:
+  在不破坏 Layer 抽象的前提下,给 Router 加三档索引——`prefixLayerIndices`(中间件,
+  顺序敏感)、`errorLayerIndices`(错误层)、`routeTrie`(精确路由)。trie 仅做候选过滤,
+  真实参数捕获与 `caseSensitive` / `strict` / 正则约束仍由 `PathPattern.matchExact`
+  二次保证,**261 个既有测试零退步**。同时 `methodsForPath` / `hasMethodForPath` 也走
+  trie 加速,Allow 头与 405 判定提速。
+  - 实测(`benchmark/`):50 条路由命中最后一条从 92μs → **16μs(5.6× 提升)**;404 路径
+    从 24μs → 13μs;1/10/50 条路由命中耗时**几乎相同**——派发已与路由表规模解耦。
+  - 1 条极小路由表场景因 trie 固定开销有约 5μs 退化,真实业务可忽略。
+- **README 定位升级为「原生高性能」**:从"中小型 RESTful"扩到"任意规模",
+  支撑 trie 改造后的实际能力。
 - **README 新增「定位与边界」段**:把"反代后置 + 不覆盖 TLS / 压缩 / 限流 / WebSocket /
   流式大文件 / 多层代理 / handler 超时"这些设计取舍前置声明,与 Express 自身的"专注
   HTTP 应用、运维关切交给生态"哲学一致。

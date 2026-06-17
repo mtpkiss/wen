@@ -27,7 +27,7 @@ cjpm run
 | 1. 对象分配 | 每请求必付的 `HttpRequest` + `HttpResponse` 构造 |
 | 2. 路由匹配 | `PathPattern.matchExact`:静态 / 双参数 / 通配;`pathSegments` 拆分 |
 | 3. 请求派发 | `app.handle` 全链路(匹配 + 处理器):静态命中 / 参数命中+JSON / 404 |
-| 4. 路由表规模 | 1 / 10 / 50 条路由,命中最后一条(线性扫描的最坏情形) |
+| 4. 路由表规模 | 1 / 10 / 50 条路由,命中最后一条(trie 改造后已与路由数解耦,1/10/50 几乎同耗时) |
 | 5. JSON 序列化 | `JsonObj -> String`:小对象 / 含嵌套数组的中对象 |
 | 6. JSON 解析 | `String -> JsonValue`:小文档 / 对象数组 / 解析+再序列化往返 |
 | 7. URL/Base64 | `urlDecode`(ASCII / UTF-8)、`base64` 编 / 解码 |

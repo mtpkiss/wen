@@ -1,18 +1,21 @@
 # Wen
 
-**Wen**(文)—— 一个用华为仓颉(Cangjie)编程语言编写的、类 Express 风格的轻量级
-Web 框架。名取「文」:既呼应仓颉造字,也契合 HTTP 这一文本协议。
+**Wen**(文)—— 一个用华为仓颉(Cangjie)编程语言编写的、**面向原生高性能**的
+Express 风格 Web 框架。名取「文」:既呼应仓颉造字,也契合 HTTP 这一文本协议。
 
 特点:**纯标准库、零第三方依赖**(JSON、HMAC-SHA256 等均为自带实现),API 风格贴近
-Express,源码注释为详细中文。
+Express,**路由用 trie 索引(O(M),M 是请求路径段数)**,大路由表下仍保持稳定派发耗时。
+源码注释为详细中文。
 
 这是 `wen` 库本体仓库(可作为 cjpm 依赖直接引用)。
 
 ## 定位与边界
 
-**适用场景**:中小型 RESTful / JSON API 与服务端渲染业务,**部署模型为「前置反代 +
-plain HTTP 应用进程」**(Nginx / Caddy / k8s ingress 在前面终止 TLS、做压缩、限流、
-长连接缓存,wen 进程只跑 HTTP/1.1)。这是与 Express + Node 一致的主流部署形态。
+**适用场景**:任意规模的 RESTful / JSON API 与服务端渲染业务,**部署模型为
+「前置反代 + plain HTTP 应用进程」**(Nginx / Caddy / k8s ingress 在前面终止 TLS、
+做压缩、限流、长连接缓存,wen 进程只跑 HTTP/1.1)。路由用 trie 索引,几百到上千条路由
+也能保持 O(M) 的派发耗时;实测见 [benchmark/](benchmark/)。这是与 Express + Node
+一致的主流部署形态。
 
 **不在覆盖范围**(请由反代 / 边缘 / 基础设施层负责或选用专门库):
 
