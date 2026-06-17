@@ -15,3 +15,6 @@ demo.exe
 
 # 测试运行产生的临时文件
 ._cjx_*
+
+# 本地工具(如端到端压测用的 bombardier 二进制)
+.tools/
