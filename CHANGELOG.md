@@ -6,6 +6,16 @@
 
 围绕「保持简单、可扩展」收敛范围、减少样板(含破坏性变更):
 
+- **新增 `csrf()` 中间件**:对应 Express 生态的 csurf,签名双提交 Cookie。GET 时下发签名
+  Cookie 并把 token 暴露到 `req.attribute("csrfToken")`;非安全方法要求回传匹配 token
+  (请求头 `X-CSRF-Token` / `X-XSRF-Token`,或表单字段 / 查询串 `_csrf`),不一致或缺失回 403。
+- **新增 `methodOverride()` / `methodOverrideField()` 中间件**:让 HTML 表单借助请求头
+  (默认 `X-HTTP-Method-Override`)或字段 / 查询串(默认 `_method`)把 POST 重写为
+  PUT / DELETE / PATCH。仅对 POST 生效,目标须是已知方法;原方法存入
+  `req.attribute("originalMethod")`。
+- **路由调度调整**(为让上述中间件生效):`Router` 把 method 检查从「请求开始时预筛」
+  推迟到「dispatch 执行时实时判定」。位于路由前的中间件改写 `req.method` 后,后续 layer
+  会按新方法重新匹配,与 Express 的动态分发语义一致。对既有路由匹配行为无可见影响。
 - **请求体 / Cookie 解析内置化**:JSON / 表单 / multipart / Cookie 改为「首次访问 `req.json()` /
   `attribute()` / `file()` / `cookie()` 时按 Content-Type 自动懒解析」,**无需再 `app.use` 解析中间件**;
   原 `jsonParser` / `urlencodedParser` / `multipart` / `cookieParser` 工厂保留为薄壳(提前触发),不破坏现有代码。

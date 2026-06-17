@@ -124,6 +124,55 @@ app.get("/counter", { req, res =>
 })
 ```
 
+## methodOverride(headerName! = "X-HTTP-Method-Override") / methodOverrideField(field! = "_method")
+
+让 HTML 表单(只能发 GET / POST)借助一个请求头、隐藏字段或查询串把方法改写为
+`PUT` / `DELETE` / `PATCH`,从而复用同一套 RESTful 路由。
+
+- `methodOverride()` 从请求头读取(默认 `X-HTTP-Method-Override`),适合 AJAX / 网关;
+  头值含多个时取第一个。
+- `methodOverrideField()` 从表单字段(优先)或查询串读取(默认 `_method`),适合 HTML 表单。
+
+安全约束(与 Express 一致):**仅当原始方法为 POST 时**才允许重写——`GET` 等安全方法
+不应被悄悄改成有副作用的动词;目标必须是已知 HTTP 方法,否则忽略。重写发生时,原方法
+存入 `req.attribute("originalMethod")` 备查。两者都应在「路由注册之前」用 `app.use(...)`
+挂为全局中间件,这样路由匹配时看到的已是重写后的方法。
+
+```cangjie
+app.use(methodOverride())          // 读 X-HTTP-Method-Override 头
+app.use(methodOverrideField())     // 读 _method 字段 / 查询串
+
+app.delete("/items/:id", { req, res =>
+    let om = req.attribute("originalMethod") ?? "?"   // 通常是 "POST"
+    res.send("deleted ${req.param("id") ?? "?"} (was ${om})")
+})
+```
+
+## csrf(cookieName!, field!, signed!, httpOnly!, secure!, sameSite!)
+
+对应 Express 生态的 csurf,采用**签名双提交 Cookie**。服务端为浏览器签发一个随机 token,
+经 HMAC 签名的 Cookie(默认 `_csrf`,`HttpOnly` + `SameSite=Lax`)下发;对**非安全方法**
+(POST/PUT/PATCH/DELETE)的请求,必须通过另一渠道回传同一 token——请求头 `X-CSRF-Token` /
+`X-XSRF-Token`,或表单字段 / 查询串 `_csrf`。两者一致才放行,否则回 403。
+
+- 安全方法(GET/HEAD/OPTIONS)只确保 token 存在并下发 Cookie,不做校验;token 暴露到
+  `req.attribute("csrfToken")`,把它渲染进表单隐藏字段 / 页面 meta 标签,供后续请求回传。
+- `signed=true`(默认)需先设 `app.cookieSecret`;设为 `false` 则为朴素双提交,便于前端 JS
+  直接读 Cookie 回填请求头,但失去防 Cookie 篡改能力。
+
+```cangjie
+app.cookieSecret = "change-me"
+app.use(csrf())
+
+app.get("/form", { req, res =>
+    let token = req.attribute("csrfToken") ?? ""
+    res.send("<form method=POST action=/save>" +
+        "<input type=hidden name=_csrf value=\"${token}\">" +
+        "<input name=note><button>save</button></form>")
+})
+app.post("/save", { _, res => res.send("saved") })   // 校验通过才会到这里
+```
+
 ## staticFiles(root, index!, maxAge!, dotfiles!)
 
 从 `root` 目录服务静态文件(GET/HEAD),二进制安全,自动带 `ETag`/`Last-Modified`/`Range`。

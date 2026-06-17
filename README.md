@@ -308,8 +308,10 @@ main(): Int64 {
 - **中间件**:中间件链 `(req, res, next)`、全局/路径挂载、数组批量挂载、错误处理中间件
   `(err, req, res, next)`。内置:`logger / requestId(请求 ID) / cors /
   helmet(安全头) / etag(动态条件 GET) /
-  basicAuth · bearerAuth(认证) / staticFiles / session`;JSON / 表单 / multipart / Cookie
-  解析已**内置**(`req.json()/attribute()/file()/cookie()` 首次访问即自动解析,无需注册)。
+  basicAuth · bearerAuth(认证) / csrf(CSRF 防护) /
+  methodOverride · methodOverrideField(HTML 表单方法重写) / staticFiles / session`;
+  JSON / 表单 / multipart / Cookie 解析已**内置**(`req.json()/attribute()/file()/cookie()`
+  首次访问即自动解析,无需注册)。
 - **请求**:`headers/query/params/cookies`、字符串 `attributes` 与类型化 `locals`、
   `body/bodyBytes`、`json()`(解析后的 `JsonValue`)、`file(name)/files`(上传)、
   `signedCookie(name)`、`session`;`hostname()/isType()`、`accepts()` 与 `accepts([...])`
@@ -351,6 +353,8 @@ main(): Int64 {
 | `helmet(...)` | 一组安全响应头(CSP / nosniff / HSTS / 防点击劫持等) |
 | `etag()` | 动态响应 `ETag` + `If-None-Match` → 304 |
 | `basicAuth(verify)` / `bearerAuth(verify)` | HTTP Basic / Bearer 认证,失败 401 |
+| `csrf(...)` | CSRF 防护(签名双提交 Cookie;请求头 / 表单字段回传 token) |
+| `methodOverride(headerName!)` / `methodOverrideField(field!)` | HTML 表单方法重写(POST → PUT/DELETE/PATCH) |
 | (解析已内置) | JSON / 表单 / multipart / Cookie 在 `req.json()/attribute()/file()/cookie()` 首次访问时自动解析,无需注册 |
 | `session(store?)` | 会话(签名 sid;默认内存 store,可自定义 `SessionStore`) |
 | `staticFiles(root, ...)` | 静态文件(二进制安全 + ETag/Range/Cache-Control/dotfiles) |
