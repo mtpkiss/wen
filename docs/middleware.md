@@ -1,7 +1,8 @@
 # 内置中间件参考
 
 所有内置中间件都是返回 `Middleware` 的工厂函数,用 `app.use(...)` 注册;部分也可挂在
-路由或路径前缀上。建议的注册顺序:压缩/ETag/安全等「横切关注点」靠前,业务路由靠后。
+路由或路径前缀上。建议的注册顺序:ETag / 安全头 / 认证 / 方法重写 / CSRF 等「横切关注点」
+靠前,业务路由靠后。
 
 ---
 
@@ -37,14 +38,29 @@ app.use(cors())              // 允许任意来源
 app.use(cors("https://a.com"))
 ```
 
-## helmet(csp!, hsts!, frameOptions!, referrerPolicy!, noSniff!)
+## helmet(csp!, hsts!, frameOptions!, referrerPolicy!, noSniff!, coop!, corp!)
 
-批量下发安全响应头(CSP、`X-Content-Type-Options`、HSTS、`X-Frame-Options`、`Referrer-Policy`、
-跨源策略等)。具名参数可定制;字符串传空串、布尔传 false 表示不发送该头。
+批量下发安全响应头。设计取向:**默认只发部署无关、且不会误伤业务的头**;策略性强、易因
+部署 / 内容打挂页面的头改为 opt-in(显式传值才发)。
+
+**默认开**(`helmet()` 即发):
+- `X-Content-Type-Options: nosniff`(`noSniff: true`)
+- `X-Frame-Options: SAMEORIGIN`(`frameOptions: "SAMEORIGIN"`)
+- `Referrer-Policy: no-referrer`(`referrerPolicy: "no-referrer"`)
+- `Strict-Transport-Security: max-age=15552000; includeSubDomains`(`hsts: true`)
+
+**默认关**(需显式传值才开):
+- `Content-Security-Policy`(`csp`):配错会挡掉外部脚本 / 样式 / 字体 / 图片。
+- `Cross-Origin-Opener-Policy`(`coop`):隔离跨源窗口,会破坏 OAuth 弹窗等。
+- `Cross-Origin-Resource-Policy`(`corp`):取 `same-origin` 会挡住别站加载你的资源(CDN / 嵌图)。
+
+任何字符串参数传空串、或把布尔设为 `false`,均表示「不发送该头」。
 
 ```cangjie
 app.use(helmet())
 app.use(helmet(hsts: false, frameOptions: "DENY"))
+// 显式开启 opt-in 头:
+app.use(helmet(csp: "default-src 'self'", coop: "same-origin", corp: "same-origin"))
 ```
 
 ## etag()
@@ -173,15 +189,34 @@ app.get("/form", { req, res =>
 app.post("/save", { _, res => res.send("saved") })   // 校验通过才会到这里
 ```
 
-## staticFiles(root, index!, maxAge!, dotfiles!)
+## staticFiles(root, index!, maxAge!, dotfiles!, etag!, lastModified!, immutable!, setHeaders!, redirect!)
 
-从 `root` 目录服务静态文件(GET/HEAD),二进制安全,自动带 `ETag`/`Last-Modified`/`Range`。
-- `index`:目录默认页(默认 `index.html`)。
-- `maxAge`:`>=0` 时加 `Cache-Control: public, max-age=N`。
-- `dotfiles`:隐藏文件策略 `ignore`(默认)/`deny`(403)/`allow`。
+从 `root` 目录服务静态文件(GET/HEAD),**二进制安全**,自动带 `ETag` / `Last-Modified` /
+`Range`,支持条件 GET(304)和分片下载(206 / 416)。
+
+- `index`(默认 `"index.html"`):目录默认页;传空串表示禁用,目录请求交给 `next()`。
+- `maxAge`(默认 `-1`):`>=0` 时加 `Cache-Control: public, max-age=N`,单位秒。
+- `dotfiles`(默认 `"ignore"`):隐藏文件策略 —— `ignore` 当作不存在(交给 next),
+  `deny` 返回 403,`allow` 正常服务。
+- `etag`(默认 `true`):是否计算并下发 `ETag` 头。关闭后也不应答 `If-None-Match`。
+- `lastModified`(默认 `true`):是否下发 `Last-Modified` 头(基于文件 mtime)。
+- `immutable`(默认 `false`):`maxAge>0` 且本项为 `true` 时,`Cache-Control` 追加
+  `, immutable`,告诉客户端资源在缓存期内绝不会变(适合带指纹的构建产物)。
+- `setHeaders`(默认 `None`):文件发送前调用的回调 `(res, realPath) -> Unit`,可在其中
+  对响应任意定制头部。
+- `redirect`(默认 `true`):目录请求且 URL 不以 `/` 结尾时是否 301 重定向到带斜杠版本
+  (这能让目录内 HTML 的相对路径正确解析)。关闭后目录请求一律交给 `next()`。
 
 ```cangjie
 app.use("/static", staticFiles("./public", maxAge: 3600))
+
+// 构建产物:一年强缓存 + immutable
+app.use("/assets", staticFiles("./dist", maxAge: 31536000, immutable: true))
+
+// 定制响应头(例如对字体加 CORS):
+app.use("/fonts", staticFiles("./fonts", setHeaders: {
+    res: HttpResponse, _: String => res.set("Access-Control-Allow-Origin", "*")
+}))
 ```
 
 ---
