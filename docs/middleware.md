@@ -38,7 +38,7 @@ app.use(cors())              // 允许任意来源
 app.use(cors("https://a.com"))
 ```
 
-## helmet(csp!, hsts!, frameOptions!, referrerPolicy!, noSniff!, coop!, corp!)
+## helmet(csp!, hsts!, hstsMaxAge!, hstsIncludeSubDomains!, hstsPreload!, frameOptions!, referrerPolicy!, noSniff!, coop!, corp!)
 
 批量下发安全响应头。设计取向:**默认只发部署无关、且不会误伤业务的头**;策略性强、易因
 部署 / 内容打挂页面的头改为 opt-in(显式传值才发)。
@@ -47,21 +47,33 @@ app.use(cors("https://a.com"))
 - `X-Content-Type-Options: nosniff`(`noSniff: true`)
 - `X-Frame-Options: SAMEORIGIN`(`frameOptions: "SAMEORIGIN"`)
 - `Referrer-Policy: no-referrer`(`referrerPolicy: "no-referrer"`)
-- `Strict-Transport-Security: max-age=15552000; includeSubDomains`(`hsts: true`)
+- `Strict-Transport-Security: max-age=15552000; includeSubDomains`(`hsts: true`,180 天 + includeSubDomains,不带 preload)
 
 **默认关**(需显式传值才开):
 - `Content-Security-Policy`(`csp`):配错会挡掉外部脚本 / 样式 / 字体 / 图片。
 - `Cross-Origin-Opener-Policy`(`coop`):隔离跨源窗口,会破坏 OAuth 弹窗等。
 - `Cross-Origin-Resource-Policy`(`corp`):取 `same-origin` 会挡住别站加载你的资源(CDN / 嵌图)。
 
-任何字符串参数传空串、或把布尔设为 `false`,均表示「不发送该头」。
+### HSTS 细调(`hstsMaxAge` / `hstsIncludeSubDomains` / `hstsPreload`)
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `hstsMaxAge: Int64` | `15552000`(180 天) | 浏览器强制走 HTTPS 的有效期(秒)。提交 HSTS preload 列表前应改为 `31536000`(1 年) |
+| `hstsIncludeSubDomains: Bool` | `true` | 是否对子域名生效 |
+| `hstsPreload: Bool` | `false` | 是否带 `preload` 指令。**preload 提交被浏览器接受后不可撤销**(撤销可能耗时 1 年以上),且要求 `max-age ≥ 31536000` 与 `includeSubDomains: true`——框架不强制校验,默认关以免误开 |
 
 ```cangjie
 app.use(helmet())
 app.use(helmet(hsts: false, frameOptions: "DENY"))
+
+// 生产 HSTS preload 标配:1 年 + includeSubDomains + preload。
+app.use(helmet(hstsMaxAge: 31536000, hstsPreload: true))
+
 // 显式开启 opt-in 头:
 app.use(helmet(csp: "default-src 'self'", coop: "same-origin", corp: "same-origin"))
 ```
+
+任何字符串参数传空串、或把布尔设为 `false`,均表示「不发送该头」。
 
 ## etag()
 

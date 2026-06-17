@@ -6,6 +6,10 @@
 
 围绕「保持简单、可扩展」收敛范围、减少样板(含破坏性变更):
 
+- **`helmet` HSTS 三档可调**:新增 `hstsMaxAge!`(默认 15552000 / 180 天,保持向后兼容)、
+  `hstsIncludeSubDomains!`(默认 true)、`hstsPreload!`(默认 false)三个具名参数。
+  preload 是不可撤销的浏览器内置承诺,默认关闭以免误开;生产 preload 标配可写
+  `helmet(hstsMaxAge: 31536000, hstsPreload: true)`。
 - **新增 `multipart(maxFileSize!, maxFiles!, maxFields!, fileFilter!)` 配额与过滤**:
   以前的 `multipart()` 只是「提前触发解析」的薄壳;现升级为可配置的安全闸门。三档上限
   任一超出抛 `PayloadTooLargeException`,默认错误兜底回 413;`fileFilter` 拒绝的文件

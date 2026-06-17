@@ -81,4 +81,32 @@ class HelmetTest {
         @Assert(hv(res, "X-Content-Type-Options") == "")
         @Assert(hv(res, "X-Frame-Options") == "")
     }
+
+    // 默认 HSTS 串与历史一致:180 天 + includeSubDomains、不带 preload。
+    @TestCase
+    func testHstsDefaultBackwardsCompatible(): Unit {
+        let res = run(helmet())
+        @Assert(hv(res, "Strict-Transport-Security") == "max-age=15552000; includeSubDomains")
+    }
+
+    // 自定义 max-age 生效;includeSubDomains 默认仍带。
+    @TestCase
+    func testHstsCustomMaxAge(): Unit {
+        let res = run(helmet(hstsMaxAge: 31536000))
+        @Assert(hv(res, "Strict-Transport-Security") == "max-age=31536000; includeSubDomains")
+    }
+
+    // 生产 preload 标配:1 年 max-age + includeSubDomains + preload。
+    @TestCase
+    func testHstsPreloadEnabled(): Unit {
+        let res = run(helmet(hstsMaxAge: 31536000, hstsPreload: true))
+        @Assert(hv(res, "Strict-Transport-Security") == "max-age=31536000; includeSubDomains; preload")
+    }
+
+    // includeSubDomains 关闭时该指令不出现;preload 仍可独立控制。
+    @TestCase
+    func testHstsWithoutIncludeSubDomains(): Unit {
+        let res = run(helmet(hstsIncludeSubDomains: false))
+        @Assert(hv(res, "Strict-Transport-Security") == "max-age=15552000")
+    }
 }

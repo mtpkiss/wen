@@ -20,9 +20,18 @@ package wen
  * 定制:任意字符串参数传空串、或把布尔设为 false,即表示「不发送该头」。需要更细的策略时,
  * 也可在 helmet 之后再用普通中间件覆盖具体的头。
  */
+// HSTS 三档可调:
+//   hstsMaxAge            : 秒数(默认 180 天 = 15552000)。生产 + preload 申请前应改为 31536000(1 年)。
+//   hstsIncludeSubDomains : 是否带 includeSubDomains(默认 true,与之前行为一致)。
+//   hstsPreload           : 是否带 preload 指令(默认 false)。preload 申请被浏览器接受后**不可撤销**
+//                           (撤销可能需要 1 年以上),且要求 max-age ≥ 31536000 且 includeSubDomains
+//                           为真——框架不替你强制校验,但默认关闭以免误开。
 public func helmet(
     csp!: String = "",
     hsts!: Bool = true,
+    hstsMaxAge!: Int64 = 15552000,
+    hstsIncludeSubDomains!: Bool = true,
+    hstsPreload!: Bool = false,
     frameOptions!: String = "SAMEORIGIN",
     referrerPolicy!: String = "no-referrer",
     noSniff!: Bool = true,
@@ -44,8 +53,14 @@ public func helmet(
                 res.headers["Referrer-Policy"] = referrerPolicy
             }
             if (hsts) {
-                // max-age 约 180 天,并涵盖子域名。
-                res.headers["Strict-Transport-Security"] = "max-age=15552000; includeSubDomains"
+                var hdr = "max-age=${hstsMaxAge}"
+                if (hstsIncludeSubDomains) {
+                    hdr += "; includeSubDomains"
+                }
+                if (hstsPreload) {
+                    hdr += "; preload"
+                }
+                res.headers["Strict-Transport-Security"] = hdr
             }
             if (!coop.isEmpty()) {
                 res.headers["Cross-Origin-Opener-Policy"] = coop
