@@ -6,6 +6,13 @@
 
 围绕「保持简单、可扩展」收敛范围、减少样板(含破坏性变更):
 
+- **README 新增「定位与边界」段**:把"反代后置 + 不覆盖 TLS / 压缩 / 限流 / WebSocket /
+  流式大文件 / 多层代理 / handler 超时"这些设计取舍前置声明,与 Express 自身的"专注
+  HTTP 应用、运维关切交给生态"哲学一致。
+- **`res.cookie` 自动给 `SameSite=None` 补 `Secure`**:Chrome 80+ / Firefox / Safari
+  对 `SameSite=None` 缺 `Secure` 一律拒绝;现在调用 `res.cookie(..., sameSite: "None")`
+  即使没传 `secure: true` 也会自动补上 `Secure`,以防呆。大小写不敏感;显式传
+  `secure: true` 时仍只输出一次。
 - **新增 `app.close(timeoutMs!)` 优雅关闭**:对应 Express + Node 生态里的 SIGTERM 排空。
   机制:置 shutdown 信号 → 关 server socket(中断阻塞的 accept)→ 在途连接处理完
   当前请求并断开 keep-alive(响应自动加 `Connection: close`)→ 等 drain 完成或

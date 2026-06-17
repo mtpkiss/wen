@@ -135,7 +135,9 @@ public class HttpResponse {
     //   path     —— Path 属性,默认 "/";为空串时不输出 Path。
     //   maxAge   —— Max-Age(秒),默认 -1 表示不设置;>=0 时才输出。
     //   httpOnly —— 为 true 时附加 HttpOnly,禁止脚本读取该 Cookie。
-    //   secure   —— 为 true 时附加 Secure,仅在 HTTPS 下回传。
+    //   secure   —— 为 true 时附加 Secure,仅在 HTTPS 下回传。**注意**:当
+    //               sameSite="None" 时,即使 secure=false 也会自动补 Secure,以满足
+    //               现代浏览器对跨站 Cookie 的强制要求(Chrome 80+ / Firefox / Safari)。
     //   sameSite —— SameSite 策略(如 "Lax"/"Strict"/"None");为空串时不输出。
     //   domain   —— Domain 属性(跨子域共享 Cookie 时用);为空串时不输出。
     //   expires  —— Expires 属性(HTTP 日期字符串)。为空串时:若设了 maxAge(>=0),
@@ -177,7 +179,11 @@ public class HttpResponse {
         if (httpOnly) {
             c += "; HttpOnly"
         }
-        if (secure) {
+        // SameSite=None 必须配 Secure,否则现代浏览器(Chrome 80+ / Firefox / Safari)
+        // 会直接拒绝该 Cookie。自动补 Secure 是防呆——与其让用户的跨站 Cookie 静默失效,
+        // 不如代他补上。显式传 secure: true 时也只输出一次。
+        let sameSiteNone = !sameSite.isEmpty() && sameSite.toAsciiLower() == "none"
+        if (secure || sameSiteNone) {
             c += "; Secure"
         }
         if (!sameSite.isEmpty()) {

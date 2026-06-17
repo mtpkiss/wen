@@ -610,6 +610,50 @@ class AppTest {
         @Expect(res.setCookies[0].contains("Max-Age=3600"))
     }
 
+    // SameSite=None 必须配 Secure(Chrome 80+ 强制),即使调用方没显式传 secure,
+    // 框架也自动补上 Secure 以防呆。
+    @TestCase
+    func testSameSiteNoneAutoSecure(): Unit {
+        let res = HttpResponse()
+        res.cookie("sid", "abc", sameSite: "None") // 注意:没传 secure
+        @Assert(res.setCookies.size == 1)
+        @Expect(res.setCookies[0].contains("SameSite=None"))
+        @Expect(res.setCookies[0].contains("Secure"))
+    }
+
+    // 大小写不敏感:sameSite="none" 同样触发自动 Secure。
+    @TestCase
+    func testSameSiteNoneAutoSecureCaseInsensitive(): Unit {
+        let res = HttpResponse()
+        res.cookie("sid", "abc", sameSite: "none")
+        @Expect(res.setCookies[0].contains("Secure"))
+    }
+
+    // SameSite=Lax / Strict 不会被强制加 Secure(向后兼容旧行为)。
+    @TestCase
+    func testSameSiteLaxDoesNotForceSecure(): Unit {
+        let res = HttpResponse()
+        res.cookie("sid", "abc", sameSite: "Lax")
+        @Assert(!res.setCookies[0].contains("Secure"))
+    }
+
+    // 显式 secure: true 与 sameSite: "None" 共存时只输出一次 Secure。
+    @TestCase
+    func testSameSiteNoneWithExplicitSecureNoDuplicate(): Unit {
+        let res = HttpResponse()
+        res.cookie("sid", "abc", secure: true, sameSite: "None")
+        var count = 0
+        let s = res.setCookies[0]
+        var i = 0
+        while (true) {
+            match (s.indexOf("Secure", i)) {
+                case Some(k) => count += 1; i = k + 6
+                case None => break
+            }
+        }
+        @Assert(count == 1)
+    }
+
     // 验证 clearCookie 通过设置 Max-Age=0 来让 cookie 立即过期（即删除）：
     // 调用 res.clearCookie("sid") 后，setCookies 应有 1 条记录，且其中应包含 "Max-Age=0"。
     @TestCase

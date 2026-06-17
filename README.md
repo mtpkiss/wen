@@ -8,6 +8,28 @@ Express,源码注释为详细中文。
 
 这是 `wen` 库本体仓库(可作为 cjpm 依赖直接引用)。
 
+## 定位与边界
+
+**适用场景**:中小型 RESTful / JSON API 与服务端渲染业务,**部署模型为「前置反代 +
+plain HTTP 应用进程」**(Nginx / Caddy / k8s ingress 在前面终止 TLS、做压缩、限流、
+长连接缓存,wen 进程只跑 HTTP/1.1)。这是与 Express + Node 一致的主流部署形态。
+
+**不在覆盖范围**(请由反代 / 边缘 / 基础设施层负责或选用专门库):
+
+- **TLS / HTTPS、HTTP/2** —— 反代层终止;wen 不直接监听 HTTPS 套接字
+- **响应压缩(gzip / Brotli)** —— 反代开 `gzip on;` 即可,质量远胜应用层自写
+- **限流 / 防 DDoS / WAF** —— 反代 / API 网关 / CDN 职责
+- **WebSocket** —— 独立协议,wen 提供 SSE 已覆盖大多数服务端推送场景
+- **大文件流式上传(单文件超过百 MiB)** —— 走对象存储直传或 nginx upload module;
+  wen 的 multipart 是把 body 整段读入内存(由 `maxBodySize` 兜底,默认 1 MiB)
+- **多层代理伪造头防护** —— `trustProxy` 当前是 `Bool`,假定**单层反代**部署。
+  若你的拓扑是 LB → CDN → app 多层,请用反代层自己校验 / 替换 `X-Forwarded-*` 头
+- **handler 层超时** —— socket read 超时由 `readTimeoutMs` 控制;handler 内的死循环
+  或慢查询请用反代 `proxy_read_timeout` 或运维层做兜底
+
+> 上述"由别人做"清单与 Express 自身的设计哲学一致——HTTP 框架专注 HTTP 应用,
+> 协议外的运维关切交给生态。
+
 ## 作为依赖使用
 
 在你的模块 `cjpm.toml` 中加入 git 依赖:
