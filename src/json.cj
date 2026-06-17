@@ -142,40 +142,67 @@ public enum JsonValue {
     // 递归地把当前 JSON 值序列化成紧凑（无多余空白）的 JSON 文本。
     // 关键点：对象按"有序键值对列表"逐项输出，因此输出顺序与当初的插入/解析顺序
     // 完全一致，保证保序与确定性；数字分支直接原样吐出保留的词法字面量；字符串与
-    // 键都经过 escapeJson 做必要的转义后再用双引号包裹。
+    // 键都经过 escapeJsonInto 做必要的转义后再用双引号包裹。
+    //
+    // 实现要点：递归过程统一向同一个 ArrayList<UInt8> 字节缓冲追加，**不再做任何
+    // String 拼接**——历史实现里大量 `out += "..."` 在嵌套对象/长数组上会触发
+    // O(N²) 的中间字符串复制，字节缓冲方案改成线性 O(N) 一次性 fromUtf8。
     public func toJsonString(): String {
+        let out = ArrayList<UInt8>()
+        appendJsonInto(out)
+        return String.fromUtf8(out.toArray())
+    }
+
+    // 把当前值的紧凑 JSON 编码直接追加到字节缓冲。供 toJsonString 与所有嵌套
+    // 子节点共用同一段缓冲，避免子树各自构造 String 再拼接。
+    func appendJsonInto(out: ArrayList<UInt8>): Unit {
         match (this) {
-            case JsonNull => return "null"
-            case JsonBool(b) => return if (b) {
-                "true"
+            case JsonNull => appendAscii(out, "null")
+            case JsonBool(b) => if (b) {
+                appendAscii(out, "true")
             } else {
-                "false"
+                appendAscii(out, "false")
             }
-            case JsonNumber(n) => return n
-            case JsonString(s) => return "\"" + escapeJson(s) + "\""
+            case JsonNumber(n) => appendAscii(out, n)
+            case JsonString(s) =>
+                out.add(UInt8(34)) // "
+                escapeJsonInto(out, s)
+                out.add(UInt8(34))
             case JsonArray(items) =>
-                var out = "["
+                out.add(UInt8(91)) // [
                 var first = true
                 for (it in items) {
                     if (!first) {
-                        out += ","
+                        out.add(UInt8(44)) // ,
                     }
-                    out += it.toJsonString()
+                    it.appendJsonInto(out)
                     first = false
                 }
-                return out + "]"
+                out.add(UInt8(93)) // ]
             case JsonObject(pairs) =>
-                var out = "{"
+                out.add(UInt8(123)) // {
                 var first = true
                 for ((k, v) in pairs) {
                     if (!first) {
-                        out += ","
+                        out.add(UInt8(44))
                     }
-                    out += "\"" + escapeJson(k) + "\":" + v.toJsonString()
+                    out.add(UInt8(34))
+                    escapeJsonInto(out, k)
+                    out.add(UInt8(34))
+                    out.add(UInt8(58)) // :
+                    v.appendJsonInto(out)
                     first = false
                 }
-                return out + "}"
+                out.add(UInt8(125)) // }
         }
+    }
+}
+
+// 把字符串的 UTF-8 字节逐个追加到 out。本框架的 JSON 输出里这条路径只用于
+// 已知不含需转义字符的字面量（数字词法、true/false/null），所以不再二次判定。
+func appendAscii(out: ArrayList<UInt8>, s: String): Unit {
+    for (b in s.toArray()) {
+        out.add(b)
     }
 }
 
@@ -256,15 +283,47 @@ public func parseJson(text: String): JsonValue {
 
 // ---- 转义 -------------------------------------------------------------
 
-// 对字符串中 JSON 强制要求转义的字符进行转义；合法的 UTF-8 字节原样透传。
-// 实现按字节（UInt8）逐个处理：双引号、反斜杠以及若干控制字符（退格、换页、
-// 换行、回车、制表符）被替换为对应的双字符短转义序列（如 \" \\ \b \f \n \r \t）；
-// 其余小于 0x20 的控制字符没有短形式，统一输出为 \u00XX 六字符形式（两位十六进制）。
-// 注意这里逐字节遍历不会破坏多字节 UTF-8 序列：续字节的值都 >= 0x80，落入"原样透传"
-// 分支，因此非 ASCII 文本保持原始 UTF-8 字节不被转义。
-func escapeJson(s: String): String {
-    let out = ArrayList<UInt8>()
-    for (b in s.toArray()) {
+// 对字符串中 JSON 强制要求转义的字符进行转义，结果直接追加到字节缓冲 out；
+// 合法的 UTF-8 字节原样透传。需要被转义的字符只有三类：双引号 0x22、反斜杠 0x5C、
+// 控制字符 < 0x20（其中 \b\f\n\r\t 有双字符短形式，其余统一 \u00XX）。
+//
+// 关键优化：**绝大多数 JSON 字符串字面量（字段名、枚举、URL、纯文本）根本不含
+// 需要转义的字符**。所以分两段：
+//   1. 先扫一遍找出第一个需要转义的字节位置 firstEsc。这一遍每字节只做一次复合
+//      判定 `b < 32 || b == 34 || b == 92`，分支极易预测（绝大多数命中"不转义"）。
+//   2. 若整段都不需要转义，直接批量复制原字节；否则把 [0, firstEsc) 批量拷贝后，
+//      从 firstEsc 起再走逐字节转义分支。
+// 续字节（UTF-8 多字节字符的非首字节都 ≥ 0x80）自然落入"不转义"快路径，
+// 因此非 ASCII 文本不会触发慢路径。
+func escapeJsonInto(out: ArrayList<UInt8>, s: String): Unit {
+    let bytes = s.toArray()
+    let n = bytes.size
+    var firstEsc = -1
+    var i = 0
+    while (i < n) {
+        let b = bytes[i]
+        if (b < UInt8(32) || b == UInt8(34) || b == UInt8(92)) {
+            firstEsc = i
+            break
+        }
+        i += 1
+    }
+    if (firstEsc < 0) {
+        var j = 0
+        while (j < n) {
+            out.add(bytes[j])
+            j += 1
+        }
+        return
+    }
+    var j = 0
+    while (j < firstEsc) {
+        out.add(bytes[j])
+        j += 1
+    }
+    var k = firstEsc
+    while (k < n) {
+        let b = bytes[k]
         if (b == UInt8(34)) { // 双引号 "
             out.add(UInt8(92));
             out.add(UInt8(34))
@@ -296,8 +355,8 @@ func escapeJson(s: String): String {
         } else {
             out.add(b)
         }
+        k += 1
     }
-    return String.fromUtf8(out.toArray())
 }
 
 // 把 0..15 的数值转成对应的十六进制 ASCII 字符（小写）。
