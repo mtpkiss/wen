@@ -216,31 +216,74 @@ main(): Int64 {
         res.statusCode
     })
 
-    // 路由表规模对派发的影响(线性扫描:命中最后一条 = 最坏情形)。
+    // 路由表规模对派发的影响。trie 索引让命中耗时与规模解耦:1/10/50/100/500 条命中
+    // 最后一条应当几乎等耗时(派发为 O(M+K),M=请求段数、K=候选数,与总路由数无关)。
     let app1 = buildAppWithRoutes(1)
     let app10 = buildAppWithRoutes(10)
     let app50 = buildAppWithRoutes(50)
-    section("4. 路由表规模 → 派发耗时 (命中最后一条,最坏情形)")
-    sink += runBench("1 条路由", nDispatch, warm, {
+    let app100 = buildAppWithRoutes(100)
+    let app500 = buildAppWithRoutes(500)
+    section("4. 路由表规模 → 派发耗时 (trie 索引:命中应与规模解耦)")
+    sink += runBench("1 条路由 (命中)", nDispatch, warm, {
         =>
         let req = HttpRequest("GET", "/r0")
         let res = HttpResponse()
         app1.handle(req, res)
         res.statusCode
     })
-    sink += runBench("10 条路由", nDispatch, warm, {
+    sink += runBench("10 条路由 (命中最后)", nDispatch, warm, {
         =>
         let req = HttpRequest("GET", "/r9")
         let res = HttpResponse()
         app10.handle(req, res)
         res.statusCode
     })
-    sink += runBench("50 条路由", nSlow, warm, {
+    sink += runBench("50 条路由 (命中最后)", nSlow, warm, {
         =>
         let req = HttpRequest("GET", "/r49")
         let res = HttpResponse()
         app50.handle(req, res)
         res.statusCode
+    })
+    sink += runBench("100 条路由 (命中最后)", nSlow, warm, {
+        =>
+        let req = HttpRequest("GET", "/r99")
+        let res = HttpResponse()
+        app100.handle(req, res)
+        res.statusCode
+    })
+    sink += runBench("500 条路由 (命中最后)", nSlow, warm, {
+        =>
+        let req = HttpRequest("GET", "/r499")
+        let res = HttpResponse()
+        app500.handle(req, res)
+        res.statusCode
+    })
+    // 500 条路由下的 404:trie 直接返回空候选,不再扫全表,也应与规模无关。
+    sink += runBench("500 条路由 (未命中 404)", nSlow, warm, {
+        =>
+        let req = HttpRequest("GET", "/nope")
+        let res = HttpResponse()
+        app500.handle(req, res)
+        res.statusCode
+    })
+
+    // ---- 4a. 典型中间件链开销(贴近真实业务管线)---------------------------
+    // logger 会 println 到 stdout,在 bench 里会产生 I/O 噪声,这里不挂;其余 4 个中间件
+    // 是动态响应里最常并用的横切关注点。
+    let appMw = wen()
+    appMw.use(requestId())
+    appMw.use(cors())
+    appMw.use(helmet())
+    appMw.use(etag())
+    appMw.get("/hi", {_: HttpRequest, res: HttpResponse => res.send("hi")})
+    section("4a. 典型中间件链 (requestId + cors + helmet + etag) 派发")
+    sink += runBench("命中 + 4 中间件链", nDispatch, warm, {
+        =>
+        let req = HttpRequest("GET", "/hi")
+        let res = HttpResponse()
+        appMw.handle(req, res)
+        res.statusCode + res.body.size
     })
 
     // ---- 5. JSON 序列化 ----------------------------------------------------
