@@ -80,7 +80,7 @@
 ### 发送
 
 - `send(text)` / `sendBytes(data)` / `sendStatus(code)` / `end()`
-- `json(String | JsonValue | JsonObj)` / `jsonp(payload)`
+- `json(String | JsonValue | JsonObj)`
 - `redirect(location)` / `redirect(status, location)`
 - `sendFile(path)` / `attachment([filename])` / `download(path[, filename])`
 - `render(name [, data])` —— 视图渲染

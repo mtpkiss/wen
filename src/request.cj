@@ -79,6 +79,12 @@ public class HttpRequest {
     // 当前请求的会话对象,由 session() 中间件设置;未启用时为 None。
     public var session: ?Session = None
 
+    // multipart 解析的配额与过滤选项。由 multipart(maxFileSize!, ...) 中间件在执行
+    // 时塞入,供 ensureBody 触发的 parseMultipart 读取;为 None 时不施加任何配额。
+    // 必须在任何会触发请求体解析的代码(如 req.attribute / req.file / 其它解析中间件)
+    // 之前注册中间件,否则配额来不及生效。
+    public var multipartOptions: ?MultipartOptions = None
+
     // 内部状态:next("route") 信号。处理器调用 nextRoute() 置位后,调度器会跳过
     // 当前路由的剩余处理器。
     var skipRouteFlag: Bool = false

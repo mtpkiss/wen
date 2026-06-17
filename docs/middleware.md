@@ -114,9 +114,47 @@ app.get("/c", { req, res => res.send(req.cookie("sid") ?? "anon") })   // Cookie
 读取入口:JSON → `req.json()`;表单 / multipart 文本字段 → `req.attribute(name)`;上传文件 →
 `req.file(name)` / `req.files`;Cookie → `req.cookie(name)` / `req.signedCookie(name)`。
 
-> 仍保留 `jsonParser()` / `urlencodedParser()` / `multipart()` / `cookieParser()` 工厂(现在只是
-> 「提前触发解析」的薄壳),以便在中间件链里显式表达意图——但通常不必。`textParser()` /
-> `rawParser()` 处理非默认类型(纯文本 / 原始字节),仍需显式注册。
+> 仍保留 `jsonParser()` / `urlencodedParser()` / `cookieParser()` 工厂(现在只是
+> 「提前触发解析」的薄壳),以便在中间件链里显式表达意图——但通常不必。
+> `multipart(...)` 见下一节(配额与过滤)。`textParser()` / `rawParser()` 处理非默认
+> 类型(纯文本 / 原始字节),仍需显式注册。
+
+## multipart(maxFileSize!, maxFiles!, maxFields!, fileFilter!)
+
+文件上传的**配额与过滤**。multipart 解析本身是内置的(`req.file(name)` 首次访问即触发);
+本中间件的作用是给这次解析施加上限,以及白名单过滤。
+
+| 参数 | 默认 | 行为 |
+|---|---|---|
+| `maxFileSize: Int64` | `-1`(不限) | 单文件最大字节数。超出 → 抛 `PayloadTooLargeException` → 默认 413 |
+| `maxFiles: Int64` | `-1`(不限) | 文件总数上限。超出 → 413 |
+| `maxFields: Int64` | `-1`(不限) | 字段总数上限(文件 + 文本一起算)。超出 → 413 |
+| `fileFilter: ?(String, String, String) -> Bool` | `None` | 回调签名 `(fieldName, filename, contentType) -> 是否接受`;返回 `false` 的文件**静默丢弃**,不计入 `req.files` 也不算超额 |
+
+**生效前提**:本中间件必须先于任何会触发 `req.ensureBody` 的代码注册(例如其它解析中间件、
+认证中间件里如果读了 `req.attribute`,都会触发)。否则解析已完成,后塞入的选项不再生效
+(`ensureBody` 是一次性闸门)。
+
+```cangjie
+// 头像上传:单文件 ≤ 2 MiB,至多 1 个文件,只接受 image/*。
+app.use("/upload", multipart(
+    maxFileSize: 2 * 1024 * 1024,
+    maxFiles: 1,
+    fileFilter: {
+        _: String, _: String, ctype: String => ctype.startsWith("image/")
+    }
+))
+app.post("/upload", { req, res =>
+    match (req.file("avatar")) {
+        case Some(f) => f.saveTo("./uploads/${f.filename}"); res.send("ok ${f.size()}")
+        case None => res.status(400).send("no image file")
+    }
+})
+```
+
+> **413 与 fileFilter 的差异**:超额是协议层错误,框架直接 413,handler 不会执行;
+> fileFilter 拒绝是业务策略,**静默丢弃**——handler 仍会执行,只是被拒文件不会进 `req.files`。
+> 这与 multer 的语义一致。
 
 ## session(store?)
 

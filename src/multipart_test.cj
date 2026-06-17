@@ -139,6 +139,131 @@ class MultipartTest {
         @Assert(req.attribute("k") == Some("v"))
     }
 
+    // 构造一个含多个文件 + 文本字段的 multipart body,供 limits / fileFilter 用例复用。
+    func buildMixedBody(boundary: String): Array<UInt8> {
+        let buf = ArrayList<UInt8>()
+        appendStr(buf, "--${boundary}\r\n")
+        appendStr(buf, "Content-Disposition: form-data; name=\"note\"\r\n\r\n")
+        appendStr(buf, "hi\r\n")
+        appendStr(buf, "--${boundary}\r\n")
+        appendStr(buf, "Content-Disposition: form-data; name=\"img\"; filename=\"a.png\"\r\n")
+        appendStr(buf, "Content-Type: image/png\r\n\r\n")
+        appendStr(buf, "AAAAAAAA\r\n") // 8 字节
+        appendStr(buf, "--${boundary}\r\n")
+        appendStr(buf, "Content-Disposition: form-data; name=\"doc\"; filename=\"b.exe\"\r\n")
+        appendStr(buf, "Content-Type: application/octet-stream\r\n\r\n")
+        appendStr(buf, "BBB\r\n")
+        appendStr(buf, "--${boundary}--\r\n")
+        return buf.toArray()
+    }
+
+    // 单文件超 maxFileSize -> 413,handler 不会执行。
+    @TestCase
+    func testMaxFileSizeExceededRejects413(): Unit {
+        let app = wen()
+        // a.png 是 8 字节,设上限 4 -> 必触发。
+        app.use(multipart(maxFileSize: 4))
+        app.post("/u", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
+        req.headers["content-type"] = "multipart/form-data; boundary=B"
+        req.bodyBytes = buildMixedBody("B")
+        let res = HttpResponse();
+        app.handle(req, res)
+        @Assert(res.statusCode == 413)
+        @Assert(res.body != "ok")
+    }
+
+    // 单文件等于上限不超 -> 放行,文件正常加入。
+    @TestCase
+    func testMaxFileSizeAtBoundaryPasses(): Unit {
+        let app = wen()
+        app.use(multipart(maxFileSize: 8)) // a.png 恰好 8 字节
+        app.post("/u", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
+        req.headers["content-type"] = "multipart/form-data; boundary=B"
+        req.bodyBytes = buildMixedBody("B")
+        let res = HttpResponse();
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(req.files.size == 2)
+    }
+
+    // 文件数量超 maxFiles -> 413(body 含 2 个文件,上限设 1)。
+    @TestCase
+    func testMaxFilesExceededRejects413(): Unit {
+        let app = wen()
+        app.use(multipart(maxFiles: 1))
+        app.post("/u", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
+        req.headers["content-type"] = "multipart/form-data; boundary=B"
+        req.bodyBytes = buildMixedBody("B")
+        let res = HttpResponse();
+        app.handle(req, res)
+        @Assert(res.statusCode == 413)
+    }
+
+    // 字段数(文件 + 文本)超 maxFields -> 413(body 共 3 项,上限设 2)。
+    @TestCase
+    func testMaxFieldsExceededRejects413(): Unit {
+        let app = wen()
+        app.use(multipart(maxFields: 2))
+        app.post("/u", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
+        req.headers["content-type"] = "multipart/form-data; boundary=B"
+        req.bodyBytes = buildMixedBody("B")
+        let res = HttpResponse();
+        app.handle(req, res)
+        @Assert(res.statusCode == 413)
+    }
+
+    // fileFilter 拒绝某 contentType:被拒文件静默丢弃,不算超额,handler 正常执行。
+    @TestCase
+    func testFileFilterSilentlyDropsRejected(): Unit {
+        let app = wen()
+        // 只接收 image/* —— b.exe 的 octet-stream 应被丢弃,a.png 保留。
+        app.use(multipart(fileFilter: {
+            _: String, _: String, ctype: String => ctype.startsWith("image/")
+        }))
+        app.post("/u", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
+        req.headers["content-type"] = "multipart/form-data; boundary=B"
+        req.bodyBytes = buildMixedBody("B")
+        let res = HttpResponse();
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(req.files.size == 1)
+        match (req.file("img")) {
+            case Some(f) => @Assert(f.contentType == "image/png")
+            case None => @Assert(false)
+        }
+        // 被丢弃的文件不出现。
+        match (req.file("doc")) {
+            case Some(_) => @Assert(false)
+            case None => @Expect(true)
+        }
+    }
+
+    // 默认无参 multipart() 无任何上限,行为与旧接口一致。
+    @TestCase
+    func testNoOptionsDefaultsToUnlimited(): Unit {
+        let app = wen()
+        app.use(multipart()) // 无 limits
+        app.post("/u", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("POST", "/u");
+        req.path = "/u"
+        req.headers["content-type"] = "multipart/form-data; boundary=B"
+        req.bodyBytes = buildMixedBody("B")
+        let res = HttpResponse();
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(req.files.size == 2)
+    }
+
     // saveTo 落盘后内容与上传字节一致。
     @TestCase
     func testSaveTo(): Unit {

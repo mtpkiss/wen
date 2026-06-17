@@ -6,6 +6,17 @@
 
 围绕「保持简单、可扩展」收敛范围、减少样板(含破坏性变更):
 
+- **新增 `multipart(maxFileSize!, maxFiles!, maxFields!, fileFilter!)` 配额与过滤**:
+  以前的 `multipart()` 只是「提前触发解析」的薄壳;现升级为可配置的安全闸门。三档上限
+  任一超出抛 `PayloadTooLargeException`,默认错误兜底回 413;`fileFilter` 拒绝的文件
+  静默丢弃,语义与 multer 对齐。默认参数皆为「不限」,旧调用 `app.use(multipart())`
+  行为完全兼容。
+- **router 默认错误兜底升级**:此前所有未处理异常统一回 500。现把 `PayloadTooLargeException`
+  映射为 413、`BadRequestException` 映射为 400(与 server 层 read body 阶段的行为一致),
+  其余未知异常仍按 500 兜底。用户注册了错误中间件时,先到错误中间件;它未结束响应才走兜底。
+- **`res.jsonp` 明确不在范围内**:能力一览 / ROADMAP / API 参考 / 0.2.0 发布说明里此前
+  错误声称已实现 `res.jsonp`(实际从未实现)。JSONP 是 CORS 之前的跨域方案,现代 Web
+  已用浏览器原生 fetch + CORS 覆盖,wen 作为新框架无兼容包袱,正式声明不实现。文档已修正。
 - **新增 `csrf()` 中间件**:对应 Express 生态的 csurf,签名双提交 Cookie。GET 时下发签名
   Cookie 并把 token 暴露到 `req.attribute("csrfToken")`;非安全方法要求回传匹配 token
   (请求头 `X-CSRF-Token` / `X-XSRF-Token`,或表单字段 / 查询串 `_csrf`),不一致或缺失回 403。
@@ -51,7 +62,7 @@
   sid + 内存 store)、`etag`。
 - **会话与安全**:HMAC-SHA256 签名 Cookie(`res.cookie(signed: true)` / `req.signedCookie`)、
   `session()`、自写 `base64Encode/Decode`、`hmacSha256Hex`。
-- **响应细节**:`res.jsonp/vary/links`、带状态码的 `res.redirect`、cookie 的
+- **响应细节**:`res.vary`、带状态码的 `res.redirect`、cookie 的
   `domain`/`expires`(`maxAge` 自动推导 Expires)、自动 `Date` 响应头。
 - **静态文件选项**:`index`、`maxAge`(Cache-Control)、`dotfiles` 策略。
 - **应用设置**:`app.enable/disable/enabled/disabled`。

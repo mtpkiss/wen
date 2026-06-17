@@ -317,7 +317,7 @@ main(): Int64 {
   `signedCookie(name)`、`session`;`hostname()/isType()`、`accepts()` 与 `accepts([...])`
   (带 q 值的最佳匹配);代理感知 `protocol()/secure()/ips()/clientIp()/subdomains()/xhr()`
   (配合 `app.trustProxy`)。
-- **响应**:`send/json/jsonp/sendBytes/sendStatus/end`、`redirect`(可带状态码);`json`
+- **响应**:`send/json/sendBytes/sendStatus/end`、`redirect`(可带状态码);`json`
   支持字符串与类型化 `JsonValue/JsonObj`;`cookie`(支持 `signed` 签名、`domain`/`expires`/
   `maxAge`/`httpOnly`/`secure`/`sameSite`)/`clearCookie`、`set` 批量、
   `mimeType/contentType/append/location/vary`;`render`(视图渲染)、`format`(内容
