@@ -232,20 +232,33 @@ class Layer {
     // caseSensitive / strict 由所在 Router 在派发时传入(对应 Express 的
     // `case sensitive routing` / `strict routing` 设置)。
     func tryMatch(req: HttpRequest, caseSensitive: Bool, strict: Bool): ?HashMap<String, String> {
+        if (!this.methodMatches(req.method)) {
+            return None
+        }
+        return this.tryMatchPath(req, caseSensitive, strict)
+    }
+
+    // 仅按路径匹配,不查方法。供 runChain 预收集使用:为了让 method-override 这类
+    // 中间件能在链中改写 req.method,方法检查推迟到 dispatch 执行时实时进行。
+    func tryMatchPath(req: HttpRequest, caseSensitive: Bool, strict: Bool): ?HashMap<String, String> {
         if (this.isError) {
             return Some(HashMap<String, String>())
-        }
-        match (this.method) {
-            case Some(m) =>
-                if (m != HttpMethod.ALL && m != req.method) {
-                    return None
-                }
-            case None => ()
         }
         if (this.isPrefix) {
             return this.pattern.matchPrefix(req.path, caseSensitive: caseSensitive)
         }
         return this.pattern.matchExact(req.path, caseSensitive: caseSensitive, strict: strict)
+    }
+
+    // 本层声明的方法是否与请求当前的方法相容。error 层不限制方法。
+    func methodMatches(method: String): Bool {
+        if (this.isError) {
+            return true
+        }
+        match (this.method) {
+            case Some(m) => return m == HttpMethod.ALL || m == method
+            case None => return true
+        }
     }
 }
 
@@ -539,9 +552,12 @@ public class Router {
     }
 
     private func runChain(req: HttpRequest, res: HttpResponse, onExhausted: Next, onError: (Exception) -> Unit): Unit {
+        // 预收集只按路径匹配的 layer,方法检查推迟到 dispatch 阶段。这样位于路由
+        // 之前的中间件(如 methodOverride)改写 req.method 后,后续 layer 才会按
+        // 新方法实时判定是否执行。
         let matched = ArrayList<Layer>()
         for (layer in layers) {
-            match (layer.tryMatch(req, this.caseSensitive, this.strict)) {
+            match (layer.tryMatchPath(req, this.caseSensitive, this.strict)) {
                 case Some(_) => matched.add(layer)
                 case None => ()
             }
@@ -584,6 +600,13 @@ public class Router {
                     dispatch(matched, index + 1, req, res, onExhausted, onError, None)
                     return
                 }
+                // 实时方法检查:layer 路径已在 runChain 预筛通过,这里再验证方法
+                // 是否与当前 req.method 相容,以兼容 methodOverride 这类中间件
+                // 链中改写 method 的场景。
+                if (!layer.methodMatches(req.method)) {
+                    dispatch(matched, index + 1, req, res, onExhausted, onError, None)
+                    return
+                }
                 runNormal(matched, index, layer, req, res, onExhausted, onError)
         }
     }
@@ -592,8 +615,9 @@ public class Router {
         onExhausted: Next, onError: (Exception) -> Unit): Unit {
         // 重新运行本层的匹配以取回它捕获的参数并写入 req.params。之所以要在此重新
         // 匹配，是因为不同的层可能捕获不同的参数名/值，需在执行该层处理器前对齐。
+        // 这里只重做路径匹配:方法检查已在 dispatch 阶段实时完成。
         var captured = HashMap<String, String>()
-        match (layer.tryMatch(req, this.caseSensitive, this.strict)) {
+        match (layer.tryMatchPath(req, this.caseSensitive, this.strict)) {
             case Some(params) =>
                 captured = params
                 for ((k, v) in params) {
