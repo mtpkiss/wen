@@ -695,8 +695,27 @@ public class HttpRequest {
             case Some(v) => v
             case None => return
         }
-        let ct = ctRaw.toAsciiLower()
-        if (ct.contains("application/json")) {
+        let mainType = primaryContentType(ctRaw)
+        // app 级注册的自定义解析器优先(请求已关联 app 且注册了匹配该主类型的解析器时):
+        // 它既能支持内置三类之外的类型(如 application/xml),也能覆盖内置默认。
+        match (this.app) {
+            case Some(a) => match (a.bodyParserFor(mainType)) {
+                case Some(parser) =>
+                    parser(this)
+                    return
+                case None => ()
+            }
+            case None => ()
+        }
+        // 回落内置解析器(始终可用,不依赖 app):测试中直接构造、未经 app 派发的请求,
+        // 以及 app 未注册对应解析器的常规情况,都据此正常解析。
+        runBuiltinBodyParser(mainType, ctRaw)
+    }
+
+    // 内置请求体解析:按主 Content-Type 分派到 json / urlencoded / multipart;均为
+    // 「尽力解析、失败不报错」(非法 JSON 时 jsonBody 保持 None)。其它类型不处理。
+    func runBuiltinBodyParser(mainType: String, ctRaw: String): Unit {
+        if (mainType == "application/json") {
             if (!this.body.isEmpty()) {
                 try {
                     this.jsonBody = Some(parseJson(this.body))
@@ -704,9 +723,9 @@ public class HttpRequest {
                     ()
                 }
             }
-        } else if (ct.contains("application/x-www-form-urlencoded")) {
+        } else if (mainType == "application/x-www-form-urlencoded") {
             parseQuery(this.body, this.attributes)
-        } else if (ct.contains("multipart/form-data")) {
+        } else if (mainType == "multipart/form-data") {
             match (extractBoundary(ctRaw)) {
                 case Some(b) => parseMultipart(this, b)
                 case None => ()
@@ -743,6 +762,14 @@ public class HttpRequest {
     func markParamProcessed(name: String): Unit {
         this.processedParamNames.add(name)
     }
+}
+
+// 取 Content-Type 的主类型:剥掉分号后的参数(charset/boundary 等)、去空白、小写。
+// 例如 "application/json; charset=utf-8" -> "application/json"。app.bodyParser 注册与
+// ensureBody 查询两端共用,以保证注册 "application/xml" 能匹配请求头 "application/xml; ..."。
+func primaryContentType(ct: String): String {
+    let (head, _) = splitOnce(ct, ";")
+    return head.trimAscii().toAsciiLower()
 }
 
 // 判断字符串是否形如 IPv4 地址(只由数字与 "." 组成)。用于在 subdomains 中避免把

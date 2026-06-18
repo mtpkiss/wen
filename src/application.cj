@@ -42,6 +42,11 @@ public class Application {
     // 经 app.engine(ext, fn) 注册;res.render 时按模板扩展名在此查找,未注册即抛异常。
     let engines: HashMap<String, ViewEngine> = HashMap<String, ViewEngine>()
 
+    // 已注册的请求体解析器表:键为规范化的主 Content-Type(如 "application/xml"),值为
+    // 对应解析器。经 app.bodyParser(contentType, fn) 注册;ensureBody 懒解析时优先查它,
+    // 未命中再回落内置(json/urlencoded/multipart)。
+    let bodyParsers: HashMap<String, BodyParser> = HashMap<String, BodyParser>()
+
     public init() {}
 
     public func setLocal(key: String, value: Any): Unit {
@@ -104,6 +109,22 @@ public class Application {
     public func mime(ext: String, mimeType: String): Application {
         registerMimeType(ext, mimeType)
         return this
+    }
+
+    // 注册一个请求体解析器:当请求的主 Content-Type 等于 contentType(剥掉 charset 等
+    // 参数后比较、大小写无关)时,首次经 req.json()/req.attribute()/req.local() 等访问器
+    // 懒解析请求体会调用 parser(req),由它读取 req.body/req.bodyBytes 并把结果写回 req
+    // (常见做法:req.setLocal(key, 对象) 供下游取用)。可支持内置三类(json/urlencoded/
+    // multipart)之外的类型(如 application/xml、application/protobuf),也可覆盖内置默认。
+    // 约定在 listen() 之前注册;解析器内抛出的异常会照常传播到错误处理流水线(框架不吞)。
+    public func bodyParser(contentType: String, parser: BodyParser): Application {
+        bodyParsers[primaryContentType(contentType)] = parser
+        return this
+    }
+
+    // 内部:取匹配某主 Content-Type 的已注册解析器(供 HttpRequest.ensureBody 调用)。
+    func bodyParserFor(mainType: String): ?BodyParser {
+        return bodyParsers.get(mainType)
     }
 
     // 渲染一个视图并返回结果字符串(供 res.render 调用)。流程:

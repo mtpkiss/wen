@@ -44,3 +44,10 @@ public type ParamHandler = (HttpRequest, HttpResponse, String) -> Unit
 // HTML)。引擎自行负责读取该模板文件。通过 app.engine(ext, fn) 为某扩展名注册;
 // 未注册时 res.render 抛异常——框架自身不内置默认引擎。
 public type ViewEngine = (String, JsonValue) -> String
+
+// 「请求体解析器」契约:形如 (请求) -> Unit。当请求的主 Content-Type 与注册时指定的
+// 类型匹配时,框架在懒解析请求体阶段(HttpRequest.ensureBody)调用它,由它读取
+// req.body / req.bodyBytes 并把解析结果写回请求对象(通常经 req.setLocal 暂存对象供
+// 下游取用)。经 app.bodyParser(contentType, fn) 注册;可扩展或覆盖内置的
+// json / urlencoded / multipart 解析。
+public type BodyParser = (HttpRequest) -> Unit
