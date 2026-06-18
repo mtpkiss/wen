@@ -13,20 +13,23 @@ import std.time.*
  * 这样核心保持极简,定制能力却是完全开放的。
  */
 
-// 默认日志:每个请求完成后打 "METHOD path status durationMs"。
-public func logger(): Middleware {
+// 默认日志:每个请求完成后打 "METHOD path status durationMs"。可选 sink 改变输出去向
+// (默认 println 到 stdout),例如写入文件 / stderr / 结构化日志系统。
+public func logger(sink!: (String) -> Unit = { line: String => println(line) }): Middleware {
     return logger({
         req: HttpRequest, res: HttpResponse, ms: Int64 => "${req.method} ${req.path} ${res.statusCode} ${ms}ms"
-    })
+    }, sink: sink)
 }
 
-// 自定义日志:format 拿到 (请求, 响应, 处理耗时毫秒),返回要打印的一整行。
-public func logger(format: (HttpRequest, HttpResponse, Int64) -> String): Middleware {
+// 自定义日志:format 拿到 (请求, 响应, 处理耗时毫秒),返回要打印的一整行;sink 决定这一行
+// 输出到哪里(默认 println 到 stdout)。format 管「打什么」、sink 管「打到哪」,两者都开放。
+public func logger(format: (HttpRequest, HttpResponse, Int64) -> String,
+    sink!: (String) -> Unit = { line: String => println(line) }): Middleware {
     return {
         req: HttpRequest, res: HttpResponse, next: Next =>
             let start = DateTime.now()
             next()
             let elapsedMs = (DateTime.now() - start).toMilliseconds()
-            println(format(req, res, elapsedMs))
+            sink(format(req, res, elapsedMs))
     }
 }

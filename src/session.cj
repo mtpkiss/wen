@@ -110,17 +110,26 @@ public class MemorySessionStore <: SessionStore {
     }
 }
 
-// 构造 session 中间件,使用指定的存储后端。
-public func session(store: SessionStore): Middleware {
+// 构造 session 中间件,使用指定的存储后端。可选具名参数定制 sid Cookie:
+//   cookieName  Cookie 名(默认 "sid")
+//   path        Path 属性(默认 "/")
+//   maxAge      Max-Age 秒数;默认 -1 表示不设(会话 Cookie,关闭浏览器即失)
+//   secure      是否仅 HTTPS 回传(默认 false;生产 HTTPS 站点应设 true)
+//   sameSite    SameSite 策略(默认空,不输出;可设 "Lax"/"Strict"/"None")
+//   httpOnly    是否禁止脚本读取(默认 true)
+// sid Cookie 始终 HMAC 签名,故仍需先设 app.cookieSecret。
+public func session(store: SessionStore, cookieName!: String = "sid", path!: String = "/", maxAge!: Int64 = -1,
+    secure!: Bool = false, sameSite!: String = "", httpOnly!: Bool = true): Middleware {
     return {
         req: HttpRequest, res: HttpResponse, next: Next =>
-            let sess = loadOrCreateSession(req, store)
+            let sess = loadOrCreateSession(req, store, cookieName)
             req.session = Some(sess)
             next()
             // 请求处理完毕后回存会话;新会话再下发一枚签名的 sid Cookie。
             store.save(sess.id, sess.values)
             if (sess.isNew) {
-                res.cookie("sid", sess.id, httpOnly: true, path: "/", signed: true)
+                res.cookie(cookieName, sess.id, path: path, maxAge: maxAge, httpOnly: httpOnly, secure: secure,
+                    sameSite: sameSite, signed: true)
             }
     }
 }
@@ -130,9 +139,9 @@ public func session(): Middleware {
     return session(MemorySessionStore())
 }
 
-// 依据签名 sid Cookie 载入既有会话,或新建一个会话。
-func loadOrCreateSession(req: HttpRequest, store: SessionStore): Session {
-    match (req.signedCookie("sid")) {
+// 依据签名 sid Cookie 载入既有会话,或新建一个会话。cookieName 为 sid Cookie 的名字。
+func loadOrCreateSession(req: HttpRequest, store: SessionStore, cookieName: String): Session {
+    match (req.signedCookie(cookieName)) {
         case Some(id) => match (store.load(id)) {
             case Some(vals) => return Session(id, vals, false)
             case None => return Session(store.newId(), HashMap<String, String>(), true)
