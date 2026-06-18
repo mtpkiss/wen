@@ -477,6 +477,12 @@ public func contentTypeFor(value: String): String {
         return value
     }
     let n = value.toAsciiLower()
+    // 用户经 app.mime / registerMimeType 注册的映射优先(使 res.type("webp") 等在
+    // 注册后与 mimeFor 一致地命中);未注册时落到下面的内置简写表,行为不变。
+    match (lookupUserMime(n)) {
+        case Some(t) => return t
+        case None => ()
+    }
     if (n == "json") {
         return "application/json; charset=utf-8"
     } else if (n == "html") {

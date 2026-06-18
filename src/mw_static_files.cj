@@ -164,30 +164,5 @@ func sendDirectoryRedirect(req: HttpRequest, res: HttpResponse): Unit {
     res.redirect(301, target)
 }
 
-// 根据文件名的扩展名推断 Content-Type；对识别不出的扩展名，回退到通用的
-// 二进制类型 application/octet-stream（让浏览器当作下载处理）。
-// 推断前先把文件名转成小写，因此扩展名大小写不影响匹配。
-func mimeFor(name: String): String {
-    let n = name.toAsciiLower()
-    if (n.endsWith(".html")) {
-        return "text/html; charset=utf-8"
-    } else if (n.endsWith(".css")) {
-        return "text/css"
-    } else if (n.endsWith(".js")) {
-        return "application/javascript"
-    } else if (n.endsWith(".json")) {
-        return "application/json"
-    } else if (n.endsWith(".png")) {
-        return "image/png"
-    } else if (n.endsWith(".jpg") || n.endsWith(".jpeg")) {
-        return "image/jpeg"
-    } else if (n.endsWith(".gif")) {
-        return "image/gif"
-    } else if (n.endsWith(".svg")) {
-        return "image/svg+xml"
-    } else if (n.endsWith(".txt")) {
-        return "text/plain; charset=utf-8"
-    } else {
-        return "application/octet-stream"
-    }
-}
+// mimeFor / 扩展名 -> MIME 的映射已移至 mime.cj,并改为「用户注册表优先、回落内置」
+// 的可扩展形式(经 app.mime(ext, type) / registerMimeType(ext, type) 扩展或覆盖)。

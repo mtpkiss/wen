@@ -96,6 +96,16 @@ public class Application {
         return this
     }
 
+    // 注册(或覆盖)一个扩展名到 MIME 类型的映射:此后 sendFile / download / 静态文件
+    // 中间件按该扩展名发文件时,以及 res.type(ext)/res.mimeType(ext) 取该扩展名时,都会
+    // 返回此 Content-Type。ext 可带或不带前导点、大小写不敏感(".WEBP" 与 "webp" 等价)。
+    // 用于补齐内置表未覆盖的类型(.webp/.wasm/.avif 等)或覆盖内置默认。约定在 listen()
+    // 之前调用。它是包级 registerMimeType 的链式语法糖,二者写入同一张进程级全局表。
+    public func mime(ext: String, mimeType: String): Application {
+        registerMimeType(ext, mimeType)
+        return this
+    }
+
     // 渲染一个视图并返回结果字符串(供 res.render 调用)。流程:
     //   1. 用 "views" 设置(默认 "views")作为视图根目录;
     //   2. 若 name 自带扩展名就用它,否则取 "view engine" 设置作为默认扩展名并补全文件名;
