@@ -24,6 +24,25 @@ class MimeTest {
         @Assert(mimeFor("data.zzunknown") == "application/octet-stream")
     }
 
+    // 常见扩展名都内置:图片 / 字体 / 音视频 / 文档 / 归档等无需注册即可识别。
+    @TestCase
+    func testBuiltinCommonTypes(): Unit {
+        @Assert(mimeFor("photo.webp") == "image/webp")
+        @Assert(mimeFor("pic.avif") == "image/avif")
+        @Assert(mimeFor("font.woff2") == "font/woff2")
+        @Assert(mimeFor("font.ttf") == "font/ttf")
+        @Assert(mimeFor("clip.mp4") == "video/mp4")
+        @Assert(mimeFor("song.mp3") == "audio/mpeg")
+        @Assert(mimeFor("doc.pdf") == "application/pdf")
+        @Assert(mimeFor("bundle.zip") == "application/zip")
+        @Assert(mimeFor("mod.wasm") == "application/wasm")
+        @Assert(mimeFor("page.htm") == "text/html; charset=utf-8")
+        @Assert(mimeFor("favicon.ico") == "image/x-icon")
+        @Assert(mimeFor("data.xml") == "application/xml")
+        // 大小写不敏感:大写扩展名同样命中内置表。
+        @Assert(mimeFor("PHOTO.WEBP") == "image/webp")
+    }
+
     // registerMimeType 新增一个内置表未覆盖的扩展名;大小写与前导点均不敏感。
     @TestCase
     func testRegisterNewExtension(): Unit {
