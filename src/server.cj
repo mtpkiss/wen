@@ -8,9 +8,9 @@ import std.sync.*
 // 服务器在 handleConnection 的 catch 中捕获它，并向客户端返回 413
 // Payload Too Large 响应。把"体积超限"建模成专门的异常，是为了和
 // 普通的解析错误（400）、未知错误（500）区分开，从而映射到正确的状态码。
-public class PayloadTooLargeException <: Exception {
+public class PayloadTooLargeException <: HttpException {
     public init() {
-        super("Payload Too Large")
+        super(413, "Payload Too Large")
     }
 }
 
@@ -19,9 +19,9 @@ public class PayloadTooLargeException <: Exception {
 // 二义性正是 HTTP 请求走私（request smuggling）攻击的经典手法：前后端代理
 // 对"以哪个头为准"理解不一致，攻击者就能把一个请求伪装成两个。服务器一律
 // 拒绝这类请求，捕获该异常后返回 400 Bad Request。
-public class BadRequestException <: Exception {
+public class BadRequestException <: HttpException {
     public init() {
-        super("Bad Request")
+        super(400, "Bad Request")
     }
 }
 
@@ -232,10 +232,8 @@ public class HttpServer {
                     break
                 }
             }
-        } catch (_: PayloadTooLargeException) {
-            writeError(client, 413, "Payload Too Large")
-        } catch (_: BadRequestException) {
-            writeError(client, 400, "Bad Request")
+        } catch (he: HttpException) {
+            writeError(client, he.status, he.message)
         } catch (_: Exception) {
             writeError(client, 500, "Internal Server Error")
         } finally {

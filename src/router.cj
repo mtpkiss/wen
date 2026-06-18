@@ -488,17 +488,17 @@ public class Router {
                 }
             }
         }
-        // 默认错误兜底:把框架已建模的协议级异常映射为对应状态码,与 server 层
-        // (read body 阶段)的 catch 行为一致;其余未知异常仍按 500 兜底。用户注册了
-        // 错误处理中间件时,异常会先到那里,本兜底仅在所有错误中间件都未结束响应时触发。
+        // 默认错误兜底:把异常映射为响应状态码。HttpException(及其子类,含框架内置的
+        // PayloadTooLargeException=413 / BadRequestException=400)按其 status 回对应状态码、
+        // 以 message 作响应体;其余未知异常按 500 兜底。与 server 层(read body 阶段)的
+        // catch 行为一致。用户注册了错误处理中间件时,异常会先到那里,本兜底仅在所有错误
+        // 中间件都未结束响应时触发。
         let onError: (Exception) -> Unit = {
             e: Exception => if (!res.finished) {
                 try {
                     throw e
-                } catch (_: PayloadTooLargeException) {
-                    res.status(413).send("Payload Too Large")
-                } catch (_: BadRequestException) {
-                    res.status(400).send("Bad Request")
+                } catch (he: HttpException) {
+                    res.status(he.status).send(he.message)
                 } catch (_: Exception) {
                     res.status(500).send("Internal Server Error")
                 }
