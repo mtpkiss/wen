@@ -54,9 +54,13 @@ public func staticFiles(root: String, index!: String = "index.html", maxAge!: In
                 req.path
             }
 
-            // 安全：绝不允许通过 ".." 进行目录穿越、逃出所服务的 root 目录。
-            // 一旦相对路径里出现 ".."，直接放行（next）而不去读文件。
-            if (rel.contains("..")) {
+            // 安全:用 resolveWithinRoot 做沙箱化路径规范化,任何能跨出 base 的相对路径
+            // (典型如含 "..",或被字符串解码后跨出根目录)都会抛异常 -> 视作未命中放行。
+            // 这比早先「rel.contains("..")」更严密:resolveWithinRoot 是路径规范化后的
+            // 前缀比对,而不只是看 ".." 字面值。
+            let probeFull = try {
+                resolveWithinRoot(base, rel)
+            } catch (_: Exception) {
                 next()
                 return
             }
@@ -66,8 +70,7 @@ public func staticFiles(root: String, index!: String = "index.html", maxAge!: In
             // 至于 URL 已带 "/" 的目录请求,则在下面追加 index 后按文件处理。
             let endsWithSlash = rel.isEmpty() || rel.endsWith("/")
             if (!endsWithSlash) {
-                let probe = "${base}/${rel}"
-                if (exists(probe) && isDirectoryPath(probe)) {
+                if (exists(probeFull) && isDirectoryPath(probeFull)) {
                     if (redirect) {
                         sendDirectoryRedirect(req, res)
                     } else {
@@ -92,10 +95,16 @@ public func staticFiles(root: String, index!: String = "index.html", maxAge!: In
                 return
             }
 
-            let path = "${base}/${rel}"
+            // 沙箱化拼接最终路径:补上 index 后路径仍需在 base 之内,否则放行。
+            let path = try {
+                resolveWithinRoot(base, rel)
+            } catch (_: Exception) {
+                next()
+                return
+            }
 
-            // 用 `exists` 检查路径是否存在；不存在的文件（以及无法读取的情况）
-            // 都跳过并交给后续路由处理，不在这里返回。
+            // 用 `exists` 检查路径是否存在;不存在的文件(以及无法读取的情况)
+            // 都跳过并交给后续路由处理,不在这里返回。
             if (!exists(path)) {
                 next()
                 return
