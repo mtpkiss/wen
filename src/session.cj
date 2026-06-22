@@ -2,7 +2,6 @@ package wen
 
 import std.collection.*
 import std.sync.*
-import std.random.*
 
 /*
  * 会话(session)支持。
@@ -65,7 +64,6 @@ public interface SessionStore {
 public class MemorySessionStore <: SessionStore {
     let data = HashMap<String, HashMap<String, String>>()
     let lock = Mutex()
-    let rng = Random()
 
     public init() {}
 
@@ -99,14 +97,10 @@ public class MemorySessionStore <: SessionStore {
         }
     }
 
+    // 128 位 sid。**安全关键**:经 secureRandomHex(应用层 CSPRNG)生成,以保证攻击者
+    // 无法从自己拿到的 sid 反推内部状态、预测他人 sid(详见 secure_random.cj)。
     public func newId(): String {
-        lock.lock()
-        try {
-            // 128 位随机 id(两个 64 位随机数拼成十六进制)。
-            return toHex64(rng.nextUInt64()) + toHex64(rng.nextUInt64())
-        } finally {
-            lock.unlock()
-        }
+        return secureRandomHex(16)
     }
 }
 

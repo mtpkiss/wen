@@ -1,8 +1,5 @@
 package wen
 
-import std.sync.*
-import std.random.*
-
 /*
  * CSRF(跨站请求伪造)防护中间件 —— 对应 Express 生态的 csurf,采用「签名双提交 Cookie」。
  *
@@ -32,25 +29,15 @@ import std.random.*
  * 安全方法(GET/HEAD/OPTIONS)只「确保 token 存在并下发 Cookie」,不做校验。
  */
 
-// 线程安全的 CSRF token 生成器(128 位随机,十六进制)。Random 实例非线程安全,故加锁
-// (与 requestId 的做法一致)。
-class CsrfTokenGen {
-    let lock = Mutex()
-    let rng = Random()
-
-    func next(): String {
-        lock.lock()
-        try {
-            return toHex64(rng.nextUInt64()) + toHex64(rng.nextUInt64())
-        } finally {
-            lock.unlock()
-        }
-    }
+// 生成 128 位 CSRF token。**安全关键**:必须由不可预测的 CSPRNG 派生,否则攻击者可观察
+// 自己拿到的 token 来恢复 PRNG 内部状态、进而预测他人 token。本框架经 secureRandomHex
+// (HMAC-SHA256 单向扩展的 PRNG,详见 secure_random.cj)生成,保证输出不可反推内部状态。
+func nextCsrfToken(): String {
+    return secureRandomHex(16)
 }
 
 public func csrf(cookieName!: String = "_csrf", field!: String = "_csrf", signed!: Bool = true,
     httpOnly!: Bool = true, secure!: Bool = false, sameSite!: String = "Lax"): Middleware {
-    let gen = CsrfTokenGen()
     return {
         req: HttpRequest, res: HttpResponse, next: Next =>
             // 1. 复用此前下发 Cookie 里的 token;没有有效 token 则新生成并下发。
@@ -67,7 +54,7 @@ public func csrf(cookieName!: String = "_csrf", field!: String = "_csrf", signed
                 case None => ()
             }
             if (token.isEmpty()) {
-                token = gen.next()
+                token = nextCsrfToken()
                 res.cookie(cookieName, token, httpOnly: httpOnly, secure: secure, sameSite: sameSite, signed: signed)
             }
             // 2. 暴露给视图 / 下游:渲染进表单隐藏字段或 meta 标签,供后续请求回传。
