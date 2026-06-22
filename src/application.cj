@@ -148,11 +148,17 @@ public class Application {
     //   2. 若 name 自带扩展名就用它,否则取 "view engine" 设置作为默认扩展名并补全文件名;
     //   3. 按扩展名查 app.engine(ext, fn) 注册的引擎;没有则抛异常;
     //   4. 交给引擎读取模板文件并渲染。
+    //
+    // 安全:视图名经 normalizeRelPath 规范化,若试图跳出 views 目录(如含 "../")抛异常,
+    // 防止模板路径穿越。
     func renderView(name: String, data: JsonValue): String {
         let viewsDir = match (this.setting("views")) {
             case Some(v) => v
             case None => "views"
         }
+        // 沙箱:确保 name 不会跳出 viewsDir。不在乎规范化结果(后续仍走 joinViewPath
+        // 保留原拼接行为),只借此触发越界异常。
+        normalizeRelPath(name)
         var fileName = name
         let ext = match (fileExt(name)) {
             case Some(e) => e
