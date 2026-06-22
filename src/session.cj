@@ -2,6 +2,7 @@ package wen
 
 import std.collection.*
 import std.sync.*
+import std.time.*
 
 /*
  * 会话(session)支持。
@@ -60,18 +61,52 @@ public interface SessionStore {
     func newId(): String
 }
 
-// 进程内存实现的会话存储(线程安全,用 Mutex 保护)。
-public class MemorySessionStore <: SessionStore {
-    let data = HashMap<String, HashMap<String, String>>()
-    let lock = Mutex()
+// 单个会话在存储里的内部表示。`lastAccess` 用于 TTL 滑动过期(每次 load/save 都刷新)。
+class SessionEntry {
+    var values: HashMap<String, String>
+    var lastAccess: Int64
 
-    public init() {}
+    init(values: HashMap<String, String>, lastAccess: Int64) {
+        this.values = values
+        this.lastAccess = lastAccess
+    }
+}
+
+// 进程内存实现的会话存储(线程安全,用 Mutex 保护)。
+//
+// 配额(默认全关、向后兼容):
+//   - ttlSeconds:**滑动**过期窗口,>0 时,任何「上次访问后超过 N 秒」的会话被视为不存在
+//     并在 load/save 时惰性清理。-1/0 表示永不过期。
+//   - maxSessions:容量上限,>0 时,save 引入新会话且容量超额时,FIFO 淘汰最旧。
+//
+// 「满了怎么办」选 evict 而非 reject:save 发生在响应处理之后,reject 只能让会话「静默
+// 失效」(下个请求又是新会话);evict 在 save 里淘汰最旧,零中间件改动、对正常用户无感。
+public class MemorySessionStore <: SessionStore {
+    let data = HashMap<String, SessionEntry>()
+    let order = ArrayList<String>() // 按首次写入顺序;FIFO 淘汰从头部取
+    let lock = Mutex()
+    let ttlSeconds: Int64
+    let maxSessions: Int64
+
+    public init(ttlSeconds!: Int64 = -1, maxSessions!: Int64 = -1) {
+        this.ttlSeconds = ttlSeconds
+        this.maxSessions = maxSessions
+    }
 
     public func load(id: String): ?HashMap<String, String> {
         lock.lock()
         try {
+            sweepExpiredLocked()
             match (data.get(id)) {
-                case Some(v) => return Some(copyMap(v))
+                case Some(entry) =>
+                    if (isExpiredLocked(entry)) {
+                        removeFromOrderLocked(id)
+                        data.remove(id)
+                        return None
+                    }
+                    // 滑动过期:每次访问都续命。
+                    entry.lastAccess = nowSec()
+                    return Some(copyMap(entry.values))
                 case None => return None
             }
         } finally {
@@ -82,7 +117,19 @@ public class MemorySessionStore <: SessionStore {
     public func save(id: String, values: HashMap<String, String>): Unit {
         lock.lock()
         try {
-            data[id] = copyMap(values)
+            sweepExpiredLocked()
+            let isNew = !data.contains(id)
+            data[id] = SessionEntry(copyMap(values), nowSec())
+            if (isNew) {
+                order.add(id)
+                if (maxSessions > 0) {
+                    while (order.size > maxSessions) {
+                        let oldId = order[0]
+                        order.remove(0..1)
+                        data.remove(oldId)
+                    }
+                }
+            }
         } finally {
             lock.unlock()
         }
@@ -92,6 +139,7 @@ public class MemorySessionStore <: SessionStore {
         lock.lock()
         try {
             data.remove(id)
+            removeFromOrderLocked(id)
         } finally {
             lock.unlock()
         }
@@ -101,6 +149,58 @@ public class MemorySessionStore <: SessionStore {
     // 无法从自己拿到的 sid 反推内部状态、预测他人 sid(详见 secure_random.cj)。
     public func newId(): String {
         return secureRandomHex(16)
+    }
+
+    // 当前会话数(诊断 / 测试用)。
+    public func size(): Int64 {
+        lock.lock()
+        try {
+            return data.size
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    private func nowSec(): Int64 {
+        return DateTime.now().toUnixTimeStamp().toSeconds()
+    }
+
+    private func isExpiredLocked(entry: SessionEntry): Bool {
+        if (ttlSeconds <= 0) {
+            return false
+        }
+        return nowSec() - entry.lastAccess >= ttlSeconds
+    }
+
+    // 顺序队列前面是最旧的;从头扫到第一个未过期就停下,O(已过期数)。
+    private func sweepExpiredLocked(): Unit {
+        if (ttlSeconds <= 0) {
+            return
+        }
+        let n = nowSec()
+        while (order.size > 0) {
+            let oldId = order[0]
+            match (data.get(oldId)) {
+                case Some(e) => if (n - e.lastAccess >= ttlSeconds) {
+                    order.remove(0..1)
+                    data.remove(oldId)
+                } else {
+                    return
+                }
+                case None => order.remove(0..1)
+            }
+        }
+    }
+
+    private func removeFromOrderLocked(id: String): Unit {
+        var i = 0
+        while (i < order.size) {
+            if (order[i] == id) {
+                order.remove(i..(i + 1))
+                return
+            }
+            i += 1
+        }
     }
 }
 
