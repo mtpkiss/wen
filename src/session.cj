@@ -23,9 +23,14 @@ import std.time.*
 
 // 一次请求对应的会话对象:带一个 id 和一组字符串键值数据。
 public class Session {
-    public let id: String
+    // id / isNew 在请求处理过程中可能因 regenerate() 而变化,因此是 var:
+    //   - regenerate() 会把 id 切换到新值、isNew 置 true,从而触发 sid Cookie 重新下发。
+    //   - values 内容随之迁移,处理器手上的 sess 引用语义不变。
+    public var id: String
     let values: HashMap<String, String>
-    let isNew: Bool
+    public var isNew: Bool
+    // regenerate() 标记:由中间件在 next() 返回后处理。
+    var regenerateRequested: Bool = false
 
     init(id: String, values: HashMap<String, String>, isNew: Bool) {
         this.id = id
@@ -46,6 +51,17 @@ public class Session {
     // 删除会话中某个键。
     public func remove(key: String): Unit {
         values.remove(key)
+    }
+
+    // 在「认证边界」(典型为用户登录成功后)调用,为当前会话换发一枚新的随机 sid:
+    //   - 旧 sid 在 store 中销毁;
+    //   - 数据(values)迁移到新 sid;
+    //   - 标记 isNew,使 session 中间件在响应结束时下发新的签名 sid Cookie。
+    // 这能挫败「会话固定攻击」:即使攻击者先设了一个已知 sid 的 Cookie,登录后 sid
+    // 立即被替换,旧 sid 失效。本方法只**记录意图**,真正的 destroy/newId/setCookie
+    // 由 session() 中间件在 next() 返回后统一执行,以避免与处理器中其它会话操作竞争。
+    public func regenerate(): Unit {
+        this.regenerateRequested = true
     }
 }
 
@@ -219,6 +235,15 @@ public func session(store: SessionStore, cookieName!: String = "sid", path!: Str
             let sess = loadOrCreateSession(req, store, cookieName)
             req.session = Some(sess)
             next()
+            // 处理器若调用了 sess.regenerate(),在此换发新 sid:销毁旧 id、把数据
+            // 在内部迁移到新 id、并强制下发新 Cookie。**必须在 save 之前换 id**,
+            // 否则数据会被以旧 id 重新存回,旧记录又复活。
+            if (sess.regenerateRequested) {
+                store.destroy(sess.id)
+                sess.id = store.newId()
+                sess.isNew = true
+                sess.regenerateRequested = false
+            }
             // 请求处理完毕后回存会话;新会话再下发一枚签名的 sid Cookie。
             store.save(sess.id, sess.values)
             if (sess.isNew) {
