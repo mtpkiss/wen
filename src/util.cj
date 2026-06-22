@@ -175,3 +175,61 @@ public func pathSegments(path: String): Array<String> {
     }
     return parts.toArray()
 }
+
+// 把一个相对路径在 root 沙箱内解析为最终路径,**保证结果绝不跳出 root**。
+//
+// 规则:
+//   - 反斜杠归一为正斜杠(Windows 兼容)。
+//   - 按 "/" 拆段,逐段处理:空段 / "." 跳过;".." 弹出栈;栈空时再弹 ".." 视为「越界」。
+//   - 任何 URL-编码的穿越也会失败,因为这里只看字面字符;.. 必须以原文出现才会被识别;
+//     反过来,即便客户端把 %2e%2e 解码后给到这里也会触发越界。
+//   - 越界即抛异常。文件存在性由调用方自行检查(本函数不访问文件系统,纯字符串运算)。
+//
+// 返回值是 root + "/" + safeRel 形式的结合路径,可直接传给 std.fs(由 File.readFrom 等
+// 读取)。symlink 攻击不在本函数职责范围内——若 root 内存在可写场景,部署侧应禁止用户
+// 创建 symlink。
+public func resolveWithinRoot(root: String, relPath: String): String {
+    let normRel = normalizeRelPath(relPath)
+    let r = stripTrailingSep(root)
+    if (normRel.isEmpty()) {
+        return r
+    }
+    return r + "/" + normRel
+}
+
+func normalizeRelPath(p: String): String {
+    let raw = p.replace("\\", "/")
+    let stack = ArrayList<String>()
+    for (seg in raw.split("/")) {
+        if (seg.isEmpty() || seg == ".") {
+            continue
+        }
+        if (seg == "..") {
+            if (stack.size == 0) {
+                throw Exception("path escapes root sandbox: ${p}")
+            }
+            let idx = stack.size - 1
+            stack.remove(idx..(idx + 1))
+            continue
+        }
+        stack.add(seg)
+    }
+    var out = ""
+    var i = 0
+    for (s in stack) {
+        if (i > 0) {
+            out += "/"
+        }
+        out += s
+        i += 1
+    }
+    return out
+}
+
+func stripTrailingSep(s: String): String {
+    var t = s
+    while (t.size > 0 && (t.endsWith("/") || t.endsWith("\\"))) {
+        t = t[0..(t.size - 1)]
+    }
+    return t
+}

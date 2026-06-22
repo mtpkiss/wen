@@ -230,11 +230,17 @@ public class HttpResponse {
     //     不会因为经过 UTF-8 编解码往返而被破坏。
     //   - 经由 applyFileResponse 统一附带 ETag 与 Accept-Ranges,并在请求带
     //     If-None-Match / Range 时分别给出 304 / 206(详见 file_response.cj)。
-    public func sendFile(path: String): Unit {
-        let p = if (path.startsWith("./")) {
-            path[2..path.size]
-        } else {
-            path
+    public func sendFile(path: String, root!: ?String = None): Unit {
+        // 沙箱:传了 root 时,把 path 解析为 root 之内的绝对路径;含 ".." 或显式跨出
+        // root 一律抛异常。建议任何「path 直接或间接来自客户端输入」的调用都显式传 root。
+        let p = match (root) {
+            case Some(r) => resolveWithinRoot(r, path)
+            case None =>
+                if (path.startsWith("./")) {
+                    path[2..path.size]
+                } else {
+                    path
+                }
         }
         if (!exists(p)) {
             throw Exception("sendFile: file not found: ${path}")
@@ -261,13 +267,13 @@ public class HttpResponse {
     // sendFile 发送文件字节——因此同样具备二进制安全、ETag 与 Range 支持。
     // 注意:Content-Type 以文件实际扩展名为准(sendFile 内设置),下载文件名只影响
     // 保存时的建议名,二者互不冲突。
-    public func download(path: String): Unit {
-        download(path, basename(path))
+    public func download(path: String, root!: ?String = None): Unit {
+        download(path, basename(path), root: root)
     }
 
-    public func download(path: String, filename: String): Unit {
+    public func download(path: String, filename: String, root!: ?String = None): Unit {
         this.headers["Content-Disposition"] = contentDispositionFor(filename)
-        sendFile(path)
+        sendFile(path, root: root)
     }
 
     // 发送一段文本响应体(纯文本或 HTML)并结束响应。
