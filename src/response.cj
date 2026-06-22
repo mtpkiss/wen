@@ -233,14 +233,19 @@ public class HttpResponse {
     public func sendFile(path: String, root!: ?String = None): Unit {
         // 沙箱:传了 root 时,把 path 解析为 root 之内的绝对路径;含 ".." 或显式跨出
         // root 一律抛异常。建议任何「path 直接或间接来自客户端输入」的调用都显式传 root。
+        // 未传 root 时:出于安全考虑,默认拒绝含 ".." 路径段的 path(防止 path 直接
+        // 来自 req.params/query 时被用作路径穿越任意文件读)。需要读 root 之外文件时,
+        // 显式传 root 才有可控的沙箱边界。
         let p = match (root) {
             case Some(r) => resolveWithinRoot(r, path)
             case None =>
-                if (path.startsWith("./")) {
+                let stripped = if (path.startsWith("./")) {
                     path[2..path.size]
                 } else {
                     path
                 }
+                rejectDotDotPath(stripped)
+                stripped
         }
         if (!exists(p)) {
             throw Exception("sendFile: file not found: ${path}")
@@ -280,6 +285,9 @@ public class HttpResponse {
     // 不改动 Content-Type,沿用当前已设置的值(默认是 text/plain);如需指定为
     // HTML 等类型,请在调用前用 contentType/mimeType 设置好。
     public func send(text: String): Unit {
+        if (warnIfFinished("send")) {
+            return
+        }
         this.body = text
         this.finished = true
     }
@@ -287,8 +295,22 @@ public class HttpResponse {
     // 发送一段原始二进制响应体并结束响应。本方法不会自动设置 Content-Type;
     // 如果类型对客户端有意义,请在调用前自行设置(例如 res.contentType("image/png"))。
     public func sendBytes(data: Array<UInt8>): Unit {
+        if (warnIfFinished("sendBytes")) {
+            return
+        }
         this.bodyBytes = Some(data)
         this.finished = true
+    }
+
+    // 已 finished / hijacked 的响应再次调用终结方法是错误用法。打一条 stderr 警告
+    // 并直接返回,不覆盖已有 body — 早先 send("a"); send("b") 会让 body 变成 "b" 而
+    // 用户毫无察觉。返回 true 表示调用方应跳过后续写入。
+    private func warnIfFinished(method: String): Bool {
+        if (this.finished || this.hijacked) {
+            eprintln("[wen] 警告: res.${method} 在响应已结束(finished/hijacked)后被再次调用,本次写入已忽略")
+            return true
+        }
+        return false
     }
 
     // 以流式方式发送响应:先把状态行和响应头刷出(因此所有头部必须在调用前设好),
@@ -297,11 +319,21 @@ public class HttpResponse {
     // 方法内部会把 hijacked 与 finished 都置为 true,以接管连接并跳过服务端的
     // 常规序列化写出流程。需要设置的头(如 Content-Type)请务必在调用前设好。
     public func stream(body: (StreamWriter) -> Unit): Unit {
+        if (warnIfFinished("stream")) {
+            return
+        }
         this.hijacked = true
         this.finished = true
         let writer = StreamWriter(this)
         writer.begin()
-        body(writer)
+        // body 抛异常时,响应头已写出 — 不能再回一个 5xx 错误响应(客户端会把两份响应
+        // 拼起来解析)。这里吞掉异常,只能依赖 hijacked=true 让上层关闭连接。建议业务
+        // 自身在 body 内做异常处理与日志。
+        try {
+            body(writer)
+        } catch (_: Exception) {
+            ()
+        }
     }
 
     // 建立一个 Server-Sent Events(SSE,服务器推送事件)流。先设置好 SSE 所需的
@@ -489,11 +521,23 @@ public class HttpResponse {
     // 强度不足(< 32 字节)时打一条 stderr 警告(由 warnIfWeakCookieSecret 保证一进程一次)。
     private func cookieSecretOrThrow(): String {
         let app = resolveApp()
-        warnIfWeakCookieSecret(app.cookieSecret)
+        warnIfWeakCookieSecret(Some(app), app.cookieSecret)
         if (app.cookieSecret.isEmpty()) {
             throw Exception("签名 Cookie 需要先设置 app.cookieSecret")
         }
         return app.cookieSecret
+    }
+}
+
+// 拦截显式含 ".." 路径段的相对路径:即便目标文件存在,也拒绝读取,避免 sendFile
+// 在未传 root 时被攻击者用作任意文件读漏洞。检查的是「路径段」,因此 "a..b"(段内
+// 含点点)是合法的,只有独立段 ".." 才被禁。同时把反斜杠归一为正斜杠以兼容 Windows。
+func rejectDotDotPath(p: String): Unit {
+    let normalized = p.replace("\\", "/")
+    for (seg in normalized.split("/")) {
+        if (seg == "..") {
+            throw Exception("sendFile: 路径含 '..' 段被拒绝;若需读取上级目录文件,请显式传 root 参数:sendFile(path, root: ...)")
+        }
     }
 }
 

@@ -1,5 +1,7 @@
 package wen
 
+import std.collection.*
+
 /*
  * 认证中间件:HTTP Basic 与 Bearer Token。
  *
@@ -69,6 +71,21 @@ func authScheme(req: HttpRequest, prefix: String): ?String {
 }
 
 // 回 401 并带上 WWW-Authenticate 头。
+// 安全:realm 里可能含双引号 / 反斜杠 — 直接拼进 "..." 会破坏 RFC 7235 的 quoted-string
+// 结构,导致客户端解析错乱。按 RFC 7230 的 quoted-string 转义规则给 \ 和 " 加反斜杠;
+// CR/LF/NUL 已被 res.set 内的 checkHeaderSafe 兜底拒绝。
 func sendUnauthorized(res: HttpResponse, scheme: String, realm: String): Unit {
-    res.set("WWW-Authenticate", "${scheme} realm=\"${realm}\"").status(401).send("Unauthorized")
+    res.set("WWW-Authenticate", "${scheme} realm=\"${escapeQuotedString(realm)}\"").status(401).send("Unauthorized")
+}
+
+func escapeQuotedString(s: String): String {
+    let bytes = s.toArray()
+    let out = ArrayList<UInt8>()
+    for (b in bytes) {
+        if (b == UInt8(92) || b == UInt8(34)) { // \ 或 "
+            out.add(UInt8(92))
+        }
+        out.add(b)
+    }
+    return String.fromUtf8(out.toArray())
 }

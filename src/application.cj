@@ -3,18 +3,32 @@ package wen
 import std.collection.*
 import std.sync.*
 
-// 已经打过弱 cookieSecret 警告:用 AtomicBool 保证全进程只 print 一次,免刷屏。
-let WEAK_COOKIE_SECRET_WARNED: AtomicBool = AtomicBool(false)
-
 // 检查 cookieSecret 强度,长度 < 32 字节(256 位)时在 stderr 打一行警告。该长度阈值
 // 对应「在线暴力破解 HMAC-SHA256 实际不可行」的常用底线。空串不警告(配套异常已说明)。
 // 不强制抛错(避免阻断已有应用启动),只引起开发者关注。
-func warnIfWeakCookieSecret(secret: String): Unit {
+//
+// 警告闸门由 Application 实例字段 warnedWeakCookieSecret 承担(从前的包级
+// AtomicBool 会让同进程内多个 Application 共享标志位,跨实例的弱密钥警告漏报)。
+func warnIfWeakCookieSecret(app: ?Application, secret: String): Unit {
     if (secret.isEmpty() || secret.size >= 32) {
         return
     }
-    if (WEAK_COOKIE_SECRET_WARNED.compareAndSwap(false, true)) {
-        eprintln("[wen] 警告: cookieSecret 长度 ${secret.size} 不足 32 字节(256 位),易被暴力破解;生产环境请使用至少 32 字节的强随机密钥")
+    match (app) {
+        case Some(a) =>
+            if (!a.warnedWeakCookieSecret.compareAndSwap(false, true)) {
+                return
+            }
+        case None => ()
+    }
+    eprintln("[wen] 警告: cookieSecret 长度 ${secret.size} 不足 32 字节(256 位),易被暴力破解;生产环境请使用至少 32 字节的强随机密钥")
+}
+
+// 应用启动后再修改配置(setLocal / engine / bodyParser / set / enable / disable / mime)
+// 会抛此异常。多线程并发请求阶段对共享 HashMap 的写入会引发数据竞争,所以"配置阶段
+// 写入、运行阶段只读"被设为强约束。
+public class IllegalStateException <: Exception {
+    public init(msg: String) {
+        super(msg)
     }
 }
 
@@ -35,6 +49,15 @@ func warnIfWeakCookieSecret(secret: String): Unit {
 public class Application {
     let router: Router = Router()
     let settings: HashMap<String, String> = HashMap<String, String>()
+
+    // 实例级的弱密钥告警闸门:同进程内多个 Application 各自独立提醒一次,免刷屏。
+    let warnedWeakCookieSecret: AtomicBool = AtomicBool(false)
+
+    // 应用是否已进入「运行阶段」:listen() 一旦启动便置 true,此后再修改路由 / 共享配置
+    // (use / get / post / set / engine / bodyParser / setLocal 等)都会抛
+    // IllegalStateException — 因为请求处理线程会并发读这些字段(HashMap/ArrayList 非
+    // 线程安全),启动后再写就是数据竞争。
+    let frozen: AtomicBool = AtomicBool(false)
 
     // 应用级的共享存储（对应 Express 的 app.locals）：一张键值表，生命周期
     // 与应用相同、被所有请求共享。适合放配置对象、共享的服务实例、全局可复用
@@ -65,7 +88,28 @@ public class Application {
 
     public init() {}
 
+    // 把应用切到「运行阶段」:由 listen 在启动前调用。一旦冻结,后续配置类写操作
+    // (路由注册、setLocal、engine、bodyParser、set/enable/disable、mime 等)都会
+    // 抛 IllegalStateException,避免请求处理线程与运行时写入并发访问 HashMap。
+    // 同时联动冻结底层 router,使所有路由注册入口也拒绝写入。
+    func markFrozen(): Unit {
+        // 在冻结之前把两项路由 settings 同步到 router,使后续 handle 路径无需再写
+        // router 字段 — 多线程并发请求时即便都写同值也是数据竞争,索性一次写完锁定。
+        router.caseSensitive = enabled("case sensitive routing")
+        router.strict = enabled("strict routing")
+        frozen.store(true)
+        router.freeze()
+    }
+
+    // 配置类方法入口检查:仅允许在 listen 之前修改应用配置。
+    func ensureNotFrozen(): Unit {
+        if (frozen.load()) {
+            throw IllegalStateException("wen: 应用已 listen,不能再修改配置/路由/共享状态;请在 listen() 之前完成注册")
+        }
+    }
+
     public func setLocal(key: String, value: Any): Unit {
+        ensureNotFrozen()
         locals[key] = value
     }
 
@@ -113,6 +157,7 @@ public class Application {
     // 为某个模板扩展名注册视图引擎,对应 Express 的 app.engine(ext, fn)。扩展名可带
     // 或不带前导点("html" 与 ".html" 等价)。注册后,渲染该扩展名的模板时即用此引擎。
     public func engine(ext: String, fn: ViewEngine): Application {
+        ensureNotFrozen()
         engines[normalizeExt(ext)] = fn
         return this
     }
@@ -123,6 +168,7 @@ public class Application {
     // 用于补齐内置表未覆盖的类型(.webp/.wasm/.avif 等)或覆盖内置默认。约定在 listen()
     // 之前调用。它是包级 registerMimeType 的链式语法糖,二者写入同一张进程级全局表。
     public func mime(ext: String, mimeType: String): Application {
+        ensureNotFrozen()
         registerMimeType(ext, mimeType)
         return this
     }
@@ -134,6 +180,7 @@ public class Application {
     // multipart)之外的类型(如 application/xml、application/protobuf),也可覆盖内置默认。
     // 约定在 listen() 之前注册;解析器内抛出的异常会照常传播到错误处理流水线(框架不吞)。
     public func bodyParser(contentType: String, parser: BodyParser): Application {
+        ensureNotFrozen()
         bodyParsers[primaryContentType(contentType)] = parser
         return this
     }
@@ -322,6 +369,7 @@ public class Application {
     // ---- 应用设置（字符串键值配置）------------------------------------------
 
     public func set(key: String, value: String): Application {
+        ensureNotFrozen()
         settings[key] = value
         return this
     }
@@ -334,10 +382,12 @@ public class Application {
     // enable/disable 把设置置为 "true"/"false";enabled/disabled 判断其布尔值
     // (未设置视为 false / 未启用)。
     public func enable(key: String): Application {
+        ensureNotFrozen()
         settings[key] = "true"
         return this
     }
     public func disable(key: String): Application {
+        ensureNotFrozen()
         settings[key] = "false"
         return this
     }
@@ -364,10 +414,13 @@ public class Application {
         // req.fresh()/req.range() 也据此读取响应上的 ETag / Last-Modified。
         res.req = Some(req)
         req.res = Some(res)
-        // 把 Express 风格的两项路由设置投递到 router(只对顶级 router 生效;嵌套的
-        // 子 Router 可独立设置 caseSensitive / strict)。
-        router.caseSensitive = enabled("case sensitive routing")
-        router.strict = enabled("strict routing")
+        // 路由设置(case sensitive / strict)由 markFrozen() 在 listen 之前一次性写入
+        // router,运行期不再修改 — 避免并发请求路径上的字段写竞争。
+        // 未走 listen 的直接 handle(测试场景)下,这里兜底同步一次。
+        if (!frozen.load()) {
+            router.caseSensitive = enabled("case sensitive routing")
+            router.strict = enabled("strict routing")
+        }
         router.handle(req, res)
     }
 
@@ -379,6 +432,9 @@ public class Application {
     public var maxBodySize: Int64 = 1048576
     public var readTimeoutMs: Int64 = 15000
     public var maxConnections: Int64 = 1024
+    // 请求头部块(状态行+全部头)字节上限,默认 64 KiB。独立于 maxBodySize,防止
+    // 超大 Cookie 等头部把内存撑爆。
+    public var maxHeaderBytes: Int64 = 65536
 
     // 当前进程内最近一次 listen() 所构建并启动的 HttpServer 引用;close() 据此触发
     // 优雅关闭。listen() 之前为 None,此时 close() 是无操作。
@@ -387,14 +443,17 @@ public class Application {
     public func listen(port: Int64): Unit {
         let server = buildServer()
         this.httpServer = Some(server)
+        markFrozen()
         server.listen(port)
     }
 
     public func listen(port: Int64, onReady: () -> Unit): Unit {
         let server = buildServer()
         this.httpServer = Some(server)
-        onReady()
-        server.listen(port)
+        markFrozen()
+        // 把 onReady 透传给 HttpServer.listen,使其在 bind 成功(端口已可被连接)之后
+        // 才触发回调,符合 Express 的 listen(port, cb) 语义。
+        server.listen(port, onReady: Some(onReady))
     }
 
     // 优雅关闭:停止接受新连接,等待在途连接结束当前请求(并断开 keep-alive),
@@ -416,6 +475,7 @@ public class Application {
         server.maxBodySize = this.maxBodySize
         server.readTimeoutMs = this.readTimeoutMs
         server.maxConnections = this.maxConnections
+        server.maxHeaderBytes = this.maxHeaderBytes
         return server
     }
 }

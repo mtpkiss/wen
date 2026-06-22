@@ -2,6 +2,7 @@ package wen
 
 import std.collection.*
 import std.regex.*
+import std.sync.*
 
 /*
  * 路由核心。
@@ -255,6 +256,11 @@ class Layer {
 
 public class Router {
     let layers: ArrayList<Layer> = ArrayList<Layer>()
+    // 路由表是否已"冻结":Application.listen 启动后设为 true,此后所有写操作
+    // (use / get / post / param / useError 等)都抛 IllegalStateException。
+    // 请求处理线程会并发遍历 layers / paramCallbacks / routeTrie,运行时再写就是
+    // 数据竞争。
+    let frozen: AtomicBool = AtomicBool(false)
     // 已注册路由数的递增计数器,用于给每次注册分配唯一的 routeId(多处理器路由
     // 的各处理器共享同一个 id)。
     var routeCounter: Int64 = 0
@@ -290,7 +296,20 @@ public class Router {
         return routeCounter
     }
 
+    // 由 Application.listen 联动设置,一次设置永远不再回退。子路由若被挂载,Application
+    // 启动前已注册完毕,运行阶段不再需要写它们;冻结同样适用。
+    func freeze(): Unit {
+        frozen.store(true)
+    }
+
+    func ensureNotFrozen(): Unit {
+        if (frozen.load()) {
+            throw IllegalStateException("wen: 应用已 listen,不能再注册路由 / 中间件;请在 listen() 之前完成注册")
+        }
+    }
+
     func add(method: ?String, path: String, handler: Middleware, isPrefix: Bool): Unit {
+        ensureNotFrozen()
         let idx = layers.size
         let layer = Layer(method, path, handler, isPrefix, freshRouteId())
         layers.add(layer)
@@ -301,6 +320,7 @@ public class Router {
     // routeId。前一个处理器调用 next() 即推进到下一个;调用 req.nextRoute() 则跳过
     // 本组剩余处理器,直达下一条路由。
     func addAll(method: ?String, path: String, handlers: Array<Middleware>, isPrefix: Bool): Unit {
+        ensureNotFrozen()
         let id = freshRouteId()
         for (h in handlers) {
             let idx = layers.size
@@ -324,6 +344,7 @@ public class Router {
     // 注册一个参数预处理回调(对应 Express 的 app.param)。当匹配到的路由捕获了名为
     // `name` 的参数时,会在该路由处理器执行前触发此回调(每个请求每个参数名只触发一次)。
     public func param(name: String, handler: ParamHandler): Unit {
+        ensureNotFrozen()
         paramCallbacks[name] = handler
     }
 
@@ -443,6 +464,7 @@ public class Router {
     // 注册一个错误处理中间件。它只在有异常正在链中传递时才会被调用;由于链是按
     // 注册顺序执行的，所以要把它注册在「希望被它捕获其错误的那些路由」之后。
     public func useError(handler: ErrorHandler): Unit {
+        ensureNotFrozen()
         let idx = layers.size
         let layer = Layer(handler)
         layers.add(layer)
@@ -760,6 +782,10 @@ public class Router {
         // 从而保证下游路由仍按完整路径来匹配。
         // 同时维护 req.baseUrl：在子路由处理期间将其设为挂载前缀，以便子路由内的
         // 处理器能获知自己是在哪个路径前缀下运行的(对应 Express 的 req.baseUrl)。
+        // next 幂等保护:同一个 layer 的 next 被多次调用时,只第一次推进链,后续静默忽略。
+        // 早先 next 是裸闭包,中间件错误地调两次会让后续 layer 跑两遍,触发 param
+        // callback 重复触发、状态错乱。
+        let nextCalled = AtomicBool(false)
         if (layer.isPrefix && layer.pattern.segments.size > 0) {
             let savedPath = req.path
             let savedBaseUrl = req.baseUrl
@@ -768,16 +794,20 @@ public class Router {
             req.baseUrl = savedBaseUrl + mountPrefix
             let next: Next = {
                 =>
-                    req.path = savedPath
-                    req.baseUrl = savedBaseUrl
-                    dispatch(matched, index + 1, req, res, onExhausted, onError, None)
+                    if (nextCalled.compareAndSwap(false, true)) {
+                        req.path = savedPath
+                        req.baseUrl = savedBaseUrl
+                        dispatch(matched, index + 1, req, res, onExhausted, onError, None)
+                    }
             }
             try {
                 layer.handler(req, res, next)
             } catch (ex: Exception) {
                 req.path = savedPath
                 req.baseUrl = savedBaseUrl
-                dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
+                if (nextCalled.compareAndSwap(false, true)) {
+                    dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
+                }
                 return
             }
             req.path = savedPath
@@ -786,11 +816,18 @@ public class Router {
                 skipRoute()
             }
         } else {
-            let next: Next = {=> dispatch(matched, index + 1, req, res, onExhausted, onError, None)}
+            let next: Next = {
+                =>
+                    if (nextCalled.compareAndSwap(false, true)) {
+                        dispatch(matched, index + 1, req, res, onExhausted, onError, None)
+                    }
+            }
             try {
                 layer.handler(req, res, next)
             } catch (ex: Exception) {
-                dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
+                if (nextCalled.compareAndSwap(false, true)) {
+                    dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
+                }
                 return
             }
             if (req.consumeSkipRoute()) {

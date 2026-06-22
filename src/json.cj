@@ -376,6 +376,11 @@ func hexDigit(v: Int64): UInt8 {
 class JsonParser {
     let buf: Array<UInt8>
     var pos: Int64 = 0
+    // 当前嵌套深度;每进入一层 object/array 加 1,退出时减 1。超过 MAX_DEPTH 抛异常,
+    // 避免攻击者用 [[[[[...]]]]] 之类的极深嵌套触发栈溢出(仓颉是否有栈保护未知,
+    // 即便有也会以 SIGSEGV 形式 crash 而非可捕获 Exception)。
+    var depth: Int64 = 0
+    static let MAX_DEPTH: Int64 = 256
 
     init(text: String) {
         this.buf = text.toArray()
@@ -609,11 +614,13 @@ class JsonParser {
     // 把键值对按出现顺序追加到 pairs（这正是保序的来源）。每对之后遇逗号则继续下一对，
     // 遇 '}' 则结束，其余字符报错。键必须是字符串。
     func parseObject(): JsonValue {
+        enterNested()
         pos += 1 // 跳过 {
         let pairs = ArrayList<(String, JsonValue)>()
         skipWs()
         if (peek() == 125) { // 空对象 }
             pos += 1
+            depth -= 1
             return JsonObject(pairs)
         }
         while (true) {
@@ -641,18 +648,29 @@ class JsonParser {
             } // 右花括号 } -> 对象结束
             throw JsonException("expected ',' or '}' at offset ${pos}")
         }
+        depth -= 1
         return JsonObject(pairs)
+    }
+
+    // 进入一层嵌套(object / array)前调用;超过深度上限抛异常,避免极深嵌套引发栈溢出。
+    func enterNested(): Unit {
+        depth += 1
+        if (depth > MAX_DEPTH) {
+            throw JsonException("JSON nested too deeply (> ${MAX_DEPTH}) at offset ${pos}")
+        }
     }
 
     // 解析数组：跳过起始的 '['，处理可能的空数组（'[]'）；否则进入循环，每轮递归调用
     // parseValue 解析一个元素并按顺序追加到 items（嵌套结构由递归自然处理）。每个元素
     // 之后遇逗号则继续，遇 ']' 则结束，其余字符报错。
     func parseArray(): JsonValue {
+        enterNested()
         pos += 1 // 跳过 [
         let items = ArrayList<JsonValue>()
         skipWs()
         if (peek() == 93) { // 空数组 ]
             pos += 1
+            depth -= 1
             return JsonArray(items)
         }
         while (true) {
@@ -670,6 +688,7 @@ class JsonParser {
             } // 右方括号 ] -> 数组结束
             throw JsonException("expected ',' or ']' at offset ${pos}")
         }
+        depth -= 1
         return JsonArray(items)
     }
 }

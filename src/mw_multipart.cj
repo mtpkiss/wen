@@ -209,10 +209,18 @@ func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, s
     var filename = ""
     var hasFilename = false
     var contentType = ""
+    // 防御:同一 part 内出现重复 Content-Disposition / Content-Type 视为畸形 part,
+    // 直接丢弃(早先后值覆盖前值会让攻击者插入第二份头改写已解析的 name/filename)。
+    var seenDisposition = false
+    var seenContentType = false
     for (line in headerText.split("\r\n")) {
         let (k, v) = splitOnce(line, ":")
         let key = k.trimAscii().toAsciiLower()
         if (key == "content-disposition") {
+            if (seenDisposition) {
+                return
+            }
+            seenDisposition = true
             // 解析其参数,如 form-data; name="x"; filename="y"。
             for (paramRaw in v.split(";")) {
                 let (pk, pv) = splitOnce(paramRaw.trimAscii(), "=")
@@ -225,6 +233,10 @@ func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, s
                 }
             }
         } else if (key == "content-type") {
+            if (seenContentType) {
+                return
+            }
+            seenContentType = true
             contentType = v.trimAscii()
         }
     }

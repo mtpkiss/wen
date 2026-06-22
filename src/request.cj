@@ -366,7 +366,13 @@ public class HttpRequest {
             return Unsatisfiable
         }
         let ranges = ArrayList<ByteRange>()
+        // 防御:Range 多区间放大攻击。客户端 "bytes=0-0,0-1,..." 几千段可让响应放大成
+        // multipart,消耗带宽与 CPU。nginx / Apache 默认上限在十位数,这里取 16。
+        let maxRanges = 16
         for (part in spec.split(",")) {
+            if (ranges.size >= maxRanges) {
+                return Malformed
+            }
             let p = part.trimAscii()
             if (p.isEmpty()) {
                 continue
@@ -654,7 +660,7 @@ public class HttpRequest {
             case Some(a) => a.cookieSecret
             case None => return None
         }
-        warnIfWeakCookieSecret(secret)
+        warnIfWeakCookieSecret(this.app, secret)
         if (secret.isEmpty()) {
             return None
         }
@@ -747,8 +753,20 @@ public class HttpRequest {
                 if (p.isEmpty()) {
                     continue
                 }
-                let (k, v) = splitOnce(p, "=")
-                this.cookies[k.trimAscii()] = v.trimAscii()
+                let (k, vRaw) = splitOnce(p, "=")
+                let name = k.trimAscii()
+                if (name.isEmpty()) {
+                    continue
+                }
+                // 按 RFC 6265:cookie 值可被双引号包裹(被某些客户端使用),需要剥掉。
+                // 同时值在传输前可能经过 URL 编码(常见框架做法):做一次 urlDecode,
+                // 让 cookie 写入(框架自身的 res.cookie 同样按 RFC 写 raw)和读取一致;
+                // 若值已是 raw(无 %XX),urlDecode 是 identity。
+                var v = vRaw.trimAscii()
+                if (v.size >= 2 && v.startsWith("\"") && v.endsWith("\"")) {
+                    v = v[1..(v.size - 1)]
+                }
+                this.cookies[name] = urlDecode(v)
             }
             case None => ()
         }

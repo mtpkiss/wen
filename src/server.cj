@@ -67,6 +67,11 @@ public class HttpServer {
     // 从而间接限制了 spawn 出来的线程数：当连接洪水（大量并发连接）涌入时，
     // 多出来的连接会在 accept 之前被挡住，不会无限制地创建线程而把资源耗尽。
     public var maxConnections: Int64 = 1024
+    // 请求头部块(状态行 + 全部头)的最大字节数,默认 64 KiB。早先头部仅靠
+    // `maxBodySize + 65536` 这个组合上限挡 — 当 body 上限被调到几十 MB 时,header
+    // 也跟着可以膨胀到几十 MB,单条 Cookie 头都能把内存撑爆。独立设置头部上限是
+    // 标准实践(参考 nginx 8 KiB / Apache 8 KiB / Go 1 MiB)。
+    public var maxHeaderBytes: Int64 = 65536
 
     // ---- 优雅关闭相关状态 ----
     // 关闭信号:置 true 后,accept 循环退出,handleConnection 不再复用 keep-alive。
@@ -85,11 +90,34 @@ public class HttpServer {
         this.app = app
     }
 
-    public func listen(port: Int64): Unit {
+    // bind 成功后(端口已可被连接)再触发 onReady;Express 的 listen(port, cb) 语义。
+    // 在进入 accept 循环之前调用,因此 onReady 抛异常会让 server 不开始接受连接(自然
+    // 关闭 socket)。onReady 默认 None,调用 `listen(port)` 即不带回调。
+    public func listen(port: Int64, onReady!: ?(() -> Unit) = None): Unit {
         let server = TcpServerSocket(bindAt: UInt16(port))
-        server.bind()
+        // 先把 serverSocket 挂上去再 bind:其它线程若在 bind 期间提前调用 shutdown(),
+        // 能拿到这把 socket 关掉它,免得 bind 完成后再自检 — 关闭路径更可预测。
+        // 反过来若先 bind 再赋值,bind 与赋值之间的窗口内 shutdown() 找不到 socket,
+        // 只能依赖 bind 完成后自检退出,期间端口短暂被占用又释放,对外可见性不稳定。
         this.serverSocket = Some(server)
-        // 若 shutdown() 在 listen() 之前被调用过(罕见但合法),这里立即退出。
+        server.bind()
+        // bind 已成功,端口对外可见;先触发 onReady。若 onReady 抛异常,将 socket 关掉
+        // 再向上冒,避免泄漏。
+        match (onReady) {
+            case Some(cb) =>
+                try {
+                    cb()
+                } catch (e: Exception) {
+                    try {
+                        server.close()
+                    } catch (_: Exception) {
+                        ()
+                    }
+                    throw e
+                }
+            case None => ()
+        }
+        // 若 shutdown() 在 listen() 之前或 onReady 期间被调用,这里立即退出。
         if (shutdownRequested.load()) {
             try {
                 server.close()
@@ -192,9 +220,14 @@ public class HttpServer {
 
     func handleConnection(client: TcpSocket): Unit {
         client.readTimeout = Duration.millisecond * readTimeoutMs
-        let reader = ConnReader(client, maxBodySize)
+        let reader = ConnReader(client, maxBodySize, maxHeaderBytes)
+        // 当前这条请求的响应是否已开始写出(响应头已发或连接已被流式劫持)。
+        // catch 块据此决定是否再写错误响应 — 已发过字节再写错误响应会让客户端把两份
+        // 响应拼起来解析(协议混乱)。每条新请求开始时重置为 false。
+        var responseStarted = false
         try {
             while (true) {
+                responseStarted = false
                 // readMessage 返回 None 表示对端正常关闭了连接（读到流末尾）
                 // 或读操作超时——这两种都属于"没有更多请求了"的正常收尾，而非
                 // 错误。因此直接 break 退出循环、安静地结束这条连接的服务，
@@ -208,6 +241,11 @@ public class HttpServer {
                 let res = HttpResponse()
                 res.conn = Some(SocketConnection(client))
                 app.handle(req, res)
+                // 流式响应已经在 stream/sse 内部写出过响应头;此后无论是否 finished,
+                // 都不能再写额外错误响应。
+                if (res.headersSent || res.hijacked) {
+                    responseStarted = true
+                }
                 if (!res.finished) {
                     res.status(404).send("Not Found")
                 }
@@ -227,15 +265,21 @@ public class HttpServer {
                     "close"
                 }
                 res.headersSent = true
+                responseStarted = true
                 client.write(serializeResponse(res))
                 if (!keepAlive) {
                     break
                 }
             }
         } catch (he: HttpException) {
-            writeError(client, he.status, he.message)
+            // 仅在本条请求的响应头尚未写出时才回错误响应;否则保持沉默,让连接关闭。
+            if (!responseStarted) {
+                writeError(client, he.status, he.message)
+            }
         } catch (_: Exception) {
-            writeError(client, 500, "Internal Server Error")
+            if (!responseStarted) {
+                writeError(client, 500, "Internal Server Error")
+            }
         } finally {
             client.close()
         }
@@ -307,11 +351,50 @@ public class HttpServer {
         let headerPart = String.fromUtf8(subArray(raw, 0, headerEnd))
         let bodyBytes = subArray(raw, bodyStart, raw.size)
 
+        // 拒绝 LF-only 行结束(RFC 7230 要求 CRLF):某些代理会"宽容"地把 LF 当作行
+        // 终止符,而 wen 严格按 CRLF 切分 -> 同一报文不同解读 = 走私通道。
+        // 凡是出现 \n 而前面不是 \r 的位置,一律拒绝。
+        rejectBareLF(headerPart)
+
         let lines = headerPart.split("\r\n")
+        if (lines.size == 0 || lines[0].isEmpty()) {
+            throw BadRequestException()
+        }
         let requestLine = lines[0]
 
-        let (method, afterMethod) = splitOnce(requestLine, " ")
-        let (target, version) = splitOnce(afterMethod, " ")
+        // 请求行的形态必须是 "METHOD SP TARGET SP HTTP/x.y";少于两个空格或方法/URI 缺失
+        // 一律 400。早先解析后默默生成空 method / 空 path,会让攻击者绕过日志/审计。
+        let firstSp = requestLine.indexOf(" ")
+        let method: String
+        let afterMethod: String
+        match (firstSp) {
+            case Some(_) =>
+                let (m, rest) = splitOnce(requestLine, " ")
+                method = m
+                afterMethod = rest
+            case None => throw BadRequestException()
+        }
+        if (method.isEmpty() || !isTokenString(method)) {
+            // 方法名必须为 RFC 7230 token(字母/数字/部分符号);非 token 字符抛 400。
+            throw BadRequestException()
+        }
+        let secondSp = afterMethod.indexOf(" ")
+        let target: String
+        let version: String
+        match (secondSp) {
+            case Some(_) =>
+                let (t, v) = splitOnce(afterMethod, " ")
+                target = t
+                version = v
+            case None => throw BadRequestException()
+        }
+        if (target.isEmpty()) {
+            throw BadRequestException()
+        }
+        // 防御性目标 URI 长度上限:8 KiB(同等于 nginx/Apache 默认)。极长 URI 多为攻击。
+        if (target.size > 8192) {
+            throw PayloadTooLargeException()
+        }
 
         let req = HttpRequest(method, target)
         req.httpVersion = version
@@ -326,15 +409,116 @@ public class HttpServer {
         while (i < lines.size) {
             let line = lines[i]
             if (!line.isEmpty()) {
+                // 行首空白(SP/HTAB)是 RFC 7230 §3.2.4 已被废弃的 "obs-fold" 续行
+                // 形式;主流服务器拒绝以避免与代理解读分歧。
+                let firstChar = line.toArray()[0]
+                if (firstChar == UInt8(32) || firstChar == UInt8(9)) {
+                    throw BadRequestException()
+                }
+                let colonIdx = line.indexOf(":")
+                match (colonIdx) {
+                    case None => throw BadRequestException()
+                    case Some(_) => ()
+                }
                 let (key, value) = splitOnce(line, ":")
-                req.headers[key.toAsciiLower().trimAscii()] = value.trimAscii()
+                let nameLow = key.toAsciiLower().trimAscii()
+                if (nameLow.isEmpty() || !isTokenString(nameLow)) {
+                    // 头名必须是 token;含空格/控制字符的"Hos:t example"会被切出非法 key。
+                    throw BadRequestException()
+                }
+                let raw = value.trimAscii()
+                // 头值不允许含 CR/LF/NUL(响应分割的请求侧对偶问题)。
+                for (b in raw.toArray()) {
+                    if (b == UInt8(13) || b == UInt8(10) || b == UInt8(0)) {
+                        throw BadRequestException()
+                    }
+                }
+                // RFC 7230 §3.2.2:同名头(除 Set-Cookie)按 "," 合并保留多值。
+                // 早先后值静默覆盖前值,会让 Cookie / X-Forwarded-For 等多值头丢失。
+                match (req.headers.get(nameLow)) {
+                    case Some(existing) => req.headers[nameLow] = "${existing}, ${raw}"
+                    case None => req.headers[nameLow] = raw
+                }
             }
             i += 1
         }
 
         req.bodyBytes = bodyBytes
-        req.body = String.fromUtf8(bodyBytes)
+        // 文本 body 视图:仅当 Content-Type 主类型属于文本族(json/xml/x-www-form-
+        // urlencoded/text-*)时才进行 UTF-8 解码;二进制负载(图片/protobuf/gzip 等)
+        // 跳过解码,避免大请求的无谓 CPU 开销和潜在的 UTF-8 异常波及 parseRequest。
+        // 解码本身也用 try-catch 兜底:出现非法 UTF-8 字节时置空串(req.bodyBytes 仍可用)。
+        req.body = decodeBodyTextIfApplicable(bodyBytes, req)
         return req
+    }
+
+    // 判定 Content-Type 是否是「需要文本视图」的类型 — 仅这些类型才付出 UTF-8 解码代价。
+    func decodeBodyTextIfApplicable(bodyBytes: Array<UInt8>, req: HttpRequest): String {
+        if (bodyBytes.size == 0) {
+            return ""
+        }
+        let ct = match (req.headers.get("content-type")) {
+            case Some(v) => v.toAsciiLower()
+            case None => ""
+        }
+        let needsText = (ct.startsWith("text/")
+            || ct.startsWith("application/json")
+            || ct.startsWith("application/xml")
+            || ct.startsWith("application/x-www-form-urlencoded")
+            || ct.startsWith("application/javascript")
+            || ct.startsWith("application/ld+json")
+            || ct.isEmpty()) // 无 Content-Type 时,保持兼容:尝试解码
+        if (!needsText) {
+            return ""
+        }
+        try {
+            return String.fromUtf8(bodyBytes)
+        } catch (_: Exception) {
+            return ""
+        }
+    }
+
+    // 拒绝裸 LF(无前导 CR)出现在头部块:防止与上游代理对行边界的解读分歧。
+    func rejectBareLF(headerPart: String): Unit {
+        let bytes = headerPart.toArray()
+        var i = 0
+        while (i < bytes.size) {
+            if (bytes[i] == UInt8(10)) {
+                if (i == 0 || bytes[i - 1] != UInt8(13)) {
+                    throw BadRequestException()
+                }
+            }
+            i += 1
+        }
+    }
+
+    // RFC 7230 token 字符集:!#$%&'*+-.^_`|~ 与 ALPHA / DIGIT。用于校验方法名 / 头名。
+    func isTokenString(s: String): Bool {
+        if (s.isEmpty()) {
+            return false
+        }
+        for (b in s.toArray()) {
+            if (!isTokenByte(b)) {
+                return false
+            }
+        }
+        return true
+    }
+
+    func isTokenByte(b: UInt8): Bool {
+        if ((b >= UInt8(65) && b <= UInt8(90)) || (b >= UInt8(97) && b <= UInt8(122))) {
+            return true
+        }
+        if (b >= UInt8(48) && b <= UInt8(57)) {
+            return true
+        }
+        // !#$%&'*+-.^_`|~
+        if ((b == UInt8(33) || b == UInt8(35) || b == UInt8(36) || b == UInt8(37) || b == UInt8(38)
+            || b == UInt8(39) || b == UInt8(42) || b == UInt8(43) || b == UInt8(45) || b == UInt8(46)
+            || b == UInt8(94) || b == UInt8(95) || b == UInt8(96) || b == UInt8(124) || b == UInt8(126))) {
+            return true
+        }
+        return false
     }
 
     // headerSeparatorIndex 的 Array 版本：在原始字节数组里扫描头/体分隔符
@@ -444,12 +628,14 @@ func buildHeadBlock(res: HttpResponse): String {
 class ConnReader {
     let sock: TcpSocket
     let maxBodySize: Int64
+    let maxHeaderBytes: Int64
     let buf: ArrayList<UInt8> = ArrayList<UInt8>()
     let tmp: Array<UInt8> = Array<UInt8>(4096, repeat: 0)
 
-    init(sock: TcpSocket, maxBodySize: Int64) {
+    init(sock: TcpSocket, maxBodySize: Int64, maxHeaderBytes: Int64) {
         this.sock = sock
         this.maxBodySize = maxBodySize
+        this.maxHeaderBytes = maxHeaderBytes
     }
 
     // 从套接字再读一批字节追加到内部缓冲区 buf。读到的字节先落在固定大小的
@@ -478,13 +664,13 @@ class ConnReader {
     // 定长报文，便于后续 parseRequest 统一处理。当遇到干净的流末尾、或消息读
     // 到一半就断流（不完整）时返回 None，调用方据此结束这条连接。
     func readMessage(): ?Array<UInt8> {
-        // 第一步：不断读直到缓冲区里出现头/体分隔符 "\r\n\r\n"，确定头部已收全。
+        // 第一步:不断读直到缓冲区里出现头/体分隔符 "\r\n\r\n",确定头部已收全。
+        // 头部块有独立上限 maxHeaderBytes(默认 64 KiB),不再混用 maxBodySize 兜底。
+        // 早先「maxBodySize + 65536」组合让 body 上限被调高时 header 也跟着无限放宽,
+        // 单条 Cookie 头就可耗光内存。
         var sep = headerSeparatorIndex(buf)
         while (sep < 0) {
-            // 防御：若迟迟读不到头部结束符，且累积字节已远超请求体上限再加 64 KiB
-            // 的头部余量，说明对端在发送畸形或恶意的超长头部，直接判为体积超限，
-            // 避免缓冲区无限增长把内存撑爆。
-            if (buf.size > maxBodySize + 65536) {
+            if (buf.size > maxHeaderBytes) {
                 throw PayloadTooLargeException()
             }
             if (!fill()) {
@@ -544,6 +730,10 @@ class ConnReader {
                 lineEnd = findCRLF(buf, pos)
             }
             let size = parseHexLen(String.fromUtf8(sliceList(buf, pos, lineEnd)))
+            // 单块大小本身就不能超过 body 上限,且必须非负。早 reject 比延迟到累加后更稳妥。
+            if (size < 0 || size > maxBodySize) {
+                throw PayloadTooLargeException()
+            }
             pos = lineEnd + 2
             if (size == 0) {
                 // 读到大小为 0 的结束块，表示请求体到此结束。这里消费掉结束块后
@@ -562,7 +752,9 @@ class ConnReader {
                 }
                 break
             }
-            if (body.size + size > maxBodySize) {
+            // 用减法形式校验防止 body.size + size 的 Int64 加法溢出绕过检查。
+            // 上面已确保 size <= maxBodySize、size >= 0,因此 maxBodySize - size 不会下溢。
+            if (body.size > maxBodySize - size) {
                 throw PayloadTooLargeException()
             }
             while (buf.size < pos + size + 2) {
@@ -661,21 +853,63 @@ func dropFront(buf: ArrayList<UInt8>, n: Int64): Unit {
     }
 }
 
-// 从头部文本中取出 Content-Length 的数值；不存在该头时返回 0。逐行扫描、
-// 对头名做小写化与去空白后再比较，以兼容大小写不同的写法。
+// 从头部文本中取出 Content-Length 的数值;不存在该头时返回 0。
+//
+// 走私防护:
+//   1. 多个 Content-Length 头(无论值是否相同)一律视为非法分帧 -> 抛 BadRequest。
+//      RFC 7230 §3.3.3 要求拒绝;若仅取第一个,前后代理对"以哪个为准"理解不一致即可
+//      实施 CL.CL 走私。
+//   2. 值必须严格为十进制数字 [0-9]+,不允许空白、正负号、十六进制前缀或附加字符。
+//      parseInt 风格的"宽松正常化"会让 wen 与代理对同一个 Content-Length 给出不同
+//      解读,构成走私入口。
 func headerContentLength(headerText: String): Int64 {
+    var found = -1
     for (line in headerText.split("\r\n")) {
         let (k, v) = splitOnce(line, ":")
         if (k.toAsciiLower().trimAscii() == "content-length") {
-            return parseInt(v.trimAscii())
+            let n = parseContentLengthStrict(v.trimAscii())
+            if (found >= 0 && found != n) {
+                // 多个 Content-Length 值不一致:典型走私构造。
+                throw BadRequestException()
+            }
+            if (found >= 0) {
+                // 多个同值的 Content-Length 也拒绝(RFC 严格要求只有一个)。
+                throw BadRequestException()
+            }
+            found = n
         }
     }
-    return 0
+    if (found < 0) {
+        return 0
+    }
+    return found
 }
 
-// 判断头部块中是否存在 Content-Length 头（只看有无，不取值）。它专门用于
-// 走私防护：与 headerIsChunked 配合，检测"同时声明 chunked 与 Content-Length"
-// 这种二义分帧。同样对头名做小写化与去空白以兼容各种大小写写法。
+// 严格解析 Content-Length 值:仅接受十进制 [0-9]+,空串 / 含空白 / 负号 / 非数字字符
+// 一律抛 BadRequestException。不要复用宽松的 parseInt,后者会把 "5abc"、"-5"、""
+// 等都正常化成数字,与上游代理结果不一致 -> 请求走私。
+func parseContentLengthStrict(s: String): Int64 {
+    if (s.isEmpty()) {
+        throw BadRequestException()
+    }
+    let bytes = s.toArray()
+    var result: Int64 = 0
+    for (b in bytes) {
+        if (b < UInt8(48) || b > UInt8(57)) {
+            throw BadRequestException()
+        }
+        let d = Int64(b) - 48
+        // 防 Int64 溢出:result*10+d 大于 Int64.Max 时拒绝。
+        if (result > (Int64(0x7FFFFFFFFFFFFFFF) - d) / 10) {
+            throw BadRequestException()
+        }
+        result = result * 10 + d
+    }
+    return result
+}
+
+// 判断头部块中是否存在 Content-Length 头(只看有无,不取值)。专门用于走私防护:
+// 与 headerIsChunked 配合,检测"同时声明 chunked 与 Content-Length"这种二义分帧。
 func headerHasContentLength(headerText: String): Bool {
     for (line in headerText.split("\r\n")) {
         let (k, _) = splitOnce(line, ":")
@@ -686,25 +920,61 @@ func headerHasContentLength(headerText: String): Bool {
     return false
 }
 
-// 判断请求是否声明了 chunked 分块传输编码，即查找 Transfer-Encoding 头并看
-// 其值（小写后）是否包含 "chunked"。用 contains 而非全等比较，是为了兼容形如
-// "gzip, chunked" 这种带多个编码、chunked 出现在列表中的写法。
+// 判断请求是否声明了 chunked 分块传输编码。
+//
+// 走私防护:严格按 RFC 7230 §3.3.1 的 token 列表语义解析:
+//   1. 收集**全部** Transfer-Encoding 头(可能出现多次),按 "," 拆成 token 序列;
+//   2. 任何 token 等于 "chunked"(大小写无关、去空白)则视为 chunked;
+//   3. RFC 要求 chunked 若出现必须是**最后一个** transfer-coding;否则拒绝(400)。
+//      不满足时返回 false 让调用方按非 chunked 处理 — 此分支配合 CL 校验仍能拦截。
+// 早先用 v.toAsciiLower().contains("chunked") 会把 "xchunked" 误判为 chunked,
+// 让 wen 与不同代理产生分帧分歧 -> TE.TE 走私。
 func headerIsChunked(headerText: String): Bool {
+    var anyChunked = false
+    var chunkedIsLast = false
     for (line in headerText.split("\r\n")) {
         let (k, v) = splitOnce(line, ":")
-        if (k.toAsciiLower().trimAscii() == "transfer-encoding") {
-            return v.toAsciiLower().contains("chunked")
+        if (k.toAsciiLower().trimAscii() != "transfer-encoding") {
+            continue
+        }
+        let parts = v.split(",")
+        var i = 0
+        while (i < parts.size) {
+            let tok = parts[i].trimAscii().toAsciiLower()
+            if (tok == "chunked") {
+                anyChunked = true
+                chunkedIsLast = (i == parts.size - 1)
+            } else if (tok.isEmpty()) {
+                ()
+            } else {
+                chunkedIsLast = false
+            }
+            i += 1
         }
     }
-    return false
+    if (anyChunked && !chunkedIsLast) {
+        // chunked 不是最后一个 transfer-coding,按 RFC 视为非法分帧。
+        throw BadRequestException()
+    }
+    return anyChunked
 }
 
-// 解析 chunked 的块大小行：把行首的十六进制数字（0-9、a-f、A-F）解析为长度。
-// 块大小行后面可能跟着以分号引导的"块扩展"（chunk extension，形如 "1a;ext=v"），
-// 本函数遇到第一个非十六进制字符（如分号）即停止，从而自然忽略掉该扩展后缀。
+// 解析 chunked 的块大小行:把行首的十六进制数字(0-9、a-f、A-F)解析为长度。
+// 块大小行后面可能跟着以分号引导的"块扩展"(chunk extension,形如 "1a;ext=v"),
+// 本函数遇到第一个非十六进制字符(如分号)即停止,从而自然忽略掉该扩展后缀。
+//
+// 走私 / DoS 防护:
+//   - 空串(连一位 hex 都没有)抛 BadRequestException — 早先静默返回 0 会把"残缺块"
+//     当成"结束块"提前终止解析,body 截断后被当成正常请求传给路由,与代理对同一字节流
+//     的解读不一致。
+//   - 最多接受 16 位 hex(Int64 表示上限),超出抛 BadRequestException;并在累加过程中
+//     检测 Int64 溢出。早先无位数 / 溢出检测会让 size 在 body.size+size > maxBodySize
+//     检查里溢出为负,绕过 PayloadTooLarge,继而触发 OOM / 内存放大。
 func parseHexLen(s: String): Int64 {
-    var result = 0
-    for (c in s.toArray()) {
+    let bytes = s.toArray()
+    var result: Int64 = 0
+    var digits = 0
+    for (c in bytes) {
         var d = -1
         if (c >= UInt8(48) && c <= UInt8(57)) {
             d = Int64(c) - 48
@@ -715,7 +985,20 @@ func parseHexLen(s: String): Int64 {
         } else {
             break
         }
+        digits += 1
+        if (digits > 16) {
+            // Int64 上限就是 16 个 hex(0x7FFFFFFFFFFFFFFF),超过即溢出。
+            throw BadRequestException()
+        }
+        // 检测 result * 16 + d 是否溢出 Int64.MaxValue。
+        if (result > (Int64(0x7FFFFFFFFFFFFFFF) - d) / 16) {
+            throw BadRequestException()
+        }
         result = result * 16 + d
+    }
+    if (digits == 0) {
+        // 空 chunk-size 行属于残缺分帧,拒绝。
+        throw BadRequestException()
     }
     return result
 }
@@ -783,12 +1066,21 @@ public func urlDecode(s: String): String {
     var i = 0
     while (i < bytes.size) {
         let c = bytes[i]
-        if (c == UInt8(37) && i + 2 < bytes.size) { // 字节 37 即 '%'，后面跟两位十六进制
+        if (c == UInt8(37)) { // '%'
+            // 严格百分号解码:必须紧跟两位有效十六进制数字。残缺的 %X / 末尾的 %
+            // 或非 hex 字符(%GG)早先静默吞成 NUL 字节或保留 %,与代理对路径的
+            // 解读会产生分歧,可被用于路径绕过 / 走私。一律原样保留剩余字节,让
+            // 上层(如路径沙箱)按字面拦截。
+            if (i + 2 >= bytes.size || !isHexByte(bytes[i + 1]) || !isHexByte(bytes[i + 2])) {
+                out.add(c)
+                i += 1
+                continue
+            }
             let code = hexVal(bytes[i + 1]) * 16 + hexVal(bytes[i + 2])
             out.add(UInt8(code))
             i += 3
         } else if (c == UInt8(43)) { // 字节 43 即 '+'
-            out.add(UInt8(32)) // 还原为字节 32，即空格
+            out.add(UInt8(32)) // 还原为字节 32,即空格
             i += 1
         } else {
             out.add(c)
@@ -796,4 +1088,10 @@ public func urlDecode(s: String): String {
         }
     }
     return String.fromUtf8(out.toArray())
+}
+
+func isHexByte(b: UInt8): Bool {
+    return ((b >= UInt8(48) && b <= UInt8(57))
+        || (b >= UInt8(65) && b <= UInt8(70))
+        || (b >= UInt8(97) && b <= UInt8(102)))
 }
