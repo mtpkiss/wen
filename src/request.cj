@@ -654,6 +654,7 @@ public class HttpRequest {
             case Some(a) => a.cookieSecret
             case None => return None
         }
+        warnIfWeakCookieSecret(secret)
         if (secret.isEmpty()) {
             return None
         }

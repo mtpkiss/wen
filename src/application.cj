@@ -1,6 +1,22 @@
 package wen
 
 import std.collection.*
+import std.sync.*
+
+// 已经打过弱 cookieSecret 警告:用 AtomicBool 保证全进程只 print 一次,免刷屏。
+let WEAK_COOKIE_SECRET_WARNED: AtomicBool = AtomicBool(false)
+
+// 检查 cookieSecret 强度,长度 < 32 字节(256 位)时在 stderr 打一行警告。该长度阈值
+// 对应「在线暴力破解 HMAC-SHA256 实际不可行」的常用底线。空串不警告(配套异常已说明)。
+// 不强制抛错(避免阻断已有应用启动),只引起开发者关注。
+func warnIfWeakCookieSecret(secret: String): Unit {
+    if (secret.isEmpty() || secret.size >= 32) {
+        return
+    }
+    if (WEAK_COOKIE_SECRET_WARNED.compareAndSwap(false, true)) {
+        eprintln("[wen] 警告: cookieSecret 长度 ${secret.size} 不足 32 字节(256 位),易被暴力破解;生产环境请使用至少 32 字节的强随机密钥")
+    }
+}
 
 /*
  * 应用对象——相当于 Express 里的 `const app = express()`。

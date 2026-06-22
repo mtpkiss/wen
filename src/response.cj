@@ -485,9 +485,11 @@ public class HttpResponse {
         }
     }
 
-    // 取签名 Cookie 用的密钥(app.cookieSecret);未设置则抛异常。
+    // 取签名 Cookie 用的密钥(app.cookieSecret);未设置则抛异常。同时,首次发现密钥
+    // 强度不足(< 32 字节)时打一条 stderr 警告(由 warnIfWeakCookieSecret 保证一进程一次)。
     private func cookieSecretOrThrow(): String {
         let app = resolveApp()
+        warnIfWeakCookieSecret(app.cookieSecret)
         if (app.cookieSecret.isEmpty()) {
             throw Exception("签名 Cookie 需要先设置 app.cookieSecret")
         }
