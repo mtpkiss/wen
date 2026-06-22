@@ -28,6 +28,12 @@ public func cors(): Middleware {
 public func cors(origin: String, methods!: String = "GET, POST, PUT, DELETE, PATCH, OPTIONS",
     headers!: String = "Content-Type, Authorization", credentials!: Bool = false, maxAge!: Int64 = -1,
     exposeHeaders!: String = ""): Middleware {
+    // 在中间件构造期主动拒绝危险配置:CORS 规范禁止 credentials=true 与 origin="*" 同用
+    // (浏览器会拒,但服务端仍会处理请求,可能造成意料外的状态改变)。这里宁可让应用启动
+    // 时立刻报错,也好过把误配带到生产再被攻击者利用。
+    if (credentials && origin.trimAscii() == "*") {
+        throw Exception("CORS 配置错误:credentials=true 时 origin 不能为 \"*\",请指定具体的 origin")
+    }
     return {
         req: HttpRequest, res: HttpResponse, next: Next =>
             res.set("Access-Control-Allow-Origin", origin)
