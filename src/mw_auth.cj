@@ -20,12 +20,19 @@ public func basicAuth(verify: (String, String) -> Bool, realm!: String = "Restri
         req: HttpRequest, res: HttpResponse, next: Next => match (authScheme(req, "Basic ")) {
             case Some(b64) =>
                 let decoded = String.fromUtf8(base64Decode(b64))
-                let (user, pass) = splitOnce(decoded, ":")
-                if (verify(user, pass)) {
-                    req.attributes["authUser"] = user
-                    next()
-                } else {
+                // 安全:base64Decode 对非法字符是宽松跳过(忽略),畸形输入可能解出
+                // 不含 ":" 的歧义结果。RFC 7617 要求 Basic 凭据形如 "user:pass",
+                // 故强制要求解码结果非空且包含 ":";否则按未提供凭据返回 401。
+                if (decoded.isEmpty() || !decoded.contains(":")) {
                     sendUnauthorized(res, "Basic", realm)
+                } else {
+                    let (user, pass) = splitOnce(decoded, ":")
+                    if (verify(user, pass)) {
+                        req.attributes["authUser"] = user
+                        next()
+                    } else {
+                        sendUnauthorized(res, "Basic", realm)
+                    }
                 }
             case None => sendUnauthorized(res, "Basic", realm)
         }
