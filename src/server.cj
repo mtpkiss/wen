@@ -630,12 +630,29 @@ class ConnReader {
     let maxBodySize: Int64
     let maxHeaderBytes: Int64
     let buf: ArrayList<UInt8> = ArrayList<UInt8>()
+    // 缓冲区前端已被「逻辑消费」的字节数。dropFront 仅推进这个指针即可在 O(1)
+    // 摊销内完成 keep-alive 之间的字节剪裁,无需把剩余字节整段拷回;真正的物理
+    // 压缩(把有效字节搬回 0 位置、释放垃圾)只在累计废字节超过 maxHeaderBytes
+    // 时触发一次。早先版本每条 keep-alive 请求结束都要做一次完整 O(n) 拷贝,
+    // 高频小请求下退化成 O(n²)。
+    var readStart: Int64 = 0
     let tmp: Array<UInt8> = Array<UInt8>(4096, repeat: 0)
 
     init(sock: TcpSocket, maxBodySize: Int64, maxHeaderBytes: Int64) {
         this.sock = sock
         this.maxBodySize = maxBodySize
         this.maxHeaderBytes = maxHeaderBytes
+    }
+
+    // 逻辑可用字节数 = 物理 buf 大小 - 已消费指针。下面的扫描 / 切片均以"逻辑
+    // 下标 0 = readStart"为起点。
+    func available(): Int64 {
+        return buf.size - readStart
+    }
+
+    // 取逻辑下标 i 处的字节。等价于 buf[readStart + i],但调用方不必感知物理偏移。
+    func byteAt(i: Int64): UInt8 {
+        return buf[readStart + i]
     }
 
     // 从套接字再读一批字节追加到内部缓冲区 buf。读到的字节先落在固定大小的
@@ -660,6 +677,84 @@ class ConnReader {
         }
     }
 
+    // 在「逻辑视图」里查找头/体分隔符 "\r\n\r\n"(13,10,13,10),返回其逻辑下标;
+    // 找不到返回 -1。物理上从 buf[readStart..] 扫起,但对调用者透明。
+    func headerSeparatorIndex(): Int64 {
+        let lim = buf.size - 3
+        var i = readStart
+        while (i < lim) {
+            if (buf[i] == UInt8(13) && buf[i + 1] == UInt8(10)
+                && buf[i + 2] == UInt8(13) && buf[i + 3] == UInt8(10)) {
+                return i - readStart
+            }
+            i += 1
+        }
+        return -1
+    }
+
+    // 从「逻辑下标 from」起查找下一个 CRLF;找不到返回 -1。from 为负则视为 0。
+    func findCRLF(from: Int64): Int64 {
+        let logicalStart = if (from < 0) {
+            0
+        } else {
+            from
+        }
+        let lim = buf.size - 1
+        var i = readStart + logicalStart
+        while (i < lim) {
+            if (buf[i] == UInt8(13) && buf[i + 1] == UInt8(10)) {
+                return i - readStart
+            }
+            i += 1
+        }
+        return -1
+    }
+
+    // 取「逻辑视图」的 [start, end) 半开区间,返回独立 Array<UInt8> 副本。
+    func sliceList(start: Int64, end: Int64): Array<UInt8> {
+        if (end <= start) {
+            return Array<UInt8>()
+        }
+        let out = Array<UInt8>(end - start, repeat: 0)
+        let base = readStart + start
+        var i = 0
+        let n = end - start
+        while (i < n) {
+            out[i] = buf[base + i]
+            i += 1
+        }
+        return out
+    }
+
+    // 丢弃逻辑视图前 n 个字节。仅推进 readStart;只在累计废字节超过 maxHeaderBytes
+    // 阈值时才做一次物理压缩(把剩余有效字节搬到 buf 起点)。n <= 0 不做改动;
+    // n >= 可用字节则清空整个缓冲。
+    func dropFront(n: Int64): Unit {
+        if (n <= 0) {
+            return
+        }
+        let avail = buf.size - readStart
+        if (n >= avail) {
+            buf.clear()
+            readStart = 0
+            return
+        }
+        readStart += n
+        // 累计垃圾过多时做一次性 compact:把 [readStart..buf.size) 搬到 [0..rem),
+        // 再把尾巴砍掉。摊销代价 O(1)/请求。
+        if (readStart >= maxHeaderBytes) {
+            let rem = buf.size - readStart
+            var i = 0
+            while (i < rem) {
+                buf[i] = buf[readStart + i]
+                i += 1
+            }
+            // 用 remove(range) 截断尾部;ArrayList.remove 支持 range 半开区间。
+            buf.remove(rem..buf.size)
+            readStart = 0
+        }
+    }
+
     // 读取并返回一个完整请求的重组字节（头部段 + 请求体），形式上等价于一段
     // 定长报文，便于后续 parseRequest 统一处理。当遇到干净的流末尾、或消息读
     // 到一半就断流（不完整）时返回 None，调用方据此结束这条连接。
@@ -668,18 +763,18 @@ class ConnReader {
         // 头部块有独立上限 maxHeaderBytes(默认 64 KiB),不再混用 maxBodySize 兜底。
         // 早先「maxBodySize + 65536」组合让 body 上限被调高时 header 也跟着无限放宽,
         // 单条 Cookie 头就可耗光内存。
-        var sep = headerSeparatorIndex(buf)
+        var sep = headerSeparatorIndex()
         while (sep < 0) {
-            if (buf.size > maxHeaderBytes) {
+            if (available() > maxHeaderBytes) {
                 throw PayloadTooLargeException()
             }
             if (!fill()) {
                 return None
             }
-            sep = headerSeparatorIndex(buf)
+            sep = headerSeparatorIndex()
         }
         let headerSectionEnd = sep + 4
-        let headerText = String.fromUtf8(sliceList(buf, 0, sep))
+        let headerText = String.fromUtf8(sliceList(0, sep))
 
         let chunked = headerIsChunked(headerText)
         if (chunked && headerHasContentLength(headerText)) {
@@ -701,14 +796,14 @@ class ConnReader {
         }
         // 持续读取，直到缓冲区里的字节足够覆盖"头部段 + 完整请求体"。中途断流
         // （fill 返回 false）说明请求只发了一半，返回 None 放弃这条连接。
-        while (buf.size < headerSectionEnd + contentLength) {
+        while (available() < headerSectionEnd + contentLength) {
             if (!fill()) {
                 return None
             }
         }
         let total = headerSectionEnd + contentLength
-        let msg = sliceList(buf, 0, total)
-        dropFront(buf, total)
+        let msg = sliceList(0, total)
+        dropFront(total)
         return Some(msg)
     }
 
@@ -722,14 +817,14 @@ class ConnReader {
         let body = ArrayList<UInt8>()
         var pos = headerSectionEnd
         while (true) {
-            var lineEnd = findCRLF(buf, pos)
+            var lineEnd = findCRLF(pos)
             while (lineEnd < 0) {
                 if (!fill()) {
                     return None
                 }
-                lineEnd = findCRLF(buf, pos)
+                lineEnd = findCRLF(pos)
             }
-            let size = parseHexLen(String.fromUtf8(sliceList(buf, pos, lineEnd)))
+            let size = parseHexLen(String.fromUtf8(sliceList(pos, lineEnd)))
             // 单块大小本身就不能超过 body 上限,且必须非负。早 reject 比延迟到累加后更稳妥。
             if (size < 0 || size > maxBodySize) {
                 throw PayloadTooLargeException()
@@ -740,12 +835,12 @@ class ConnReader {
                 // 那个收尾的 CRLF（即结束块与可选 trailer 之间的空行）。注意：本
                 // 实现不支持 trailer（结束块之后附带的尾部报文头），仅吃掉这一个
                 // CRLF 即认定结束；若对端发了 trailer，会被后续处理忽略。
-                var endLine = findCRLF(buf, pos)
+                var endLine = findCRLF(pos)
                 while (endLine < 0) {
                     if (!fill()) {
                         break
                     }
-                    endLine = findCRLF(buf, pos)
+                    endLine = findCRLF(pos)
                 }
                 if (endLine >= 0) {
                     pos = endLine + 2
@@ -757,20 +852,20 @@ class ConnReader {
             if (body.size > maxBodySize - size) {
                 throw PayloadTooLargeException()
             }
-            while (buf.size < pos + size + 2) {
+            while (available() < pos + size + 2) {
                 if (!fill()) {
                     return None
                 }
             }
             var i = 0
             while (i < size) {
-                body.add(buf[pos + i])
+                body.add(byteAt(pos + i))
                 i += 1
             }
             pos += size + 2
         }
-        let headerSection = sliceList(buf, 0, headerSectionEnd)
-        dropFront(buf, pos)
+        let headerSection = sliceList(0, headerSectionEnd)
+        dropFront(pos)
         let result = ArrayList<UInt8>()
         for (b in headerSection) {
             result.add(b)
@@ -779,77 +874,6 @@ class ConnReader {
             result.add(b)
         }
         return Some(result.toArray())
-    }
-}
-
-// 在缓冲区里查找头/体分隔符 "\r\n\r\n"（字节序列 13,10,13,10）的起始下标；
-// 找不到则返回 -1。它作用在边读边攒的 ArrayList<UInt8> 上，用 -1 而非 None
-// 表示"尚未出现"，便于调用方在循环里用 < 0 判断是否需要继续读取更多字节。
-func headerSeparatorIndex(buf: ArrayList<UInt8>): Int64 {
-    var i = 0
-    while (i + 3 < buf.size) {
-        if (buf[i] == UInt8(13) && buf[i + 1] == UInt8(10) && buf[i + 2] == UInt8(13) && buf[i + 3] == UInt8(10)) {
-            return i
-        }
-        i += 1
-    }
-    return -1
-}
-
-// 从下标 `from` 起（含 from 本身）查找下一个 "\r\n"（字节 13,10）的位置，
-// 返回其起始下标；找不到返回 -1。chunked 解码时用它来定位每行块大小、以及
-// 各分块末尾的 CRLF。若传入的 from 为负，则从头（下标 0）开始扫描。
-func findCRLF(buf: ArrayList<UInt8>, from: Int64): Int64 {
-    var i = if (from < 0) {
-        0
-    } else {
-        from
-    }
-    while (i + 1 < buf.size) {
-        if (buf[i] == UInt8(13) && buf[i + 1] == UInt8(10)) {
-            return i
-        }
-        i += 1
-    }
-    return -1
-}
-
-// 把 ArrayList 缓冲区的 [start, end) 半开区间复制成一个全新的 Array<UInt8>。
-// 返回独立副本，与原缓冲区互不影响；当 end <= start 时返回空数组。
-func sliceList(buf: ArrayList<UInt8>, start: Int64, end: Int64): Array<UInt8> {
-    if (end <= start) {
-        return Array<UInt8>()
-    }
-    let out = Array<UInt8>(end - start, repeat: 0)
-    var i = start
-    while (i < end) {
-        out[i - start] = buf[i]
-        i += 1
-    }
-    return out
-}
-
-// 从缓冲区 `buf` 头部丢弃前 `n` 个字节，原地保留其余部分。这是 keep-alive
-// 的关键操作：一个请求消费完后，把它占用的字节从缓冲区前端移除，剩下的字节
-// （可能是下一个请求的开头）留待后续 readMessage 继续处理。n <= 0 时不做任何
-// 改动；n 大于等于缓冲区长度时直接清空。
-func dropFront(buf: ArrayList<UInt8>, n: Int64): Unit {
-    if (n <= 0) {
-        return
-    }
-    if (n >= buf.size) {
-        buf.clear()
-        return
-    }
-    let rest = ArrayList<UInt8>()
-    var i = n
-    while (i < buf.size) {
-        rest.add(buf[i])
-        i += 1
-    }
-    buf.clear()
-    for (b in rest) {
-        buf.add(b)
     }
 }
 
@@ -1043,19 +1067,6 @@ public func parseInt(s: String): Int64 {
     return 0
 }
 
-func hexVal(b: UInt8): Int64 {
-    if (b >= UInt8(48) && b <= UInt8(57)) {
-        return Int64(b) - 48
-    }
-    if (b >= UInt8(65) && b <= UInt8(70)) {
-        return Int64(b) - 65 + 10
-    }
-    if (b >= UInt8(97) && b <= UInt8(102)) {
-        return Int64(b) - 97 + 10
-    }
-    return 0
-}
-
 // 对 URL 组件做解码：还原百分号编码（%XX）以及把 '+' 还原成空格。关键点在于
 // 解码出的字节先统统累积到一个字节缓冲里，直到最后才整体按 UTF-8 解释成字符串。
 // 这样一来，一个跨多字节的 UTF-8 序列（例如 "%E4%B8%AD" 对应汉字 "中"）能被
@@ -1088,10 +1099,4 @@ public func urlDecode(s: String): String {
         }
     }
     return String.fromUtf8(out.toArray())
-}
-
-func isHexByte(b: UInt8): Bool {
-    return ((b >= UInt8(48) && b <= UInt8(57))
-        || (b >= UInt8(65) && b <= UInt8(70))
-        || (b >= UInt8(97) && b <= UInt8(102)))
 }

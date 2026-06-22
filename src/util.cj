@@ -149,6 +149,29 @@ func b64Val(c: UInt8): Int64 {
     return -1
 }
 
+// 单个 hex 字符的数值(0..15);非 hex 字符返回 0。urlDecode / JSON \uXXXX 解析共用。
+// 注意:返回 0 表示「非 hex」与「字符 '0'」不可区分 — 调用方需先用 isHexByte
+// 校验合法性,否则非 hex 输入会被静默映射为 0。urlDecode 已经走 isHexByte 双校验。
+func hexVal(b: UInt8): Int64 {
+    if (b >= UInt8(48) && b <= UInt8(57)) {
+        return Int64(b) - 48
+    }
+    if (b >= UInt8(65) && b <= UInt8(70)) {
+        return Int64(b) - 65 + 10
+    }
+    if (b >= UInt8(97) && b <= UInt8(102)) {
+        return Int64(b) - 97 + 10
+    }
+    return 0
+}
+
+// 判定字节是否属于十六进制字符集(0-9 / A-F / a-f)。
+func isHexByte(b: UInt8): Bool {
+    return ((b >= UInt8(48) && b <= UInt8(57))
+        || (b >= UInt8(65) && b <= UInt8(70))
+        || (b >= UInt8(97) && b <= UInt8(102)))
+}
+
 // 返回字符串中最后一个 "." 的下标;不存在则返回 -1。用于在 "<value>.<sig>" 形式
 // 的签名 Cookie 中,从右侧切出签名部分(value 自身可以包含 ".")。
 public func lastIndexOfDot(s: String): Int64 {
