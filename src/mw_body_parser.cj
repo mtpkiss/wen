@@ -22,11 +22,27 @@ public func urlencodedParser(): Middleware {
 }
 
 // (兼容保留)JSON 解析。解析已内置,本中间件仅提前触发 req.ensureBody();
-// 解析结果经 req.json() 读取(空体 / 非法 JSON 时为 None,不会让请求失败)。
-public func jsonParser(): Middleware {
+// 解析结果经 req.json() 读取(空体 / 非法 JSON 时默认为 None,不会让请求失败)。
+//
+// strict 模式:当 strict=true、Content-Type 主类型为 application/json、且请求体非空、
+// 但解析结果仍为 None(JSON 语法错误)时,立刻抛 BadRequestException(框架默认回 400)。
+// 路由处理器若忘记检查 req.json() 的 None 状态,这能避免畸形 JSON 绕过依赖请求体内容的
+// 业务校验,造成意料外的行为。默认 false 保持向后兼容。
+public func jsonParser(strict!: Bool = false): Middleware {
     return {
         req: HttpRequest, _: HttpResponse, next: Next =>
             req.ensureBody()
+            if (strict) {
+                match (req.header("content-type")) {
+                    case Some(ct) => if (primaryContentType(ct) == "application/json" && !req.body.isEmpty()) {
+                        match (req.jsonBody) {
+                            case None => throw BadRequestException()
+                            case Some(_) => ()
+                        }
+                    }
+                    case None => ()
+                }
+            }
             next()
     }
 }
