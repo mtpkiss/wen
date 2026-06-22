@@ -117,9 +117,38 @@ func extractBoundary(ct: String): ?String {
         case Some(i) =>
             let after = ct[(i + "boundary=".size)..ct.size]
             let (b, _) = splitOnce(after, ";")
-            return Some(unquote(b.trimAscii()))
+            let bv = unquote(b.trimAscii())
+            // RFC 2046 §5.1.1:boundary 长度 1..=70,仅含 bcharsnospace 字符集
+            // (字母、数字、'()+_,-./:=? 和单引号)。超长会让朴素 indexOfBytes O(n*m) 退化
+            // 成放大 CPU 攻击(ReDoS 类变体),非法字符可能让解析无限循环或异常行为。
+            // 不合规一律 400 -> 早早拒绝。
+            if (!isValidMultipartBoundary(bv)) {
+                throw BadRequestException()
+            }
+            return Some(bv)
         case None => return None
     }
+}
+
+// RFC 2046 §5.1.1 boundary 字符集:bcharsnospace = DIGIT / ALPHA / "'" / "(" / ")" /
+// "+" / "_" / "," / "-" / "." / "/" / ":" / "=" / "?"。规范允许内部出现空格,但实践中
+// 几乎不会用,这里一并禁止以简化实现并堵掉边界歧义。
+func isValidMultipartBoundary(s: String): Bool {
+    if (s.isEmpty() || s.size > 70) {
+        return false
+    }
+    for (b in s.toArray()) {
+        let alnum = (b >= UInt8(48) && b <= UInt8(57))
+            || (b >= UInt8(65) && b <= UInt8(90))
+            || (b >= UInt8(97) && b <= UInt8(122))
+        let special = b == UInt8(39) || b == UInt8(40) || b == UInt8(41) || b == UInt8(43)
+            || b == UInt8(95) || b == UInt8(44) || b == UInt8(45) || b == UInt8(46)
+            || b == UInt8(47) || b == UInt8(58) || b == UInt8(61) || b == UInt8(63)
+        if (!(alnum || special)) {
+            return false
+        }
+    }
+    return true
 }
 
 // 在 req.bodyBytes 上按 boundary 切分并解析各个 part。
