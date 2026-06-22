@@ -414,12 +414,19 @@ public class HttpServer {
 // 构造 HTTP 响应的头部块字符串:状态行 + 各响应头 + 各 Set-Cookie 行(HTTP 不允许把多个
 // cookie 合并到一行,故逐条输出)+ 终止空行。serializeResponse 与流式响应的 StreamWriter.begin
 // 共用它,避免两处重复拼装。
+//
+// 安全兜底:所有键、值、Set-Cookie 行进入序列化前再次过 checkHeaderSafe;即使有人绕过
+// HttpResponse 的 API、直接往 res.headers 写入了含 CR/LF/NUL 的值,这里也会拒绝(抛异常,
+// 由上层错误处理流水线兜底),从而彻底堵住 HTTP 响应分割注入。
 func buildHeadBlock(res: HttpResponse): String {
     var head = "HTTP/1.1 ${res.statusCode} ${res.statusMessage}\r\n"
     for ((k, v) in res.headers) {
+        checkHeaderSafe(k)
+        checkHeaderSafe(v)
         head += "${k}: ${v}\r\n"
     }
     for (c in res.setCookies) {
+        checkHeaderSafe(c)
         head += "Set-Cookie: ${c}\r\n"
     }
     head += "\r\n"

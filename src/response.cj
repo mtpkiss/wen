@@ -76,6 +76,8 @@ public class HttpResponse {
     }
 
     public func set(name: String, value: String): HttpResponse {
+        checkHeaderSafe(name)
+        checkHeaderSafe(value)
         this.headers[name] = value
         return this
     }
@@ -90,12 +92,15 @@ public class HttpResponse {
     // 逐项写入 headers(同名键会被覆盖),并返回 `this` 以支持链式调用。
     public func set(headers: HashMap<String, String>): HttpResponse {
         for ((k, v) in headers) {
+            checkHeaderSafe(k)
+            checkHeaderSafe(v)
             this.headers[k] = v
         }
         return this
     }
 
     public func contentType(value: String): HttpResponse {
+        checkHeaderSafe(value)
         this.headers["Content-Type"] = value
         return this
     }
@@ -104,13 +109,16 @@ public class HttpResponse {
     // MIME 类型,对应 Express 的 res.type()。若传入的值本身已包含 "/"(即已是
     // 完整 MIME 类型),则原样使用、不做转换。
     public func mimeType(value: String): HttpResponse {
-        this.headers["Content-Type"] = contentTypeFor(value)
+        let expanded = contentTypeFor(value)
+        checkHeaderSafe(expanded)
+        this.headers["Content-Type"] = expanded
         return this
     }
 
     // 设置 Location 响应头(仅设置头部,并不结束响应)。与 redirect 不同:
     // redirect 会同时设状态码并标记响应完成,而本方法只改一个头、可继续链式调用。
     public func location(url: String): HttpResponse {
+        checkHeaderSafe(url)
         this.headers["Location"] = url
         return this
     }
@@ -119,6 +127,8 @@ public class HttpResponse {
     // 则直接以该值创建。特例:名为 Set-Cookie 的头(大小写无关)会被转交到专门的
     // setCookies 列表,以便保留多个 Cookie(headers 这种单值映射无法表达同名多值)。
     public func append(name: String, value: String): HttpResponse {
+        checkHeaderSafe(name)
+        checkHeaderSafe(value)
         if (name.toAsciiLower() == "set-cookie") {
             this.setCookies.add(value)
             return this
@@ -149,6 +159,14 @@ public class HttpResponse {
     public func cookie(name: String, value: String, path!: String = "/", maxAge!: Int64 = -1, httpOnly!: Bool = false,
         secure!: Bool = false, sameSite!: String = "", domain!: String = "", expires!: String = "",
         signed!: Bool = false): HttpResponse {
+        // 防 HTTP 响应分割:Cookie 的各个组成片段都不允许出现 CR/LF/NUL。
+        // 拼成 Set-Cookie 行后整体不再含 \r\n,避免攻击者通过 Cookie 注入新头部。
+        checkHeaderSafe(name)
+        checkHeaderSafe(value)
+        checkHeaderSafe(path)
+        checkHeaderSafe(domain)
+        checkHeaderSafe(expires)
+        checkHeaderSafe(sameSite)
         let actualValue = if (signed) {
             let secret = cookieSecretOrThrow()
             "${value}.${hmacSha256Hex(secret, value)}"
@@ -197,6 +215,8 @@ public class HttpResponse {
     // 浏览器据此立即将其过期。path 需与当初设置该 Cookie 时一致(默认 "/"),
     // 否则浏览器会因路径不匹配而无法删除目标 Cookie。
     public func clearCookie(name: String, path!: String = "/"): HttpResponse {
+        checkHeaderSafe(name)
+        checkHeaderSafe(path)
         this.setCookies.add("${name}=; Path=${path}; Max-Age=0")
         return this
     }
@@ -325,6 +345,7 @@ public class HttpResponse {
     // 设置一个重定向响应:状态码置为 302,写入 Location 头指向目标地址,清空响应体,
     // 并结束响应。
     public func redirect(location: String): Unit {
+        checkHeaderSafe(location)
         status(302)
         this.headers["Location"] = location
         this.body = ""
@@ -333,6 +354,7 @@ public class HttpResponse {
 
     // 指定状态码的重定向(如 301 永久重定向)。
     public func redirect(status: Int64, location: String): Unit {
+        checkHeaderSafe(location)
         this.status(status)
         this.headers["Location"] = location
         this.body = ""
@@ -341,6 +363,7 @@ public class HttpResponse {
 
     // 往 Vary 头追加一个字段(已存在则不重复),对应 Express 的 res.vary。
     public func vary(field: String): HttpResponse {
+        checkHeaderSafe(field)
         match (this.headers.get("Vary")) {
             case Some(v) =>
                 var present = false
@@ -463,6 +486,19 @@ public class HttpResponse {
             throw Exception("签名 Cookie 需要先设置 app.cookieSecret")
         }
         return app.cookieSecret
+    }
+}
+
+// 防 HTTP 响应分割(Response Splitting):响应头的「名」与「值」均不允许含 CR / LF / NUL
+// 等可能破坏头部帧结构的字节。一旦发现立即抛异常,由错误处理流水线兜底(默认回 500)——
+// 静默剥离同样可破坏语义,直接拒绝最稳妥。所有面向用户的写头接口(set/cookie/redirect/
+// location/append/vary 等)进入时调用;server.cj 的 buildHeadBlock 在序列化最终一刻
+// 再校验一次,使任何绕过 API 直接写 `res.headers["..."] = ...` 的途径也无法成功。
+func checkHeaderSafe(v: String): Unit {
+    for (b in v.toArray()) {
+        if (b == UInt8(13) || b == UInt8(10) || b == UInt8(0)) {
+            throw Exception("响应头值含非法控制字符(CR/LF/NUL),拒绝写入以防 HTTP 响应分割")
+        }
     }
 }
 
