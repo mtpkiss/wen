@@ -251,7 +251,7 @@ public class HttpResponse {
     }
 
     public func attachment(filename: String): HttpResponse {
-        this.headers["Content-Disposition"] = "attachment; filename=\"${filename}\""
+        this.headers["Content-Disposition"] = contentDispositionFor(filename)
         this.headers["Content-Type"] = mimeFor(filename)
         return this
     }
@@ -266,7 +266,7 @@ public class HttpResponse {
     }
 
     public func download(path: String, filename: String): Unit {
-        this.headers["Content-Disposition"] = "attachment; filename=\"${filename}\""
+        this.headers["Content-Disposition"] = contentDispositionFor(filename)
         sendFile(path)
     }
 
@@ -487,6 +487,60 @@ public class HttpResponse {
         }
         return app.cookieSecret
     }
+}
+
+// 按 RFC 6266 / 5987 构造 Content-Disposition 头值。同时输出两份文件名:
+//   - filename="<safe>"   :传统参数,把非 ASCII / 引号 / 控制字符替换为 "_"(回退兼容)
+//   - filename*=UTF-8''<percent-encoded>  :RFC 5987 编码,保留原始 UTF-8 字符
+// 现代浏览器(Chrome/Firefox/Safari)在两者都存在时优先用 filename*,从而既能
+// 提示原始文件名,又彻底杜绝 `"`/CR/LF 等字符破坏头部结构(攻击者把恶意文件名
+// 塞进 download 参数注入额外响应头/Set-Cookie 的经典手法)。
+func contentDispositionFor(filename: String): String {
+    let safe = asciiFallbackFilename(filename)
+    let encoded = percentEncodeFilename(filename)
+    return "attachment; filename=\"${safe}\"; filename*=UTF-8''${encoded}"
+}
+
+// 把文件名替换成 ASCII 安全的回退版本:任何非 ASCII / 控制字符 / 引号 / 反斜杠 /
+// 分号 等可能破坏头部结构的字符,统一替换为下划线。
+func asciiFallbackFilename(s: String): String {
+    let bytes = s.toArray()
+    let out = ArrayList<UInt8>()
+    for (b in bytes) {
+        if (b < UInt8(0x20) || b == UInt8(0x7f) || b > UInt8(0x7e) || b == UInt8(34) || b == UInt8(92) || b == UInt8(13) || b == UInt8(10) || b == UInt8(0) || b == UInt8(59)) {
+            // 不可打印 ASCII / 高位字节 / 双引号 / 反斜杠 / CR / LF / NUL / 分号
+            out.add(UInt8(95)) // '_'
+        } else {
+            out.add(b)
+        }
+    }
+    return String.fromUtf8(out.toArray())
+}
+
+// RFC 5987 percent-encoding:把字符串的 UTF-8 字节编码,unreserved 字符
+// (A-Z, a-z, 0-9, - _ . ~)原样输出,其余以 %XX 表示。
+func percentEncodeFilename(s: String): String {
+    let hex = "0123456789ABCDEF"
+    let bytes = s.toArray()
+    var out = ""
+    for (b in bytes) {
+        let unreserved =
+            (b >= UInt8(0x41) && b <= UInt8(0x5a)) ||  // A-Z
+            (b >= UInt8(0x61) && b <= UInt8(0x7a)) ||  // a-z
+            (b >= UInt8(0x30) && b <= UInt8(0x39)) ||  // 0-9
+            b == UInt8(0x2d) || b == UInt8(0x5f) || b == UInt8(0x2e) || b == UInt8(0x7e) // - _ . ~
+        if (unreserved) {
+            let arr = Array<UInt8>(1, repeat: b)
+            out += String.fromUtf8(arr)
+        } else {
+            let hi = Int64((b >> 4) & UInt8(0x0F))
+            let lo = Int64(b & UInt8(0x0F))
+            out += "%"
+            out += hex[hi..(hi + 1)]
+            out += hex[lo..(lo + 1)]
+        }
+    }
+    return out
 }
 
 // 防 HTTP 响应分割(Response Splitting):响应头的「名」与「值」均不允许含 CR / LF / NUL
