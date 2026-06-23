@@ -15,6 +15,15 @@ package wen
  */
 public type Next = () -> Unit
 
+// **同步执行契约(P0-K 1.0 锁定)**:Middleware 当前是同步的 — 函数返回前,
+// 当前层被视为"未完成"(下一层不会自动推进,必须显式调 next())。仓颉的协程
+// 模型成熟前,Middleware 没有 async/await 等价。若用户有重 IO,建议在中间件
+// 内 `spawn { ... }` 自行调度,不要让框架主调度等。
+//
+// 1.x 内**可**平行加 `AsyncMiddleware = (...) -> Future<Unit>` 等别名而不
+// 破坏 Middleware;但**不会**把 Middleware 改名为 SyncMiddleware,以避免现有
+// 应用的 import / 类型注解大面积变更。这与 Koa 1→2 从 `(ctx, next)` →
+// `async (ctx, next) => await next()` 的破坏式迁移形成对照 — Koa 是反面教材。
 public type Middleware = (HttpRequest, HttpResponse, Next) -> Unit
 
 // 「终结型」处理器：形如 (请求, 响应)，相比 Middleware 少了 next 参数。
