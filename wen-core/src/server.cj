@@ -85,15 +85,21 @@ public class HttpServer {
     // 当前在途的连接数(每条 TCP 连接一个,无论它处理了几次 keep-alive 请求)。
     // shutdown() 会等到它降为 0 或超时为止。
     let inflight: AtomicInt64 = AtomicInt64(0)
-    // drain 完成 / 超时的通知闸门。release 一次即可让 shutdown() 中阻塞的 acquire 返回;
-    // drainSignaled 防止重复 release 把信号量计数推高,影响后续(虽然 shutdown 期望只调一次)。
-    let drainGate: Semaphore = Semaphore(0)
+    // drain 完成 / 超时的通知闸门(manual-reset event 模式)。仓颉 std.sync.Semaphore(N)
+    // 的 N 既是初始 permits 也是**容量上限**:release() 若让 permits 超过 N 即抛
+    // IllegalArgumentException("Invalid amount to release.")。因此容量必须 ≥ 1,并在
+    // 构造期 acquire() 拿掉初始 permit,使后续 signalDrainOnce 的 release(+1) 合法,
+    // 同时 shutdown() 中的 acquire 真正能阻塞至 release 发生。
+    let drainGate: Semaphore = Semaphore(1)
     let drainSignaled: AtomicBool = AtomicBool(false)
     // 当前监听的 server socket;listen 期间存在,shutdown 时关闭以中断阻塞的 accept。
     var serverSocket: ?TcpServerSocket = None
 
     public init(app: Application) {
         this.app = app
+        // 立即拿掉初始 permit;此后 drainGate.acquire() 会阻塞,signalDrainOnce
+        // 的 release() 才能唤醒它。
+        drainGate.acquire()
     }
 
     // bind 成功后(端口已可被连接)再触发 onReady;Express 的 listen(port, cb) 语义。

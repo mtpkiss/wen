@@ -43,12 +43,18 @@ class GracefulShutdownTest {
         let app = wen()
         app.get("/", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         let port: Int64 = 47821
+        // 检测 listen 协程是否意外抛出异常。早先这里是裸 try/catch 吞掉所有 Exception,
+        // 结果 drainGate=Semaphore(0).release() 触发的 IllegalArgumentException 被悄悄吞了
+        // 多个版本,demo 跑到 close 路径就崩。改成把异常标志上来,主线程断言它必须为 false。
+        // (异常对象本体打印到 stdout 便于回归排查;AtomicBool 提供线程可见性,不需要 AtomicReference。)
         let listenDone = AtomicBool(false)
+        let listenThrew = AtomicBool(false)
         spawn {
             try {
                 app.listen(port)
-            } catch (_: Exception) {
-                ()
+            } catch (ex: Exception) {
+                listenThrew.store(true)
+                println("listen threw: ${ex}")
             }
             listenDone.store(true)
         }
@@ -62,5 +68,6 @@ class GracefulShutdownTest {
             i += 1
         }
         @Assert(listenDone.load())
+        @Assert(!listenThrew.load())
     }
 }
