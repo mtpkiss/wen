@@ -116,7 +116,7 @@ public func staticFiles(root: String, index!: String = "index.html", maxAge!: In
                 if (immutable && maxAge > 0) {
                     cc += ", immutable"
                 }
-                res.headers["Cache-Control"] = cc
+                res.set("Cache-Control", cc)
             }
 
             // 自定义响应头钩子:在文件发送前调用,可任意改写响应头。

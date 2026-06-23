@@ -34,18 +34,18 @@ enum RangeResult {
 // 中间件选项化时,把对应开关传到这里实现)。
 func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: String, lastModified: ?String,
     etag!: Bool = true, sendLastModified!: Bool = true): Unit {
-    res.headers["Content-Type"] = contentType
-    res.headers["Accept-Ranges"] = "bytes"
+    res.set("Content-Type", contentType)
+    res.set("Accept-Ranges", "bytes")
     var etagValue = ""
     if (etag) {
         etagValue = computeETag(data)
-        res.headers["ETag"] = etagValue
+        res.set("ETag", etagValue)
     }
     var effectiveLastModified: ?String = None
     if (sendLastModified) {
         match (lastModified) {
             case Some(lm) =>
-                res.headers["Last-Modified"] = lm
+                res.set("Last-Modified", lm)
                 effectiveLastModified = Some(lm)
             case None => ()
         }
@@ -95,13 +95,13 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
         case Some(rangeHeader) => match (parseRange(rangeHeader, data.size)) {
             case RangeOk(start, end) =>
                 res.status(206)
-                res.headers["Content-Range"] = "bytes ${start}-${end}/${data.size}"
+                res.set("Content-Range", "bytes ${start}-${end}/${data.size}")
                 res.bodyBytes = Some(sliceBytes(data, start, end + 1))
                 res.finished = true
                 return
             case RangeUnsatisfiable =>
                 res.status(416)
-                res.headers["Content-Range"] = "bytes */${data.size}"
+                res.set("Content-Range", "bytes */${data.size}")
                 res.bodyBytes = Some(Array<UInt8>())
                 res.finished = true
                 return
@@ -171,9 +171,9 @@ func httpDateAfter(seconds: Int64): String {
 
 // 若响应尚未设置 Date 头,则补上当前时间(HTTP/1.1 建议服务器发送 Date)。
 func ensureDateHeader(res: HttpResponse): Unit {
-    match (res.headers.get("Date")) {
+    match (res.get("Date")) {
         case Some(_) => ()
-        case None => res.headers["Date"] = httpDateNow()
+        case None => res.set("Date", httpDateNow())
     }
 }
 
@@ -184,10 +184,10 @@ func applyCharsetIfSet(res: HttpResponse): Unit {
     if (res.charset.isEmpty()) {
         return
     }
-    match (res.headers.get("Content-Type")) {
+    match (res.get("Content-Type")) {
         case Some(ct) =>
             if (!ct.toAsciiLower().contains("charset=")) {
-                res.headers["Content-Type"] = "${ct}; charset=${res.charset}"
+                res.set("Content-Type", "${ct}; charset=${res.charset}")
             }
         case None => ()
     }

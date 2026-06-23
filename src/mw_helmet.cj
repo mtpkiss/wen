@@ -41,16 +41,16 @@ public func helmet(
     return {
         _: HttpRequest, res: HttpResponse, next: Next =>
             if (!csp.isEmpty()) {
-                res.headers["Content-Security-Policy"] = csp
+                res.set("Content-Security-Policy", csp)
             }
             if (noSniff) {
-                res.headers["X-Content-Type-Options"] = "nosniff"
+                res.set("X-Content-Type-Options", "nosniff")
             }
             if (!frameOptions.isEmpty()) {
-                res.headers["X-Frame-Options"] = frameOptions
+                res.set("X-Frame-Options", frameOptions)
             }
             if (!referrerPolicy.isEmpty()) {
-                res.headers["Referrer-Policy"] = referrerPolicy
+                res.set("Referrer-Policy", referrerPolicy)
             }
             if (hsts) {
                 var hdr = "max-age=${hstsMaxAge}"
@@ -60,13 +60,13 @@ public func helmet(
                 if (hstsPreload) {
                     hdr += "; preload"
                 }
-                res.headers["Strict-Transport-Security"] = hdr
+                res.set("Strict-Transport-Security", hdr)
             }
             if (!coop.isEmpty()) {
-                res.headers["Cross-Origin-Opener-Policy"] = coop
+                res.set("Cross-Origin-Opener-Policy", coop)
             }
             if (!corp.isEmpty()) {
-                res.headers["Cross-Origin-Resource-Policy"] = corp
+                res.set("Cross-Origin-Resource-Policy", corp)
             }
 
             next()

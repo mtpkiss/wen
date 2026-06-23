@@ -13,7 +13,16 @@ import std.fs.*
 public class HttpResponse {
     public var statusCode: Int64 = 200
     public var statusMessage: String = "OK"
-    public let headers: HashMap<String, String>
+    // 响应头存储:按"用户提供的原始大小写"为 key 存值,序列化时直接迭代输出 —
+    // 这样 `Content-Type` / `WWW-Authenticate` / `ETag` 等头保留惯例大小写,不会
+    // 被强制 prettify。同时 headersLookup(lowercase → 原始 key)做 case-insensitive
+    // 去重:`set("X-Foo", "a")` 后 `set("x-foo", "b")` 视为同一头(覆盖,而非双发)。
+    //
+    // 字段同包可见(buildHeadBlock 等需迭代),包外只能通过 set/get/append/remove/has
+    // 访问器读写 — 这是 1.0 锁定前把大小写一致性纳入 API 契约的关键决定(round2 P2-2
+    // / round3 P2-7 同名头大小写双发的根源)。
+    let headers: HashMap<String, String>
+    let headersLookup: HashMap<String, String>
     // 每个 Cookie 都需要一行独立的 Set-Cookie 响应头,而 headers 是"一个键对应
     // 一个值"的映射,无法表达同名头出现多次的情形。因此待发出的 Cookie 不放进
     // headers,而是单独存到这个列表里,序列化时逐条输出为多行 Set-Cookie。
@@ -65,8 +74,11 @@ public class HttpResponse {
 
     public init() {
         this.headers = HashMap<String, String>()
-        this.headers["Content-Type"] = "text/plain; charset=utf-8"
+        this.headersLookup = HashMap<String, String>()
         this.setCookies = ArrayList<String>()
+        // 初始 Content-Type 走访问器,触发 lookup 注册,确保后续 set("content-type", ...)
+        // 不会再插一份导致大小写双发。
+        this.set("Content-Type", "text/plain; charset=utf-8")
     }
 
     public func status(code: Int64): HttpResponse {
@@ -75,69 +87,86 @@ public class HttpResponse {
         return this
     }
 
+    // 设置响应头(case-insensitive 去重)。`set("X-Foo", "a")` 后 `set("x-foo", "b")`
+    // 视为同一头,后者覆盖前者;输出时保留**最后一次**写入提供的原始大小写。
     public func set(name: String, value: String): HttpResponse {
         checkHeaderSafe(name)
         checkHeaderSafe(value)
+        let low = name.toAsciiLower()
+        // 已存在对应大小写无关的头:先删旧 key,避免序列化时输出两份。
+        match (this.headersLookup.get(low)) {
+            case Some(oldKey) => this.headers.remove(oldKey)
+            case None => ()
+        }
+        this.headersLookup[low] = name
         this.headers[name] = value
         return this
     }
 
-    // 读回之前在本响应上设置过的某个响应头的值;不存在则返回 None。
-    // 注意:这里按原样的键查找(与请求侧大小写无关的查找不同)。
+    // 读回之前在本响应上设置过的某个响应头的值,case-insensitive。
     public func get(name: String): ?String {
-        return this.headers.get(name)
+        match (this.headersLookup.get(name.toAsciiLower())) {
+            case Some(key) => return this.headers.get(key)
+            case None => return None
+        }
+    }
+
+    // 判断响应头是否已设置(case-insensitive)。
+    public func has(name: String): Bool {
+        return this.headersLookup.contains(name.toAsciiLower())
+    }
+
+    // 移除一个响应头(case-insensitive)。
+    public func remove(name: String): HttpResponse {
+        let low = name.toAsciiLower()
+        match (this.headersLookup.get(low)) {
+            case Some(oldKey) =>
+                this.headers.remove(oldKey)
+                this.headersLookup.remove(low)
+            case None => ()
+        }
+        return this
     }
 
     // 从一个映射中一次性设置多个响应头,对应 Express 的 `res.set({...})`。
-    // 逐项写入 headers(同名键会被覆盖),并返回 `this` 以支持链式调用。
     public func set(headers: HashMap<String, String>): HttpResponse {
         for ((k, v) in headers) {
-            checkHeaderSafe(k)
-            checkHeaderSafe(v)
-            this.headers[k] = v
+            this.set(k, v)
         }
         return this
     }
 
     public func contentType(value: String): HttpResponse {
-        checkHeaderSafe(value)
-        this.headers["Content-Type"] = value
-        return this
+        return this.set("Content-Type", value)
     }
 
     // 设置 Content-Type,并把诸如 "json"/"html"/"text" 之类的简写展开成完整的
     // MIME 类型,对应 Express 的 res.type()。若传入的值本身已包含 "/"(即已是
     // 完整 MIME 类型),则原样使用、不做转换。
     public func mimeType(value: String): HttpResponse {
-        let expanded = contentTypeFor(value)
-        checkHeaderSafe(expanded)
-        this.headers["Content-Type"] = expanded
-        return this
+        return this.set("Content-Type", contentTypeFor(value))
     }
 
     // 设置 Location 响应头(仅设置头部,并不结束响应)。与 redirect 不同:
     // redirect 会同时设状态码并标记响应完成,而本方法只改一个头、可继续链式调用。
     public func location(url: String): HttpResponse {
-        checkHeaderSafe(url)
-        this.headers["Location"] = url
-        return this
+        return this.set("Location", url)
     }
 
     // 向某个响应头追加一个值:若该头已存在,则以 ", " 拼接到原值之后;若不存在,
     // 则直接以该值创建。特例:名为 Set-Cookie 的头(大小写无关)会被转交到专门的
     // setCookies 列表,以便保留多个 Cookie(headers 这种单值映射无法表达同名多值)。
     public func append(name: String, value: String): HttpResponse {
-        checkHeaderSafe(name)
-        checkHeaderSafe(value)
         if (name.toAsciiLower() == "set-cookie") {
+            checkHeaderSafe(name)
+            checkHeaderSafe(value)
             this.setCookies.add(value)
             return this
         }
-        match (this.headers.get(name)) {
-            case Some(existing) => this.headers[name] = "${existing}, ${value}"
-            case None => this.headers[name] = value
+        match (this.get(name)) {
+            case Some(existing) => return this.set(name, "${existing}, ${value}")
+            case None => return this.set(name, value)
         }
-        return this
     }
 
     // 排入一条 Set-Cookie 响应头(加入 setCookies 列表,响应时输出)。各项属性都是
@@ -257,13 +286,13 @@ public class HttpResponse {
     // 保存对话框而非内联显示。无参版本只声明 attachment;带文件名版本额外给出建议
     // 的保存文件名,并据其扩展名推断 Content-Type(对应 Express 的 res.attachment)。
     public func attachment(): HttpResponse {
-        this.headers["Content-Disposition"] = "attachment"
+        this.set("Content-Disposition", "attachment")
         return this
     }
 
     public func attachment(filename: String): HttpResponse {
-        this.headers["Content-Disposition"] = contentDispositionFor(filename)
-        this.headers["Content-Type"] = mimeFor(filename)
+        this.set("Content-Disposition", contentDispositionFor(filename))
+        this.set("Content-Type", mimeFor(filename))
         return this
     }
 
@@ -277,7 +306,7 @@ public class HttpResponse {
     }
 
     public func download(path: String, filename: String, root!: ?String = None): Unit {
-        this.headers["Content-Disposition"] = contentDispositionFor(filename)
+        this.set("Content-Disposition", contentDispositionFor(filename))
         sendFile(path, root: root)
     }
 
@@ -342,16 +371,16 @@ public class HttpResponse {
     // 交给回调 `body` 用于逐条推送事件。当 `body` 返回时连接关闭;此时浏览器的
     // EventSource 通常会自动发起重连。
     public func sse(body: (SseWriter) -> Unit): Unit {
-        this.headers["Content-Type"] = "text/event-stream; charset=utf-8"
-        this.headers["Cache-Control"] = "no-cache"
-        this.headers["Connection"] = "keep-alive"
+        this.set("Content-Type", "text/event-stream; charset=utf-8")
+        this.set("Cache-Control", "no-cache")
+        this.set("Connection", "keep-alive")
         this.stream({w: StreamWriter => body(SseWriter(w))})
     }
 
     // 发送一个 JSON 响应体(传入的是已经序列化好的 JSON 字符串)并结束响应。
     // 会把 Content-Type 设为 application/json; charset=utf-8。
     public func json(payload: String): Unit {
-        this.headers["Content-Type"] = "application/json; charset=utf-8"
+        this.set("Content-Type", "application/json; charset=utf-8")
         this.body = payload
         this.finished = true
     }
@@ -383,26 +412,23 @@ public class HttpResponse {
     // 设置一个重定向响应:状态码置为 302,写入 Location 头指向目标地址,清空响应体,
     // 并结束响应。
     public func redirect(location: String): Unit {
-        checkHeaderSafe(location)
         status(302)
-        this.headers["Location"] = location
+        this.set("Location", location)
         this.body = ""
         this.finished = true
     }
 
     // 指定状态码的重定向(如 301 永久重定向)。
     public func redirect(status: Int64, location: String): Unit {
-        checkHeaderSafe(location)
         this.status(status)
-        this.headers["Location"] = location
+        this.set("Location", location)
         this.body = ""
         this.finished = true
     }
 
     // 往 Vary 头追加一个字段(已存在则不重复),对应 Express 的 res.vary。
     public func vary(field: String): HttpResponse {
-        checkHeaderSafe(field)
-        match (this.headers.get("Vary")) {
+        match (this.get("Vary")) {
             case Some(v) =>
                 var present = false
                 for (part in v.split(",")) {
@@ -411,9 +437,9 @@ public class HttpResponse {
                     }
                 }
                 if (!present) {
-                    this.headers["Vary"] = "${v}, ${field}"
+                    this.set("Vary", "${v}, ${field}")
                 }
-            case None => this.headers["Vary"] = field
+            case None => this.set("Vary", field)
         }
         return this
     }
@@ -424,7 +450,7 @@ public class HttpResponse {
     // 需要经由 app.handle 派发(从而 res 关联到请求与应用);否则抛异常。
     public func render(name: String, data: JsonValue): Unit {
         let app = resolveApp()
-        this.headers["Content-Type"] = "text/html; charset=utf-8"
+        this.set("Content-Type", "text/html; charset=utf-8")
         this.body = app.renderView(name, data)
         this.finished = true
     }
@@ -459,12 +485,12 @@ public class HttpResponse {
             }
         }
         // 该响应随 Accept 头而变,补上 Vary 以利缓存正确性。
-        match (this.headers.get("Vary")) {
+        match (this.get("Vary")) {
             case Some(v) =>
                 if (!v.contains("Accept")) {
-                    this.headers["Vary"] = "${v}, Accept"
+                    this.set("Vary", "${v}, Accept")
                 }
-            case None => this.headers["Vary"] = "Accept"
+            case None => this.set("Vary", "Accept")
         }
         var chosen: ?String = None
         match (this.req) {
@@ -476,7 +502,7 @@ public class HttpResponse {
         }
         match (chosen) {
             case Some(t) =>
-                this.headers["Content-Type"] = contentTypeFor(t)
+                this.set("Content-Type", contentTypeFor(t))
                 callFormat(handlers, t)
             case None =>
                 if (hasFormat(handlers, "default")) {

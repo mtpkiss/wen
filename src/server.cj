@@ -259,11 +259,12 @@ public class HttpServer {
                 // shutdown 期间不再续 keep-alive:让客户端干脆切到新连接(它会落到
                 // 已关闭的 accept 上、被 OS 拒绝;客户端通常会 fallback 到别的实例)。
                 let keepAlive = shouldKeepAlive(req) && !shutdownRequested.load()
-                res.headers["Connection"] = if (keepAlive) {
+                let connHeader = if (keepAlive) {
                     "keep-alive"
                 } else {
                     "close"
                 }
+                res.set("Connection", connHeader)
                 res.headersSent = true
                 responseStarted = true
                 client.write(serializeResponse(res))
@@ -575,14 +576,14 @@ public class HttpServer {
         let bodyBytes = if (res.suppressBody) {
             Array<UInt8>()
         } else if (bodyless) {
-            res.headers.remove("Content-Length")
+            res.remove("Content-Length")
             Array<UInt8>()
         } else {
             let real = match (res.bodyBytes) {
                 case Some(raw) => raw
                 case None => res.body.toArray()
             }
-            res.headers["Content-Length"] = real.size.toString()
+            res.set("Content-Length", real.size.toString())
             real
         }
 

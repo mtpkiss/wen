@@ -50,7 +50,7 @@ public func requestId(headerName!: String = "X-Request-Id",
                 case None => generator()
             }
             req.attributes["requestId"] = id
-            res.headers[headerName] = id
+            res.set(headerName, id)
             next()
     }
 }

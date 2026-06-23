@@ -487,7 +487,7 @@ public class Router {
                     case Some(b) => b.size
                     case None => res.body.toArray().size
                 }
-                res.headers["Content-Length"] = len.toString()
+                res.set("Content-Length", len.toString())
                 res.body = ""
                 res.bodyBytes = None
                 res.suppressBody = true

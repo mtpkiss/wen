@@ -48,7 +48,7 @@ public func etag(): Middleware {
             }
 
             let tag = computeETag(raw)
-            res.headers["ETag"] = tag
+            res.set("ETag", tag)
 
             // 条件请求:If-None-Match 命中当前 ETag -> 回 304(空体;ETag 头保留)。
             match (req.header("if-none-match")) {
