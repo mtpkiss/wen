@@ -1,6 +1,7 @@
 package bench
 
 import wen.*
+import wen_contrib.*   // helmet / cors / requestId 在此包
 import std.collection.*
 import std.time.*
 

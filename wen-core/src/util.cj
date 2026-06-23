@@ -194,7 +194,8 @@ func lastIndexOfDot(s: String): Int64 {
 
 // 把一个路径按 "/" 拆分成若干非空的路径段，自动丢弃因前导/末尾/连续斜杠
 // 产生的空段。例如 "/a/b/" 会得到 ["a", "b"]。
-func pathSegments(path: String): Array<String> {
+// **可见性 (P0-J)**:benchmark 子项目用它做路径切分基准测试。
+public func pathSegments(path: String): Array<String> {
     let raw = path.split("/")
     let parts = ArrayList<String>()
     for (seg in raw) {

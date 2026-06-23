@@ -1106,7 +1106,8 @@ func parseInt(s: String): Int64 {
 // 解码出的字节先统统累积到一个字节缓冲里，直到最后才整体按 UTF-8 解释成字符串。
 // 这样一来，一个跨多字节的 UTF-8 序列（例如 "%E4%B8%AD" 对应汉字 "中"）能被
 // 完整地重新拼接，而不会因为"每解出一个字节就单独转成字符"而被拆坏、产生乱码。
-func urlDecode(s: String): String {
+// **可见性 (P0-J)**:benchmark 子项目用它做 URL 解码基准测试。
+public func urlDecode(s: String): String {
     let bytes = s.toArray()
     let out = ArrayList<UInt8>()
     var i = 0

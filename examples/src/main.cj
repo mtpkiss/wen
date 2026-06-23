@@ -1,6 +1,7 @@
 package urlshorten
 
 import wen.*
+import wen_contrib.*   // logger / helmet / cors / requestId / bearerAuth 在此包
 import std.collection.*
 import std.sync.*
 import std.random.*

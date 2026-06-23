@@ -7,3 +7,4 @@
 
 [dependencies]
   wen = { path = "../wen-core" }
+  wen_contrib = { path = "../wen-contrib" }
