@@ -743,7 +743,10 @@ public class HttpRequest {
                 }
             }
         } else if (mainType == "application/x-www-form-urlencoded") {
-            parseQuery(this.body, this.attributes)
+            // form 字段不允许污染 framework-reserved 命名空间。早先直接 parseQuery 进
+            // attributes,攻击者 POST `authUser=admin&csrfToken=...` 即可覆盖框架内部
+            // 状态。round3 P1-10 / P1-B。
+            parseFormBodyIntoAttributes(this.body, this.attributes)
         } else if (mainType == "multipart/form-data") {
             match (extractBoundary(ctRaw)) {
                 case Some(b) => parseMultipart(this, b)
@@ -801,6 +804,38 @@ public class HttpRequest {
 func primaryContentType(ct: String): String {
     let (head, _) = splitOnce(ct, ";")
     return head.trimAscii().toAsciiLower()
+}
+
+// 判断一个键名是否属于框架保留的 attribute 命名空间。这些名字被框架内置中间件
+// 用作内部状态字段(身份 / CSRF token / 原始方法 / 请求 ID / 文本 body 视图)。
+// 自动解析路径(urlencoded form / multipart 文本字段)不能写入这些键,否则攻击者
+// 经表单字段即可覆盖框架内部状态(round3 P1-10 / P1-B)。
+//
+// 注意:本拦截仅作用于"自动解析路径",不作用于用户显式调用 setAttribute(key, val)
+// — 后者是 API 使用者主动选择的信任边界。
+func isFrameworkReservedAttribute(key: String): Bool {
+    return key == "authUser" || key == "csrfToken" || key == "originalMethod"
+        || key == "requestId" || key == "text"
+}
+
+// 把 form 请求体解析进 attributes,但跳过 framework-reserved 键。等价于 parseQuery
+// 加保留键过滤。攻击者 POST `authUser=admin&csrfToken=...` 仍能在 form 里出现,但
+// 这些字段不会进入 attributes,因此 framework 内部状态不被污染。
+func parseFormBodyIntoAttributes(body: String, into: HashMap<String, String>): Unit {
+    if (body.isEmpty()) {
+        return
+    }
+    for (pair in body.split("&")) {
+        if (pair.isEmpty()) {
+            continue
+        }
+        let (k, v) = splitOnce(pair, "=")
+        let key = urlDecode(k)
+        if (isFrameworkReservedAttribute(key)) {
+            continue
+        }
+        into[key] = urlDecode(v)
+    }
 }
 
 // 判断字符串是否形如 IPv4 地址(只由数字与 "." 组成)。用于在 subdomains 中避免把

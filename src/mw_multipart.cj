@@ -280,6 +280,12 @@ func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, s
                 }
             case None => ()
         }
+        // 与 urlencoded form 同步:multipart 文本字段也不允许污染 framework-reserved
+        // 命名空间(authUser / csrfToken / originalMethod / requestId / text)。
+        // 攻击者构造 part name="authUser" 时静默跳过,不计入 attributes。
+        if (isFrameworkReservedAttribute(name)) {
+            return
+        }
         req.attributes[name] = String.fromUtf8(content)
     }
 }
