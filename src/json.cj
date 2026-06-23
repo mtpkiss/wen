@@ -37,6 +37,13 @@ public class JsonException <: Exception {
 // 数字、字符串、数组、对象。其中对象（JsonObject）刻意用"有序的键值对列表"而非
 // 哈希表来保存成员：这样就能严格保持成员的插入顺序，从而使序列化结果具有确定性
 // （deterministic），并且"解析 -> 序列化"能可预期地保序往返（round-trip）。
+//
+// **1.0 锁定说明**:本想把 enum 限同包可见(只暴露访问器 / 工厂),让未来加分支
+// 不破坏 SemVer — 但 `public type ViewEngine = (String, JsonValue) -> String`
+// 等公开类型契约要求用户必须持有 JsonValue,仓颉的 enum 公开则分支必公开,语言
+// 层面无法既保 public 又隐藏分支。最稳的退路是**文档化"用户应优先用访问器,
+// 不要 match 分支"**,使来日加 JsonBigInt 等分支时只破坏 match-fall-through 用户,
+// 不破坏访问器用户。
 public enum JsonValue {
     | JsonNull
     | JsonBool(Bool)
