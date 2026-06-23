@@ -151,16 +151,18 @@ public class Application {
     // 可见，不会因为进入子路由就丢失）。实现上是把子路由包装成一个普通中间件，
     // 在其中调用 sub.handleAsMiddleware 来驱动子路由的匹配与执行。
     public func use(path: String, sub: Router): Application {
-        sub.mountpath = path
+        // mountpath 放到 router.use 之后:router.use 内部会 ensureNotFrozen,失败时不应
+        // 让 sub 留下被改一半的 mountpath。与 Router.use(path, sub: Router) 同款修复。
         router.use(path, {
             req: HttpRequest, res: HttpResponse, next: Next => sub.handleAsMiddleware(req, res, next)
         })
+        sub.mountpath = path
         return this
     }
 
     // 注册一个错误处理中间件，形如 (err, req, res, next)。注意注册顺序很关键：
     // 它只能捕获「在它之前注册」的那些路由 / 中间件抛出的异常，因此应当把它放在
-    // 那些需要被它兜底的路由之后注册——这一顺序语义与 Express 一致。
+    // 那些需要被它兜底的路由之后注册——这一顺序语义与 Express 一致
     public func use(handler: ErrorHandler): Application {
         router.useError(handler)
         return this

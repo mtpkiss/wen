@@ -41,7 +41,7 @@ public class StreamWriter {
         ensureDateHeader(res)
         applyCharsetIfSet(res)
         match (res.conn) {
-            case Some(c) => c.write(buildHeadBlock(res).toArray())
+            case Some(c) => c.write(buildHeadBlock(res))
             case None => ()
         }
     }

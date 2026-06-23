@@ -219,18 +219,41 @@ public class HttpRequest {
     }
 
     // 判断本次请求体的 Content-Type 是否与 `t` 匹配。`t` 既可以是简写
-    // (例如 "json"),也可以是完整的 MIME 类型。比较时会先用 contentTypeFor 把
-    // 简写展开成完整类型,再剥掉其中的参数部分(分号后的内容,如 charset),
-    // 然后做大小写无关的子串包含判断。请求没有 Content-Type 头时返回 false。
+    // (例如 "json"),也可以是完整的 MIME 类型。请求没有 Content-Type 头时返回 false。
     // (之所以叫 isType 而不是 is,是因为 `is` 是仓颉的关键字;Express 中对应
     // 的方法名为 `req.is`。)
+    //
+    // 匹配规则(对齐 Express / RFC 6838 §4.2.8 结构化语法后缀):
+    //   1. 精确匹配:`isType("json")` 命中 `application/json`。
+    //   2. 结构化后缀:`isType("json")` 也命中 `application/ld+json`、`application/vnd.api+json`。
+    // 早先实现用 contains 做子串包含,会把 `application/xmlrpc` 当成 xml(误判),
+    // 也会把 `application/json-patch+json` 当成 json(碰巧对,但理由不对);现在改成
+    // 严格 token 比对,只走精确名 + 后缀两条路径。
     public func isType(t: String): Bool {
         let ct = match (this.header("content-type")) {
             case Some(v) => v.toAsciiLower()
             case None => return false
         }
-        let (wantMain, _) = splitOnce(contentTypeFor(t).toAsciiLower(), ";")
-        return ct.contains(wantMain.trimAscii())
+        let actualMain = primaryContentType(ct)
+        let (wantRaw, _) = splitOnce(contentTypeFor(t).toAsciiLower(), ";")
+        let wantMain = wantRaw.trimAscii()
+        if (actualMain == wantMain) {
+            return true
+        }
+        // 结构化后缀语法:wantMain = "application/json",actualMain = "application/ld+json"
+        // 当 want 的 subtype 是简单 token(不含 "+")时,匹配以 "+<subtype>" 结尾的 actual。
+        let (wantType, wantSub) = splitOnce(wantMain, "/")
+        let (actualType, actualSub) = splitOnce(actualMain, "/")
+        if (wantType.isEmpty() || wantSub.isEmpty() || actualType.isEmpty() || actualSub.isEmpty()) {
+            return false
+        }
+        if (wantType != actualType) {
+            return false
+        }
+        if (wantSub.contains("+")) {
+            return false
+        }
+        return actualSub.endsWith("+${wantSub}")
     }
 
     // 判断客户端的 Accept 请求头是否接受类型 `t`(`t` 可为简写或完整 MIME 类型)。

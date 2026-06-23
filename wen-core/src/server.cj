@@ -214,9 +214,25 @@ public class HttpServer {
         if (timeoutMs <= 0) {
             return
         }
-        // watchdog:超时后释放 drainGate,让主 acquire 解阻塞返回。
+        // watchdog:正常 drain 路径(inflight==0)也会 signalDrainOnce,所以这里把
+        // 总 timeoutMs 切成多段 sleep,每段后 check drainSignaled — 一旦 drain 已通知
+        // 就立即退出,而不是傻等满超时(P1-I:消除 watchdog 协程泄漏)。100ms 片段
+        // 在最坏情况下让 watchdog 延迟退出 < 100ms,对资源占用可忽略。
         spawn {
-            sleep(Duration.millisecond * timeoutMs)
+            let slice: Int64 = 100
+            var remaining = timeoutMs
+            while (remaining > 0) {
+                let step = if (remaining < slice) {
+                    remaining
+                } else {
+                    slice
+                }
+                sleep(Duration.millisecond * step)
+                if (drainSignaled.load()) {
+                    return
+                }
+                remaining -= step
+            }
             signalDrainOnce()
         }
         drainGate.acquire()
@@ -606,7 +622,7 @@ public class HttpServer {
         }
 
         // 状态行 + 响应头 + Set-Cookie 行 + 终止空行(与流式响应共用 buildHeadBlock)。
-        let headBytes = buildHeadBlock(res).toArray()
+        let headBytes = buildHeadBlock(res)
         let total = Array<UInt8>(headBytes.size + bodyBytes.size, repeat: 0)
         var i = 0
         while (i < headBytes.size) {
@@ -622,26 +638,40 @@ public class HttpServer {
     }
 }
 
-// 构造 HTTP 响应的头部块字符串:状态行 + 各响应头 + 各 Set-Cookie 行(HTTP 不允许把多个
+// 构造 HTTP 响应的头部块字节:状态行 + 各响应头 + 各 Set-Cookie 行(HTTP 不允许把多个
 // cookie 合并到一行,故逐条输出)+ 终止空行。serializeResponse 与流式响应的 StreamWriter.begin
 // 共用它,避免两处重复拼装。
+//
+// Perf-1:用 ArrayList<UInt8> 流式追加替代 `head += "..."` 的 O(n²) 字符串拼接。
+// 100 头 → 旧实现约 100KB 中间拷贝、1000 头 → 约 10MB。两个调用方原本都立刻
+// `.toArray()`,改返字节后省一次 String 中转。
 //
 // 安全兜底:所有键、值、Set-Cookie 行进入序列化前再次过 checkHeaderSafe;即使有人绕过
 // HttpResponse 的 API、直接往 res.headers 写入了含 CR/LF/NUL 的值,这里也会拒绝(抛异常,
 // 由上层错误处理流水线兜底),从而彻底堵住 HTTP 响应分割注入。
-func buildHeadBlock(res: HttpResponse): String {
-    var head = "HTTP/1.1 ${res.statusCode} ${res.statusMessage}\r\n"
+func buildHeadBlock(res: HttpResponse): Array<UInt8> {
+    let out = ArrayList<UInt8>()
+    appendAscii(out, "HTTP/1.1 ")
+    appendAscii(out, res.statusCode.toString())
+    appendAscii(out, " ")
+    appendAscii(out, res.statusMessage)
+    appendAscii(out, "\r\n")
     for ((k, v) in res.headers) {
         checkHeaderSafe(k)
         checkHeaderSafe(v)
-        head += "${k}: ${v}\r\n"
+        appendAscii(out, k)
+        appendAscii(out, ": ")
+        appendAscii(out, v)
+        appendAscii(out, "\r\n")
     }
     for (c in res.setCookies) {
         checkHeaderSafe(c)
-        head += "Set-Cookie: ${c}\r\n"
+        appendAscii(out, "Set-Cookie: ")
+        appendAscii(out, c)
+        appendAscii(out, "\r\n")
     }
-    head += "\r\n"
-    return head
+    appendAscii(out, "\r\n")
+    return out.toArray()
 }
 
 /*

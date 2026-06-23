@@ -271,9 +271,16 @@ public func session(store: SessionStore, cookieName!: String = "sid", path!: Str
             // 处理器若调用了 sess.regenerate(),在此换发新 sid:销毁旧 id、把数据
             // 在内部迁移到新 id、并强制下发新 Cookie。**必须在 save 之前换 id**,
             // 否则数据会被以旧 id 重新存回,旧记录又复活。
+            //
+            // P1-J:先暂存新 id 再 destroy 旧 id。早先实现是 destroy(old) -> newId(),
+            // newId() 若抛(如 Redis store 临时不可达)就只剩"旧已毁、新没生"的破窗,
+            // 上层若把异常吞了,sess 仍指向已不存在的旧 id,后续 save 把数据按旧 id 复活,
+            // 形成会话固定攻击的回归窗口。改成"先 newId、成功后再 destroy"是原子的:
+            // newId 抛则保留旧会话不变,异常自然向上传播。
             if (sess.regenerateRequested) {
-                store.destroy(sess.id)
-                sess.id = store.newId()
+                let newId = store.newId()  // 先暂存:newId 抛即原子失败,sess 完全不变
+                store.destroy(sess.id)     // sess.id 此刻仍是旧 id
+                sess.id = newId
                 sess.isNew = true
                 sess.regenerateRequested = false
                 sess.dirty = true // 换发新 id 必须落盘新条目

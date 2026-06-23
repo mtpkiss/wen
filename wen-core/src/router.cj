@@ -443,6 +443,10 @@ public class Router {
     // 落在该前缀下的请求会被交给子路由，子路由先剥掉前缀再做自己的匹配。
     // 同时把挂载前缀记录到 sub.mountpath(对应 Express 的 router.mountpath)。
     public func use(path: String, sub: Router): Unit {
+        // 先 ensureNotFrozen,再写 sub.mountpath。早先实现是先写 mountpath 再 add,而
+        // add 才做冻结校验,导致 listen 后追加 use 会抛异常,但 sub 的 mountpath 已经被
+        // 修改 — 部分状态变更下次重启会带着脏数据。现在校验前置,失败即原子失败。
+        ensureNotFrozen()
         sub.mountpath = path
         add(None, path, {
             req: HttpRequest, res: HttpResponse, next: Next => sub.handleAsMiddleware(req, res, next)

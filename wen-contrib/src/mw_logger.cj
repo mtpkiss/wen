@@ -30,8 +30,19 @@ public func logger(format: (HttpRequest, HttpResponse, Int64) -> String,
     return {
         req: HttpRequest, res: HttpResponse, next: Next =>
             let start = DateTime.now()
-            next()
-            let elapsedMs = (DateTime.now() - start).toMilliseconds()
-            sink(format(req, res, elapsedMs))
+            // P1-K:try/finally 包 next。否则 next 抛(下游 handler 抛、上游错误流水线
+            // 接管)的请求不会留下任何日志记录 — 运维盲区。finally 里只读 res 的当前
+            // 状态(errorHandler 已写入了 statusCode/headers)和 elapsed,纯只读不影响
+            // 错误传播。format/sink 若再抛会盖住原异常,因此 sink 错误本身静默掉。
+            try {
+                next()
+            } finally {
+                let elapsedMs = (DateTime.now() - start).toMilliseconds()
+                try {
+                    sink(format(req, res, elapsedMs))
+                } catch (_: Exception) {
+                    ()
+                }
+            }
     }
 }

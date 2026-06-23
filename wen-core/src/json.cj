@@ -601,7 +601,9 @@ class JsonParser {
     }
 
     // 读取并解析紧随其后的 4 位十六进制数字，返回其整数值（即一个 UTF-16 码元）。
-    // 不足 4 位（提前到达输入末尾）时抛出"非法 unicode 转义"。
+    // 每字节先经 isHexByte 校验:非 hex 字符必须抛 JsonException,否则 hexVal 会把
+    // 它静默映射为 0,导致 "\uZZZZ" 被悄悄解析成 NUL 字符 — 是 JSON 字符串过滤
+    // 链的注入入口(P1-H)。不足 4 位(提前到达输入末尾)时同样抛"非法 unicode 转义"。
     func readHex4(): Int64 {
         var v = 0
         var i = 0
@@ -609,7 +611,11 @@ class JsonParser {
             if (pos >= buf.size) {
                 throw JsonException("bad unicode escape")
             }
-            v = v * 16 + hexVal(buf[pos])
+            let b = buf[pos]
+            if (!isHexByte(b)) {
+                throw JsonException("bad unicode escape")
+            }
+            v = v * 16 + hexVal(b)
             pos += 1
             i += 1
         }
