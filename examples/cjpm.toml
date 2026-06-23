@@ -6,4 +6,4 @@
   output-type = "executable"
 
 [dependencies]
-  wen = { path = "../" }
+  wen = { path = "../wen-core" }

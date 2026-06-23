@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "PowerShell(*)",
+      "Read(/**)"
+    ],
+    "additionalDirectories": [
+      "\\tmp\\cj-ws-test\\lib_pkg\\src",
+      "g:\\tmp\\cj-ws-test\\lib_pkg\\src",
+      "\\tmp\\cj-ws-test\\app_pkg\\src",
+      "g:\\tmp\\cj-ws-test\\app_pkg\\src",
+      "\\tmp\\cj-ws-test",
+      "g:\\tmp\\cj-ws-test"
+    ]
+  }
+}

@@ -1,5 +1,7 @@
 # Cangjie build output
 target/
+wen-core/target/
+wen-contrib/target/
 
 # IDE
 .idea/
@@ -9,6 +11,7 @@ target/
 .cache/
 
 # Local runnable demo / scratch (not part of the library)
+wen-core/src/main.cj
 src/main.cj
 demo.exe
 *.cjo
