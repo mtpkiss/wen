@@ -1,5 +1,7 @@
-package wen
+package wen_contrib
 
+
+import wen.*
 /*
  * 安全响应头中间件(对标 Node 生态里的 helmet)。
  *

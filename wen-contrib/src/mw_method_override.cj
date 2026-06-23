@@ -1,5 +1,7 @@
-package wen
+package wen_contrib
 
+
+import wen.*
 /*
  * 方法重写(method override)中间件 —— 对应 Express 的 method-override。
  *

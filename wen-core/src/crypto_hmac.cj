@@ -245,13 +245,16 @@ func bytesToHex(data: Array<UInt8>): String {
 
 // 对外入口:用 key 对 msg 计算 HMAC-SHA256,返回十六进制字符串。这是框架做签名
 // Cookie / session 时唯一依赖的签名原语(即"替换缝"的对外契约)。
-func hmacSha256Hex(key: String, msg: String): String {
+// **可见性 (P0-J)**:wen_contrib 的 csrf_test 用它生成有效签名的 cookie 做测试,
+// 故 public。等仓颉 stdx.crypto 发布后,文档建议用户应优先用 stdx.crypto.hmac。
+public func hmacSha256Hex(key: String, msg: String): String {
     return bytesToHex(hmacSha256(key.toArray(), msg.toArray()))
 }
 
 // 定长时间比较两个字符串是否相等(逐字节累积差异,不提前返回),避免按字符逐位
 // 比较带来的计时侧信道——用于校验签名等敏感比较。
-func constantTimeEquals(a: String, b: String): Bool {
+// **可见性 (P0-J)**:wen_contrib 的 mw_csrf 在 token 校验路径需要它,故 public。
+public func constantTimeEquals(a: String, b: String): Bool {
     let ab = a.toArray()
     let bb = b.toArray()
     if (ab.size != bb.size) {

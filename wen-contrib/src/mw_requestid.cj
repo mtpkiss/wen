@@ -1,5 +1,7 @@
-package wen
+package wen_contrib
 
+
+import wen.*
 import std.sync.*
 import std.random.*
 
@@ -77,4 +79,19 @@ func isValidRequestId(s: String): Bool {
 func defaultRequestIdGen(): () -> String {
     let gen = RequestIdGen()
     return { => gen.next() }
+}
+
+// 把 UInt64 转 16 位小写十六进制字符串(大端,固定宽度)。
+// 原本是 wen-core/src/session.cj 内的私有 helper;P0-J 把 mw_requestid 拆到
+// wen_contrib 后,这里 inline 一份避免把 toHex64 在 wen 主包提到 public。
+func toHex64(v: UInt64): String {
+    let digits = "0123456789abcdef"
+    var s = ""
+    var i = 60
+    while (i >= 0) {
+        let nib = Int64((v >> UInt64(i)) & UInt64(0xF))
+        s += digits[nib..(nib + 1)]
+        i -= 4
+    }
+    return s
 }

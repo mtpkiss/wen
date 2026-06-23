@@ -43,7 +43,11 @@ func reasonPhrase(code: Int64): String {
 // 如果字符串里根本不含 `sep`，则返回 (原串, "")，即 tail 为空串。
 // 由于只在“第一个”分隔符处切分，因此 tail 中即便再出现 `sep` 也会被原样保留，
 // 适合解析 "key=value"（value 里可能再含 "="）这类场景。
-func splitOnce(s: String, sep: String): (String, String) {
+// **可见性 (P0-J)**:P0-F 整体 internal 化后,splitOnce 与 base64Decode 被
+// wen_contrib(同 workspace 兄弟包)的 mw_auth / mw_method_override 直接调用,
+// 跨包 import 必须 public。其它"用户业务可自己实现"的 helper(reasonPhrase /
+// trimWs / listContains / lastIndexOfDot 等)继续保持 internal。
+public func splitOnce(s: String, sep: String): (String, String) {
     let idx = s.indexOf(sep)
     match (idx) {
         case Some(i) =>
@@ -75,7 +79,8 @@ func listContains(list: ArrayList<String>, value: String): Bool {
 let B64_TABLE: Array<UInt8> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toArray()
 
 // 标准 base64 编码(带 "=" 填充)。
-func base64Encode(data: Array<UInt8>): String {
+// **可见性 (P0-J)**:wen_contrib 的 auth_test 用它做测试数据,故 public。
+public func base64Encode(data: Array<UInt8>): String {
     let out = ArrayList<UInt8>()
     let n = data.size
     var i = 0
@@ -110,7 +115,8 @@ func base64Encode(data: Array<UInt8>): String {
 }
 
 // 标准 base64 解码:忽略 "="、空白与非法字符。buf 始终掩到 24 位以免溢出。
-func base64Decode(s: String): Array<UInt8> {
+// **可见性 (P0-J)**:见 splitOnce 注释,wen_contrib 的 mw_auth 需要它。
+public func base64Decode(s: String): Array<UInt8> {
     let out = ArrayList<UInt8>()
     var buf = 0
     var bits = 0

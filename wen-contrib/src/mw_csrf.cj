@@ -1,5 +1,7 @@
-package wen
+package wen_contrib
 
+
+import wen.*
 /*
  * CSRF(跨站请求伪造)防护中间件 —— 对应 Express 生态的 csurf,采用「签名双提交 Cookie」。
  *

@@ -1,0 +1,10 @@
+[package]
+  cjc-version = "1.1.3"
+  name = "wen_demo"
+  description = "Local runnable demo for wen + wen_contrib. Not part of the published library."
+  version = "0.0.0"
+  output-type = "executable"
+
+[dependencies]
+  wen = { path = "../wen-core" }
+  wen_contrib = { path = "../wen-contrib" }

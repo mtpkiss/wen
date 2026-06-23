@@ -1,5 +1,7 @@
-package wen
+package wen_contrib
 
+
+import wen.*
 import std.unittest.*
 import std.unittest.testmacro.*
 

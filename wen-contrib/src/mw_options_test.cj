@@ -1,5 +1,7 @@
-package wen
+package wen_contrib
 
+
+import wen.*
 import std.collection.*
 import std.unittest.*
 import std.unittest.testmacro.*
@@ -35,7 +37,7 @@ class MwOptionsTest {
         let res = HttpResponse()
         app.handle(req, res)
         @Assert(res.body == "fixed-id-123")
-        @Assert((res.headers.get("X-Request-Id") ?? "") == "fixed-id-123")
+        @Assert((res.get("X-Request-Id") ?? "") == "fixed-id-123")
     }
 
     // requestId:上游已注入该头时沿用,不调用 generator。
@@ -63,11 +65,11 @@ class MwOptionsTest {
         req.path = "/x"
         let res = HttpResponse()
         app.handle(req, res)
-        @Assert((res.headers.get("Access-Control-Allow-Origin") ?? "") == "https://app.example.com")
-        @Assert((res.headers.get("Access-Control-Allow-Credentials") ?? "") == "true")
-        @Assert((res.headers.get("Access-Control-Max-Age") ?? "") == "600")
-        @Assert((res.headers.get("Access-Control-Allow-Headers") ?? "") == "Content-Type, X-Request-Id")
-        @Assert((res.headers.get("Access-Control-Expose-Headers") ?? "") == "X-Total-Count")
+        @Assert((res.get("Access-Control-Allow-Origin") ?? "") == "https://app.example.com")
+        @Assert((res.get("Access-Control-Allow-Credentials") ?? "") == "true")
+        @Assert((res.get("Access-Control-Max-Age") ?? "") == "600")
+        @Assert((res.get("Access-Control-Allow-Headers") ?? "") == "Content-Type, X-Request-Id")
+        @Assert((res.get("Access-Control-Expose-Headers") ?? "") == "X-Total-Count")
     }
 
     // cors:默认(无细化参数)行为不变。
@@ -80,10 +82,10 @@ class MwOptionsTest {
         req.path = "/x"
         let res = HttpResponse()
         app.handle(req, res)
-        @Assert((res.headers.get("Access-Control-Allow-Methods") ?? "") == "GET, POST, PUT, DELETE, PATCH, OPTIONS")
-        @Assert((res.headers.get("Access-Control-Allow-Headers") ?? "") == "Content-Type, Authorization")
+        @Assert((res.get("Access-Control-Allow-Methods") ?? "") == "GET, POST, PUT, DELETE, PATCH, OPTIONS")
+        @Assert((res.get("Access-Control-Allow-Headers") ?? "") == "Content-Type, Authorization")
         // 未开启 credentials 时不发该头。
-        @Assert((res.headers.get("Access-Control-Allow-Credentials") ?? "ABSENT") == "ABSENT")
+        @Assert((res.get("Access-Control-Allow-Credentials") ?? "ABSENT") == "ABSENT")
     }
 
     // session:自定义 cookie 名与属性出现在下发的 Set-Cookie 上。
