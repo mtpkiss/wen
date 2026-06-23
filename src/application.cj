@@ -415,14 +415,26 @@ public class Application {
 
     // ---- 请求分发 / 启动服务 ------------------------------------------------
 
-    // 对给定的请求 / 响应跑完整条中间件链。这是真正的请求处理入口：它先把当前
-    // Application 关联到请求对象（req.app）上，再交给 router 去匹配并依次执行
-    // 中间件与路由。之所以把它设为 public，是为了能在「不真正开启网络套接字」的
+    // 对给定的请求 / 响应跑完整条中间件链。这是真正的请求处理入口:它先把当前
+    // Application 关联到请求对象(req.app)上,再交给 router 去匹配并依次执行
+    // 中间件与路由。之所以把它设为 public,是为了能在「不真正开启网络套接字」的
     // 情况下直接构造 req/res 来测试整条处理链。
+    //
+    // **生命周期契约(P0-D)**:每对 (req, res) 只能被 handle **一次**。原因:
+    //   1. `req.bodyParsed` / `req.cookiesParsed` 是一次性闸门 — 第二次调用时
+    //      ensureBody / ensureCookies 直接跳过,即便 bodyBytes / headers 被替换;
+    //   2. `req.res = res` 互相引用 — 第二次 handle 用不同的 res 时,前一次 dispatch
+    //      链上未结束的回调读到的 req.res 已被篡改;
+    //   3. `res.finished` / `res.headersSent` / `res.hijacked` 是单调标志位,二次
+    //      运行不会复位 — 会让响应输出陷入混乱状态。
+    //
+    // 测试场景里**每条用例都要 new 一对** HttpRequest / HttpResponse,不要复用。
+    // 同一个 req 用于"嵌套子派发"(如错误处理 / 视图渲染)由框架内部协调,用户调用
+    // app.handle 只该出现在最外层一次。round1 #38 / round3 P3-原P1-3。
     public func handle(req: HttpRequest, res: HttpResponse): Unit {
         req.app = Some(this)
-        // 让请求与响应互相持有对方的引用（对应 Express 的 res.req / req.res）：
-        // sendFile 这类方法据此读取条件请求（If-None-Match）与 Range 头；
+        // 让请求与响应互相持有对方的引用(对应 Express 的 res.req / req.res):
+        // sendFile 这类方法据此读取条件请求(If-None-Match)与 Range 头;
         // req.fresh()/req.range() 也据此读取响应上的 ETag / Last-Modified。
         res.req = Some(req)
         req.res = Some(res)
