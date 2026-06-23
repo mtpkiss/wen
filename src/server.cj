@@ -435,6 +435,14 @@ public class HttpServer {
                 }
                 // RFC 7230 §3.2.2:同名头(除 Set-Cookie)按 "," 合并保留多值。
                 // 早先后值静默覆盖前值,会让 Cookie / X-Forwarded-For 等多值头丢失。
+                //
+                // 单值头例外:RFC 7231 §3.1.1.5 明确 Content-Type 必须是单值。允许其合并
+                // 会让 "application/json" + "image/png" 被 decodeBodyTextIfApplicable 的
+                // startsWith 仍然命中 — body 被当 UTF-8 解码进 req.body,业务据此判定"是
+                // JSON"实际是 PNG → 类型混淆。出现第二次 Content-Type 一律 400。
+                if (nameLow == "content-type" && req.headers.get(nameLow).isSome()) {
+                    throw BadRequestException()
+                }
                 match (req.headers.get(nameLow)) {
                     case Some(existing) => req.headers[nameLow] = "${existing}, ${raw}"
                     case None => req.headers[nameLow] = raw
