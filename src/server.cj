@@ -839,19 +839,33 @@ class ConnReader {
             }
             pos = lineEnd + 2
             if (size == 0) {
-                // 读到大小为 0 的结束块，表示请求体到此结束。这里消费掉结束块后
-                // 那个收尾的 CRLF（即结束块与可选 trailer 之间的空行）。注意：本
-                // 实现不支持 trailer（结束块之后附带的尾部报文头），仅吃掉这一个
-                // CRLF 即认定结束；若对端发了 trailer，会被后续处理忽略。
-                var endLine = findCRLF(pos)
-                while (endLine < 0) {
-                    if (!fill()) {
+                // 读到大小为 0 的结束块,RFC 7230 §4.1.2 之后是 trailer-part:零或多个
+                // header-field 行,最后一行是空行结束。早先实现只消费 size=0 后的紧跟
+                // CRLF,把"可能存在的 trailer 字段"留在 buf 里 — 残留字节被下一次
+                // readMessage 当作下一个请求的开头解析,构成请求走私(round3 P1-12)。
+                //
+                // 修复:循环读取行直到看到空行为止。trailer 字段不解析(本实现不支持),
+                // 但必须 drain 干净;trailer 累计字节有 maxHeaderBytes 上限,防 DoS。
+                // EOF 时返 None(残缺帧不应当作完整请求,修白盒报告 G1)。
+                let trailerStart = pos
+                while (true) {
+                    var endLine = findCRLF(pos)
+                    while (endLine < 0) {
+                        if (!fill()) {
+                            return None
+                        }
+                        endLine = findCRLF(pos)
+                    }
+                    // 空行(CRLF 紧贴当前位置)即 trailer 段终止。
+                    if (endLine == pos) {
+                        pos += 2
                         break
                     }
-                    endLine = findCRLF(pos)
-                }
-                if (endLine >= 0) {
+                    // 非空行 = 一个 trailer 字段,直接跳过。
                     pos = endLine + 2
+                    if (pos - trailerStart > maxHeaderBytes) {
+                        throw PayloadTooLargeException()
+                    }
                 }
                 break
             }
