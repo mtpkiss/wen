@@ -2,7 +2,7 @@
   cjc-version = "1.1.3"
   name = "wen_contrib"
   description = "Optional middleware for Wen — helmet / csrf / cors / auth / logger / requestId / methodOverride. Split from core as part of the 1.0 lockdown roadmap (P0-J)."
-  version = "0.0.0"
+  version = "0.4.0"
   output-type = "static"
 
 [dependencies]
