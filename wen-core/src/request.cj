@@ -695,19 +695,23 @@ public class HttpRequest {
         }
         let value = raw[0..idx]
         let sig = raw[(idx + 1)..raw.size]
-        // 先用主密钥验签。
-        if (constantTimeEquals(sig, hmacSha256Hex(app.cookieSecret, value))) {
-            return Some(value)
-        }
-        // 主密钥失败 → 依次尝试 legacy 密钥列表。任何一个匹配即视为有效。
-        // 这是密钥在线轮换的关键路径:旧 cookie 持续被接受直到 legacy 清空。
+        // P1-8:始终遍历完所有候选(累积 OR),不早返 — 早先实现"主密钥命中立刻 return"
+        // 与"legacy 命中需先 hmac N 次 legacy"之间存在可观测时序差,攻击者反复请求即可
+        // 推断"自己 cookie 用的是主密钥还是 legacy",泄露轮换进度。把所有 HMAC 都算完
+        // 后再判定,密钥轮换状态对外不可观察。
+        var matched = constantTimeEquals(sig, hmacSha256Hex(app.cookieSecret, value))
         for (legacy in app.legacyCookieSecrets) {
             if (legacy.isEmpty()) {
                 continue
             }
-            if (constantTimeEquals(sig, hmacSha256Hex(legacy, value))) {
-                return Some(value)
-            }
+            // 关键:**先** 计算 HMAC 与比较结果再 OR 回去 — 不能直接写
+            // `matched = matched || constantTimeEquals(...)`,因为 `||` 短路会跳过已
+            // matched 后的 HMAC 计算,重新引入时序差。
+            let thisOne = constantTimeEquals(sig, hmacSha256Hex(legacy, value))
+            matched = matched || thisOne
+        }
+        if (matched) {
+            return Some(value)
         }
         return None
     }
@@ -797,14 +801,15 @@ public class HttpRequest {
                     continue
                 }
                 // 按 RFC 6265:cookie 值可被双引号包裹(被某些客户端使用),需要剥掉。
-                // 同时值在传输前可能经过 URL 编码(常见框架做法):做一次 urlDecode,
-                // 让 cookie 写入(框架自身的 res.cookie 同样按 RFC 写 raw)和读取一致;
-                // 若值已是 raw(无 %XX),urlDecode 是 identity。
+                // **不**做隐式 urlDecode:RFC 6265 cookie-value 不要求 percent-encoding,
+                // res.cookie 写端从不编码,读端做 decode 是不对称的"防御"。这一不对称
+                // 会让 signed cookie 含 + / %XX 时 ensureCookies 把 "+" 解为空格 → 重算
+                // HMAC 与签名段不符 → signedCookie 永远返回 None,静默丢会话(P0-1)。
                 var v = vRaw.trimAscii()
                 if (v.size >= 2 && v.startsWith("\"") && v.endsWith("\"")) {
                     v = v[1..(v.size - 1)]
                 }
-                this.cookies[name] = urlDecode(v)
+                this.cookies[name] = v
             }
             case None => ()
         }

@@ -82,6 +82,11 @@ public class HttpResponse {
     }
 
     public func status(code: Int64): HttpResponse {
+        // P2-B:finished 后改 status 会让"状态码已改 + body 改不了"形成无意义的混乱响应。
+        // 与 send/sendBytes/stream 同款警告并跳过,而非默默吞改。
+        if (warnIfFinished("status")) {
+            return this
+        }
         this.statusCode = code
         this.statusMessage = reasonPhrase(code)
         return this
@@ -89,6 +94,11 @@ public class HttpResponse {
 
     // 设置响应头(case-insensitive 去重)。`set("X-Foo", "a")` 后 `set("x-foo", "b")`
     // 视为同一头,后者覆盖前者;输出时保留**最后一次**写入提供的原始大小写。
+    //
+    // 注意:与 status / send 等不同,set **不**在 finished 后告警 — 因为 server 层
+    // 序列化阶段 (ensureDateHeader / 自动补 Content-Length / charset) 仍需要在
+    // res.finished 之后写头部。用户在 finished 后调 set 写入,header 也会出现在最终
+    // 字节流(因为序列化在 finished=true 后才跑),所以不算 no-op。
     public func set(name: String, value: String): HttpResponse {
         checkHeaderSafe(name)
         checkHeaderSafe(value)
@@ -277,6 +287,14 @@ public class HttpResponse {
                 stripped
         }
         if (!exists(p)) {
+            // P2-S:抛异常前清掉用户钩子(如 staticFiles 的 setHeaders)已写的头部 —
+            // 默认错误处理会把 status 改成 500,残留的 "Content-Type: image/png" / Cache-Control
+            // 等可能误导客户端缓存"500 + image/png"或继续按缓存策略持有错误响应。
+            this.remove("Content-Type")
+            this.remove("Cache-Control")
+            this.remove("Content-Length")
+            this.remove("ETag")
+            this.remove("Last-Modified")
             throw Exception("sendFile: file not found: ${path}")
         }
         applyFileResponse(this, File.readFrom(p), mimeFor(p), httpDateForFile(p))
@@ -356,12 +374,13 @@ public class HttpResponse {
         let writer = StreamWriter(this)
         writer.begin()
         // body 抛异常时,响应头已写出 — 不能再回一个 5xx 错误响应(客户端会把两份响应
-        // 拼起来解析)。这里吞掉异常,只能依赖 hijacked=true 让上层关闭连接。建议业务
-        // 自身在 body 内做异常处理与日志。
+        // 拼起来解析)。这里吞掉异常,只能依赖 hijacked=true 让上层关闭连接。
+        // P1-4:虽然不能写错误响应,但运营态要看得见 — stderr 打一行带 message,
+        // 与 warnIfFinished 同款风格。早先纯吞会让"SSE 莫名断流"问题完全无线索。
         try {
             body(writer)
-        } catch (_: Exception) {
-            ()
+        } catch (e: Exception) {
+            eprintln("[wen] stream/sse body 抛异常: ${e.message}")
         }
     }
 

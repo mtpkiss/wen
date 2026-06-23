@@ -20,6 +20,12 @@ demo.exe
 
 # 测试运行产生的临时文件
 ._cjx_*
+wen-core/test_data_static/
+
+# cjpm 锁文件(本地构建副产物)
+cjpm.lock
+wen-core/cjpm.lock
+wen-contrib/cjpm.lock
 
 # 本地工具(如端到端压测用的 bombardier 二进制)
 .tools/

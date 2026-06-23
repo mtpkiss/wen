@@ -84,6 +84,13 @@ func escapeQuotedString(s: String): String {
     let bytes = s.toArray()
     let out = ArrayList<UInt8>()
     for (b in bytes) {
+        // P2-L:含 CR / LF / NUL 的 realm(来自配置 / i18n 等外部源)会让
+        // checkHeaderSafe 抛异常 → 401 路径变 500,认证 UX 破坏。CR/LF/NUL 替换成 "_",
+        // 比抛异常更稳:realm 是说明文字,字符替换不影响认证语义。
+        if (b == UInt8(13) || b == UInt8(10) || b == UInt8(0)) {
+            out.add(UInt8(95)) // '_'
+            continue
+        }
         if (b == UInt8(92) || b == UInt8(34)) { // \ 或 "
             out.add(UInt8(92))
         }

@@ -303,6 +303,10 @@ public func parseJson(text: String): JsonValue {
 // 续字节（UTF-8 多字节字符的非首字节都 ≥ 0x80）自然落入"不转义"快路径，
 // 因此非 ASCII 文本不会触发慢路径。
 func escapeJsonInto(out: ArrayList<UInt8>, s: String): Unit {
+    // **P2-R 说明**:转义入口只覆盖 RFC 8259 §7 强制要求的字符集(`< 0x20` / `"` /
+    // `\`)。0x7F(DEL)在规范中是合法的、可以裸出现的 JSON 字符,某些消费方(终端 /
+    // 日志着色器)会把它当控制符,但**转义会破坏与其它符合 RFC 的解析器的字节兼容性**,
+    // 因此保持不转义。
     let bytes = s.toArray()
     let n = bytes.size
     var firstEsc = -1
@@ -503,7 +507,68 @@ class JsonParser {
         if (lex.isEmpty() || lex == "-") {
             throw JsonException("invalid number at offset ${start}")
         }
+        // P2-O:RFC 8259 严格校验 — 拒绝前导零("00123"/"-0123")与裸小数点(".5"/"1.")。
+        // 早先实现只按词法切段、整段塞进 JsonNumber,会让序列化往返把非法 JSON 当合法吐出。
+        if (!isStrictJsonNumber(lex)) {
+            throw JsonException("invalid number lexeme '${lex}' at offset ${start}")
+        }
         return JsonNumber(lex)
+    }
+
+    // P2-O:RFC 8259 §6 整数 / 小数 / 指数语法的严格校验:
+    //   number = [ "-" ] int [ frac ] [ exp ]
+    //   int    = "0" | "1"-"9" *DIGIT          (无前导零)
+    //   frac   = "." 1*DIGIT                   (小数点后至少一位)
+    //   exp    = ("e"|"E") [ "+"|"-" ] 1*DIGIT
+    func isStrictJsonNumber(s: String): Bool {
+        let bytes = s.toArray()
+        if (bytes.size == 0) {
+            return false
+        }
+        var i = 0
+        if (bytes[i] == UInt8(45)) {
+            i += 1
+        }
+        // int 段
+        if (i >= bytes.size || !isDigitByte(bytes[i])) {
+            return false
+        }
+        let intStart = i
+        while (i < bytes.size && isDigitByte(bytes[i])) {
+            i += 1
+        }
+        let intLen = i - intStart
+        if (intLen > 1 && bytes[intStart] == UInt8(48)) {
+            return false // 前导零
+        }
+        // frac 段
+        if (i < bytes.size && bytes[i] == UInt8(46)) {
+            i += 1
+            if (i >= bytes.size || !isDigitByte(bytes[i])) {
+                return false // 裸小数点
+            }
+            while (i < bytes.size && isDigitByte(bytes[i])) {
+                i += 1
+            }
+        }
+        // exp 段
+        if (i < bytes.size && (bytes[i] == UInt8(101) || bytes[i] == UInt8(69))) {
+            i += 1
+            if (i < bytes.size && (bytes[i] == UInt8(43) || bytes[i] == UInt8(45))) {
+                i += 1
+            }
+            if (i >= bytes.size || !isDigitByte(bytes[i])) {
+                return false
+            }
+            while (i < bytes.size && isDigitByte(bytes[i])) {
+                i += 1
+            }
+        }
+        return i == bytes.size
+    }
+
+    func isDigitByte(b: UInt8): Bool {
+        return b >= UInt8(48) && b <= UInt8(57)
     }
 
     // 解析字符串字面量（调用时当前字节必须是起始的双引号）。逐字节累积内容，遇到

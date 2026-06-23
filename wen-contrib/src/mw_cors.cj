@@ -29,7 +29,7 @@ public func cors(): Middleware {
 //   exposeHeaders 允许 JS 读取的响应头(默认空,不发 Access-Control-Expose-Headers)。
 public func cors(origin: String, methods!: String = "GET, POST, PUT, DELETE, PATCH, OPTIONS",
     headers!: String = "Content-Type, Authorization", credentials!: Bool = false, maxAge!: Int64 = -1,
-    exposeHeaders!: String = ""): Middleware {
+    exposeHeaders!: String = "", reflectRequestHeaders!: Bool = false): Middleware {
     // 在中间件构造期主动拒绝危险配置:CORS 规范禁止 credentials=true 与 origin="*" 同用
     // (浏览器会拒,但服务端仍会处理请求,可能造成意料外的状态改变)。这里宁可让应用启动
     // 时立刻报错,也好过把误配带到生产再被攻击者利用。
@@ -45,7 +45,25 @@ public func cors(origin: String, methods!: String = "GET, POST, PUT, DELETE, PAT
             res.vary("Origin")
             res.set("Access-Control-Allow-Origin", origin)
             res.set("Access-Control-Allow-Methods", methods)
-            res.set("Access-Control-Allow-Headers", headers)
+            // P1-10:reflectRequestHeaders=true 时,把预检的
+            // Access-Control-Request-Headers 原样反射到 Allow-Headers,避免默认值
+            // ("Content-Type, Authorization") 漏掉客户端实际需要的自定义头(浏览器
+            // 拒绝实际请求 → "已配 CORS"假象)。注意:开启反射等于把客户端控制权交给
+            // Allow-Headers,**仅在你确知所有调用方是可信前端时使用**。
+            if (reflectRequestHeaders) {
+                let acrh = match (req.header("access-control-request-headers")) {
+                    case Some(v) => v.trimAscii()
+                    case None => ""
+                }
+                if (acrh.isEmpty()) {
+                    res.set("Access-Control-Allow-Headers", headers)
+                } else {
+                    res.set("Access-Control-Allow-Headers", acrh)
+                    res.vary("Access-Control-Request-Headers")
+                }
+            } else {
+                res.set("Access-Control-Allow-Headers", headers)
+            }
             if (credentials) {
                 res.set("Access-Control-Allow-Credentials", "true")
             }

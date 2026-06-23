@@ -33,12 +33,17 @@ enum RangeResult {
 // 可选关键字参数 etag / sendLastModified 用于关闭对应响应头与条件请求支持(静态
 // 中间件选项化时,把对应开关传到这里实现)。
 func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: String, lastModified: ?String,
-    etag!: Bool = true, sendLastModified!: Bool = true): Unit {
+    etag!: Bool = true, sendLastModified!: Bool = true, precomputedETag!: ?String = None): Unit {
     res.set("Content-Type", contentType)
     res.set("Accept-Ranges", "bytes")
     var etagValue = ""
     if (etag) {
-        etagValue = computeETag(data)
+        // P1-11:若 caller 给了预算好的弱 ETag(static files 默认按 size + mtime 算),
+        // 直接用,不再对全文做多项式 hash — 大文件 / 高并发场景下能省下整次 I/O + CPU。
+        etagValue = match (precomputedETag) {
+            case Some(t) => t
+            case None => computeETag(data)
+        }
         res.set("ETag", etagValue)
     }
     var effectiveLastModified: ?String = None
@@ -80,6 +85,10 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
         case None => match (effectiveLastModified) {
             case Some(lm) => match (req.header("if-modified-since")) {
                 case Some(ims) =>
+                    // **P2-Q 已知约束**:严格字符串等值匹配 — 客户端在头里发"小写 gmt /
+                    // 缺前导零 / 不同空白"等任意合规变体时无法命中 304。框架不内置完整
+                    // HTTP-date 解析(代价不成比例);ETag 路径(If-None-Match)是首选的
+                    // 强校验,如须放宽 IMS 校验请用反代缓存层。
                     if (ims.trimAscii() == lm) {
                         send304(res)
                         return
@@ -116,8 +125,11 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
 }
 
 // 回 304 Not Modified(空体)。
+// 注意:framework 内部调用,直接写字段绕过 res.status() 的 finished-warn — etag 中间件
+// 在 next() 之后(此时 res 已 finished)会改成 304 是合法的"晚改",而非用户错误。
 func send304(res: HttpResponse): Unit {
-    res.status(304)
+    res.statusCode = 304
+    res.statusMessage = reasonPhrase(304)
     res.body = ""
     res.bodyBytes = None
     res.finished = true
@@ -132,23 +144,84 @@ func httpDateForFile(path: String): ?String {
     }
 }
 
+// P1-11:基于文件 stat (size + mtime) 的弱 ETag。Express / serve-static 默认形式,
+// 完全避开"读全文 → 多项式 hash"路径,对 100 MB 文件高并发尤其有用。语义保留:同
+// 文件被改后,size 或 mtime 至少有一变,客户端缓存正确失效。同等 hash 强度的强 ETag
+// 只在二进制内容确实可能"size+mtime 不变但字节变了"的边缘场景(如 mmap 改写)才有
+// 价值,代价不成比例 — 把强 ETag 留给 etag() 中间件(动态响应)走。
+func weakETagFromStat(path: String): ?String {
+    try {
+        let info = FileInfo(Path(path))
+        let size = info.size
+        let mtimeNs = info.lastModificationTime.toUnixTimeStamp().toNanoseconds()
+        return Some("W/\"${size}-${mtimeNs}\"")
+    } catch (_: Exception) {
+        return None
+    }
+}
+
 // 把一个(UTC)时间格式化为 RFC 1123 形式的 HTTP 日期,例如
 // "Fri, 12 Jun 2026 00:40:55 GMT"。星期与月份取其英文全名的前三个字母作为缩写。
+// **P2-D 可移植性兜底**:如果 std DayOfWeek / Month.toString() 未来变区域化(中文 /
+// 全小写等),先按 toString() 取前 3 个字节;命中已知英文集就采用;否则回退到固定 ASCII
+// 数组(按 enum 序号映射)。这样无论 std 如何演进,Date 头始终是 RFC 7231 要求的格式。
 func formatHttpDate(t: DateTime): String {
-    let dow = t.dayOfWeek.toString()
-    let mon = t.month.toString()
-    let dowAbbr = if (dow.size >= 3) {
-        dow[0..3]
-    } else {
-        dow
-    }
-    let monAbbr = if (mon.size >= 3) {
-        mon[0..3]
-    } else {
-        mon
-    }
+    let dowAbbr = abbrevDayOfWeek(t)
+    let monAbbr = abbrevMonth(t)
     return "${dowAbbr}, ${pad2(t.dayOfMonth)} ${monAbbr} ${t.year} " +
         "${pad2(t.hour)}:${pad2(t.minute)}:${pad2(t.second)} GMT"
+}
+
+let HTTP_DAYS: Array<String> = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+let HTTP_MONTHS: Array<String> = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+func abbrevDayOfWeek(t: DateTime): String {
+    let s = t.dayOfWeek.toString()
+    if (s.size >= 3 && isAsciiAlpha(s[0..3])) {
+        return s[0..3]
+    }
+    // 回退到固定 ASCII 数组 — std 区域化时不会破坏 RFC 格式。
+    match (t.dayOfWeek) {
+        case Sunday => return HTTP_DAYS[0]
+        case Monday => return HTTP_DAYS[1]
+        case Tuesday => return HTTP_DAYS[2]
+        case Wednesday => return HTTP_DAYS[3]
+        case Thursday => return HTTP_DAYS[4]
+        case Friday => return HTTP_DAYS[5]
+        case Saturday => return HTTP_DAYS[6]
+    }
+}
+
+func abbrevMonth(t: DateTime): String {
+    let s = t.month.toString()
+    if (s.size >= 3 && isAsciiAlpha(s[0..3])) {
+        return s[0..3]
+    }
+    match (t.month) {
+        case January => return HTTP_MONTHS[0]
+        case February => return HTTP_MONTHS[1]
+        case March => return HTTP_MONTHS[2]
+        case April => return HTTP_MONTHS[3]
+        case May => return HTTP_MONTHS[4]
+        case June => return HTTP_MONTHS[5]
+        case July => return HTTP_MONTHS[6]
+        case August => return HTTP_MONTHS[7]
+        case September => return HTTP_MONTHS[8]
+        case October => return HTTP_MONTHS[9]
+        case November => return HTTP_MONTHS[10]
+        case December => return HTTP_MONTHS[11]
+    }
+}
+
+func isAsciiAlpha(s: String): Bool {
+    for (b in s.toArray()) {
+        let alpha = (b >= UInt8(65) && b <= UInt8(90)) || (b >= UInt8(97) && b <= UInt8(122))
+        if (!alpha) {
+            return false
+        }
+    }
+    return true
 }
 
 // 把 0..99 的整数补足成两位十进制字符串。

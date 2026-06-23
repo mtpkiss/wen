@@ -275,6 +275,10 @@ public class HttpServer {
                     responseStarted = true
                 }
                 if (!res.finished) {
+                    // P0-3:server 兜底 404 对 HEAD 也必须 suppress body。
+                    if (req.method == HttpMethod.HEAD) {
+                        res.suppressBody = true
+                    }
                     res.status(404).send("Not Found")
                 }
                 // res.hijacked 为真，说明某个流式处理器已经"劫持"了连接，
@@ -330,7 +334,9 @@ public class HttpServer {
                 }
             case None => ()
         }
-        return req.httpVersion.trimAscii().contains("1.1")
+        // P1-1:精确匹配 "HTTP/1.1",不能用 contains("1.1") 子串 — 客户端发
+        // "HTTP/2.1.1" 等含 1.1 子串的版本不应被当作 HTTP/1.1 默认 keep-alive。
+        return req.httpVersion.trimAscii() == "HTTP/1.1"
     }
 
     func writeError(client: TcpSocket, code: Int64, message: String, headers: HashMap<String, String>): Unit {
@@ -426,6 +432,11 @@ public class HttpServer {
         if (target.isEmpty()) {
             throw BadRequestException()
         }
+        // P1-1:HTTP 版本必须严格 ^HTTP/\d+\.\d+$;早先未校验,客户端发 "xx1.1"
+        // 或 "HTTP-1.1" 都被吞下,与上游代理对版本的解读分歧形成走私利用面。
+        if (!isValidHttpVersion(version)) {
+            throw BadRequestException()
+        }
         // 防御性目标 URI 长度上限:8 KiB(同等于 nginx/Apache 默认)。极长 URI 多为攻击。
         if (target.size > 8192) {
             throw PayloadTooLargeException()
@@ -476,6 +487,12 @@ public class HttpServer {
                 // startsWith 仍然命中 — body 被当 UTF-8 解码进 req.body,业务据此判定"是
                 // JSON"实际是 PNG → 类型混淆。出现第二次 Content-Type 一律 400。
                 if (nameLow == "content-type" && req.headers.get(nameLow).isSome()) {
+                    throw BadRequestException()
+                }
+                // P1-2:同理,RFC 7230 §5.4 要求每条请求**有且仅有一个** Host 头。
+                // 之前 Host 走通用合并路径(`h1, h2`),vhost 分发场景里攻击者可借
+                // `Host: real\r\nHost: evil` 让代理 / wen 看到不同 vhost — 走私利用面。
+                if (nameLow == "host" && req.headers.get(nameLow).isSome()) {
                     throw BadRequestException()
                 }
                 match (req.headers.get(nameLow)) {
@@ -717,6 +734,9 @@ class ConnReader {
     // 对端关闭连接（read 返回 0，EOF）、读超时，或发生其它异常——这些情况都
     // 被统一当作"没有更多数据可读"处理，由调用方决定如何收尾。返回 true 表示
     // 成功读到了至少一个字节。
+    // **P2-E 已知约束**:EOF / 超时 / IO 异常折叠成同一返回值 false,server 层无法
+    // 区分"正常关闭""慢速攻击触发上限""对端 reset"。生产观察 timeout 命中率 / reset
+    // 频率需要在反代层(nginx 等)做,wen 1.0 不引入 onConnectionError hook。
     func fill(): Bool {
         try {
             let n = sock.read(tmp)
@@ -872,7 +892,13 @@ class ConnReader {
     // 字节，再以 CRLF 收尾；如此重复，直到出现大小为 0 的"结束块"。
     func readChunked(headerSectionEnd: Int64): ?Array<UInt8> {
         let body = ArrayList<UInt8>()
-        var pos = headerSectionEnd
+        // P1-3:headerSection 先取出来再立刻 dropFront — 之后循环里每完成一个 chunk
+        // 都可以触发物理 compact,buf 不会无限膨胀。早先实现把 pos 单调推进、末尾才
+        // dropFront,攻击者用 1 字节 chunk 流可让单条连接 buf 物理 size 远超 maxBodySize
+        // (后者只算 body 累积字节,不看 buf 的物理 size)。
+        let headerSection = sliceList(0, headerSectionEnd)
+        dropFront(headerSectionEnd)
+        var pos: Int64 = 0
         while (true) {
             var lineEnd = findCRLF(pos)
             while (lineEnd < 0) {
@@ -934,8 +960,12 @@ class ConnReader {
                 i += 1
             }
             pos += size + 2
+            // P1-3:每完成一个 chunk 触发一次 dropFront,让 dropFront 的摊销 compact
+            // 在小 chunk 流上正常工作 — pos 推进过 maxHeaderBytes 阈值就会做物理压缩。
+            dropFront(pos)
+            pos = 0
         }
-        let headerSection = sliceList(0, headerSectionEnd)
+        // 此处 headerSection 是入口处已取出的副本;buf 内的字节早在循环中陆续被 drop。
         dropFront(pos)
         let result = ArrayList<UInt8>()
         for (b in headerSection) {
@@ -1054,6 +1084,39 @@ func headerIsChunked(headerText: String): Bool {
     return anyChunked
 }
 
+// P1-1:严格校验请求行 HTTP 版本格式:必须形如 HTTP/<digits>.<digits>。早先用
+// contains("1.1") 子串匹配 / 不校验格式,客户端发 "HTTP/2.1.1" 或 "xx1.1" 会被
+// 当成 1.1,与上游代理对版本的解读分歧形成走私利用面。
+func isValidHttpVersion(s: String): Bool {
+    if (!s.startsWith("HTTP/")) {
+        return false
+    }
+    let rest = s[5..s.size]
+    let dot = rest.indexOf(".")
+    let dotIdx = match (dot) {
+        case Some(i) => i
+        case None => return false
+    }
+    if (dotIdx == 0 || dotIdx == rest.size - 1) {
+        return false
+    }
+    let major = rest[0..dotIdx]
+    let minor = rest[(dotIdx + 1)..rest.size]
+    return allAsciiDigits(major) && allAsciiDigits(minor)
+}
+
+func allAsciiDigits(s: String): Bool {
+    if (s.isEmpty()) {
+        return false
+    }
+    for (b in s.toArray()) {
+        if (b < UInt8(48) || b > UInt8(57)) {
+            return false
+        }
+    }
+    return true
+}
+
 // 解析 chunked 的块大小行:把行首的十六进制数字(0-9、a-f、A-F)解析为长度。
 // 块大小行后面可能跟着以分号引导的"块扩展"(chunk extension,形如 "1a;ext=v"),
 // 本函数遇到第一个非十六进制字符(如分号)即停止,从而自然忽略掉该扩展后缀。
@@ -1101,6 +1164,9 @@ func parseHexLen(s: String): Int64 {
 // 把查询字符串（如 "a=1&b=2"）解析进 into 这个映射表：先按 "&" 拆成若干
 // 键值对，再按第一个 "=" 把每对拆成键与值，并分别做 URL 解码（百分号编码与
 // '+' 还原）。空串直接返回；空的键值对片段会被跳过。
+// **P2-C 单值语义**:同名键后写覆盖前写(`?tag=a&tag=b` → 只留 `b`)。这是
+// HashMap 的写入语义,**与 Express 数组形式不同**。需要多值时,业务请自己解析
+// req.url 的查询串部分,或通过额外 API(暂未提供 queryAll)。
 func parseQuery(qs: String, into: HashMap<String, String>): Unit {
     if (qs.isEmpty()) {
         return

@@ -133,7 +133,16 @@ public func staticFiles(root: String, index!: String = "index.html", maxAge!: In
             } else {
                 None
             }
-            applyFileResponse(res, File.readFrom(path), mimeFor(rel), lm, etag: etag, sendLastModified: lastModified)
+            // P1-11:静态文件默认用 size+mtime 弱 ETag,跳过对全文做多项式 hash。
+            // 10 MB+ 文件高并发时差距明显;serve-static 默认也是弱 ETag。失败回退到
+            // 内容强 ETag(由 applyFileResponse 内部计算)以保留向后兼容语义。
+            let weak: ?String = if (etag) {
+                weakETagFromStat(path)
+            } else {
+                None
+            }
+            applyFileResponse(res, File.readFrom(path), mimeFor(rel), lm, etag: etag,
+                sendLastModified: lastModified, precomputedETag: weak)
     }
 }
 

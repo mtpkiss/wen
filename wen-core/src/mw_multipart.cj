@@ -221,14 +221,20 @@ func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, s
                 return
             }
             seenDisposition = true
-            // 解析其参数,如 form-data; name="x"; filename="y"。
-            for (paramRaw in v.split(";")) {
+            // P1-12:解析参数串(如 form-data; name="x"; filename="y")使用 quote-aware
+            // splitter — `v.split(";")` 不识别引号内的分号,合法 `name="a; b"` 会被切坏成
+            // `"a` 与 ` b"`,unquote 得 `"a`。同款 splitter 也供 extractBoundary 复用。
+            for (paramRaw in splitParamsQuoteAware(v)) {
                 let (pk, pv) = splitOnce(paramRaw.trimAscii(), "=")
                 let pkey = pk.trimAscii().toAsciiLower()
                 if (pkey == "name") {
                     name = unquote(pv.trimAscii())
                 } else if (pkey == "filename") {
-                    filename = unquote(pv.trimAscii())
+                    // P0-2:filename 归一为 basename 防路径遍历。客户端发
+                    // `filename="../../../etc/passwd"` 时,业务若写
+                    // `file.saveTo("uploads/" + file.filename)` 即被穿越;Windows 上
+                    // 反斜杠 `..\..\` 同样命中。剥到 basename 之后业务拼路径才安全。
+                    filename = basenameFilename(unquote(pv.trimAscii()))
                     hasFilename = true
                 }
             }
@@ -288,6 +294,49 @@ func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, s
         }
         req.attributes[name] = String.fromUtf8(content)
     }
+}
+
+// P1-12:把 `;` 分隔的参数串切成片段,但 `"..."` 引号内的 `;` 被视为字面字符。
+// 用于 Content-Disposition / Content-Type / boundary 等 RFC 2616 §3.6 风格参数列表的解析。
+// 不解释转义、不剥引号(交由 unquote 处理);只负责"在引号外按 ; 切片"。
+func splitParamsQuoteAware(s: String): Array<String> {
+    let out = ArrayList<String>()
+    let bytes = s.toArray()
+    var inQuotes = false
+    var start = 0
+    var i = 0
+    while (i < bytes.size) {
+        let b = bytes[i]
+        if (b == UInt8(34)) {
+            inQuotes = !inQuotes
+        } else if (b == UInt8(59) && !inQuotes) {
+            out.add(String.fromUtf8(bytes[start..i]))
+            start = i + 1
+        }
+        i += 1
+    }
+    out.add(String.fromUtf8(bytes[start..bytes.size]))
+    return out.toArray()
+}
+
+// P0-2:把客户端给的 filename 归一为 basename — 剥掉 / 与 \ 的所有前缀段。
+// 既挡 POSIX 风 `../../../etc/passwd`,也挡 Windows 风 `..\..\evil.txt`;两套
+// 分隔符都看,避免 multipart 解析时被绕过。空串 / 仅分隔符返回空串。
+func basenameFilename(s: String): String {
+    var last = -1
+    let bytes = s.toArray()
+    var i = 0
+    while (i < bytes.size) {
+        let b = bytes[i]
+        if (b == UInt8(47) || b == UInt8(92)) {
+            last = i
+        }
+        i += 1
+    }
+    if (last < 0) {
+        return s
+    }
+    return s[(last + 1)..s.size]
 }
 
 // 在字节数组 hay 中从 from 起查找子序列 needle 的起始下标;找不到返回 -1。

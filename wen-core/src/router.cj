@@ -264,8 +264,10 @@ public class Router {
     // 已注册路由数的递增计数器,用于给每次注册分配唯一的 routeId(多处理器路由
     // 的各处理器共享同一个 id)。
     var routeCounter: Int64 = 0
-    // app.param 注册的参数预处理回调表,键为参数名。
-    let paramCallbacks: HashMap<String, ParamHandler> = HashMap<String, ParamHandler>()
+    // app.param 注册的参数预处理回调表,键为参数名 → 该名下的回调列表。
+    // P2-G:同名注册多次按顺序依次执行(与 Express 一致),早先用 `HashMap<..., ParamHandler>`
+    // 只能存最后一个,前面注册的被静默丢失。
+    let paramCallbacks: HashMap<String, ArrayList<ParamHandler>> = HashMap<String, ArrayList<ParamHandler>>()
 
     // ---- 三档索引:由 add/addAll/useError 在注册时同步维护,runChain 用它们以 O(M)
     // 量级完成派发查询(M 为请求路径段数),替代原来在 layers 上 O(N) 的线性扫描。
@@ -289,7 +291,21 @@ public class Router {
     public var caseSensitive: Bool = false
     public var strict: Bool = false
 
+    // P1-7:挂载的子 Router 引用列表。markFrozen / handle 兜底路径会递归把
+    // case sensitive / strict 设置下发到所有子 router — 否则全局开关只在顶级生效。
+    let mountedSubRouters: ArrayList<Router> = ArrayList<Router>()
+
     public init() {}
+
+    // P1-7:递归把 case sensitive / strict 设置写入本 router 及所有挂载子 router。
+    // 由 Application.markFrozen / handle 调用,确保子路由的匹配行为与顶级一致。
+    func propagateRoutingSettings(cs: Bool, st: Bool): Unit {
+        this.caseSensitive = cs
+        this.strict = st
+        for (sub in mountedSubRouters) {
+            sub.propagateRoutingSettings(cs, st)
+        }
+    }
 
     func freshRouteId(): Int64 {
         routeCounter += 1
@@ -345,7 +361,14 @@ public class Router {
     // `name` 的参数时,会在该路由处理器执行前触发此回调(每个请求每个参数名只触发一次)。
     public func param(name: String, handler: ParamHandler): Unit {
         ensureNotFrozen()
-        paramCallbacks[name] = handler
+        // P2-G:同名 param 累加到 ArrayList,不覆盖前者。
+        match (paramCallbacks.get(name)) {
+            case Some(list) => list.add(handler)
+            case None =>
+                let list = ArrayList<ParamHandler>()
+                list.add(handler)
+                paramCallbacks[name] = list
+        }
     }
 
     // 全局中间件:对每个请求都执行。以根路径 "/" 作前缀注册，前缀匹配下它能
@@ -356,6 +379,7 @@ public class Router {
 
     // 挂载式中间件:只对路径处于 `path` 之下(以 path 为前缀)的请求执行。
     public func use(path: String, handler: Middleware): Unit {
+        rejectOptionalInMountPath(path)
         add(None, path, handler, true)
     }
 
@@ -447,7 +471,9 @@ public class Router {
         // add 才做冻结校验,导致 listen 后追加 use 会抛异常,但 sub 的 mountpath 已经被
         // 修改 — 部分状态变更下次重启会带着脏数据。现在校验前置,失败即原子失败。
         ensureNotFrozen()
+        rejectOptionalInMountPath(path)
         sub.mountpath = path
+        mountedSubRouters.add(sub)
         add(None, path, {
             req: HttpRequest, res: HttpResponse, next: Next => sub.handleAsMiddleware(req, res, next)
         }, true)
@@ -458,7 +484,21 @@ public class Router {
         addAll(None, "/", handlers, true)
     }
     public func use(path: String, handlers: Array<Middleware>): Unit {
+        rejectOptionalInMountPath(path)
         addAll(None, path, handlers, true)
+    }
+
+    // P1-5:mount 路径不支持可选参数段(":name?")。原因:可选段在 stripMountPath 中
+    // 总是按 pattern.segments.size 剥前缀,实际是否消费一段未被传递,导致
+    // `app.use("/api/:ver?", sub)` 请求 `/api/users` 时贪婪吞到 ver="users",sub 看到
+    // 的是 `/`,与"用户意图 sub 看到 /users"不符。早注册时直接拒。
+    func rejectOptionalInMountPath(path: String): Unit {
+        let pattern = PathPattern.compile(path)
+        for (seg in pattern.segments) {
+            if (seg.optional) {
+                throw Exception("wen: mount path 不支持可选参数段(':${seg.value}?'),与剥前缀语义有歧义")
+            }
+        }
     }
 
     private func wrap(handler: Handler): Middleware {
@@ -509,8 +549,18 @@ public class Router {
     private func dispatchTop(req: HttpRequest, res: HttpResponse): Unit {
         let onExhausted: Next = {
             => if (!res.finished) {
+                // P0-3:HEAD 在兜底 404 / 405 路径上也必须 suppress body — HTTP 契约
+                // 要求 HEAD 永不带正文。原 handle() 的 HEAD-strip 仅覆盖
+                // `noHeadRoute && hasGetRoute` 分支;onExhausted 这条兜底路径之前漏了。
+                if (req.method == HttpMethod.HEAD) {
+                    res.suppressBody = true
+                }
                 let methods = methodsForPath(req.path)
-                if (methods.isEmpty()) {
+                // P2-I:methodsForPath 现在跳过 ALL — 若此处 methods 空但路径上确实有
+                // app.all(path, h) 注册,直觉是 405(路径存在,只是没匹配上具体方法),
+                // 而非 404。hasAllRouteForPath 单独探测 ALL 标记。
+                let hasAll = hasAllRouteForPath(req.path)
+                if (methods.isEmpty() && !hasAll) {
                     res.status(404).send("Cannot ${req.method} ${req.path}")
                 } else if (req.method == HttpMethod.OPTIONS) {
                     res.set("Allow", allowHeader(req.path)).status(204).end()
@@ -571,6 +621,29 @@ public class Router {
             }
         }
         return out
+    }
+
+    // P2-I:路径上是否注册了 ALL 路由(用于 onExhausted 区分 404 vs 405)。
+    func hasAllRouteForPath(path: String): Bool {
+        let parts = pathSegments(path)
+        let cands = collectTrieCandidates(routeTrie, parts)
+        for (i in cands) {
+            let layer = layers[i]
+            if (layer.isError || layer.isPrefix) {
+                continue
+            }
+            match (layer.method) {
+                case Some(m) =>
+                    if (m == HttpMethod.ALL) {
+                        match (layer.pattern.matchExact(path, caseSensitive: this.caseSensitive, strict: this.strict)) {
+                            case Some(_) => return true
+                            case None => ()
+                        }
+                    }
+                case None => ()
+            }
+        }
+        return false
     }
 
     func hasMethodForPath(method: String, path: String): Bool {
@@ -748,6 +821,10 @@ public class Router {
         // 重新运行本层的匹配以取回它捕获的参数并写入 req.params。之所以要在此重新
         // 匹配，是因为不同的层可能捕获不同的参数名/值，需在执行该层处理器前对齐。
         // 这里只重做路径匹配:方法检查已在 dispatch 阶段实时完成。
+        // P2-H 设计取舍:wen 默认 mergeParams=true(父级 prefix 捕获的 params 沿用到
+        // 子层)。这意味着 `/x/:userId` 中间件 + `/x/:account` 路由场景下,handler 内
+        // req.params 同时含两个名 — 与 Express mergeParams: true 一致。要"只看当前 layer
+        // 的 params",应在 handler 内显式只读 req.param("account")。
         var captured = HashMap<String, String>()
         match (layer.tryMatchPath(req, this.caseSensitive, this.strict)) {
             case Some(params) =>
@@ -759,22 +836,25 @@ public class Router {
         }
         // 参数预处理回调(app.param):对本层新捕获、注册了回调、且本请求尚未处理过的
         // 参数依次触发。回调抛异常则转入错误流水线;直接结束响应则就此短路。
+        // P2-G:同名 param 注册多个时,按注册顺序逐个跑。
         if (paramCallbacks.size > 0) {
             for ((k, v) in captured) {
                 if (req.paramProcessed(k)) {
                     continue
                 }
                 match (paramCallbacks.get(k)) {
-                    case Some(cb) =>
+                    case Some(handlers) =>
                         req.markParamProcessed(k)
-                        try {
-                            cb(req, res, v)
-                        } catch (ex: Exception) {
-                            dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
-                            return
-                        }
-                        if (res.finished) {
-                            return
+                        for (cb in handlers) {
+                            try {
+                                cb(req, res, v)
+                            } catch (ex: Exception) {
+                                dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
+                                return
+                            }
+                            if (res.finished) {
+                                return
+                            }
                         }
                     case None => ()
                 }
@@ -819,9 +899,12 @@ public class Router {
             } catch (ex: Exception) {
                 req.path = savedPath
                 req.baseUrl = savedBaseUrl
-                if (nextCalled.compareAndSwap(false, true)) {
-                    dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
-                }
+                // P1-6:无论 nextCalled 是 false 还是 true,异常都必须进流水线 — 早先
+                // CAS 失败(handler 先 next() 再 throw)时直接 return → 异常静默丢弃。
+                // 改:把异常 dispatch 给后续层(err 状态会跳过普通 layer,直达 error layer)。
+                // CAS 仍尝试推进,避免子链不被重复进入。
+                nextCalled.compareAndSwap(false, true)
+                dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
                 return
             }
             req.path = savedPath
@@ -839,9 +922,9 @@ public class Router {
             try {
                 layer.handler(req, res, next)
             } catch (ex: Exception) {
-                if (nextCalled.compareAndSwap(false, true)) {
-                    dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
-                }
+                // P1-6:同上 — 无论 CAS 成功与否,都让异常进流水线给 error layer。
+                nextCalled.compareAndSwap(false, true)
+                dispatch(matched, index + 1, req, res, onExhausted, onError, Some(ex))
                 return
             }
             if (req.consumeSkipRoute()) {
@@ -853,6 +936,8 @@ public class Router {
     // 丢弃路径开头的前 `mountSegments` 个段，再把剩余的段重新拼成路径，
     // 例如 stripMountPath("/static/css/app.css", 1) -> "/css/app.css"。
     // 若剩余段不足(全被剥光)，则返回根路径 "/"。
+    // P1-7:保留原路径的尾斜杠 — 否则 sub 永远看不到 `/foo/`,只能看到 `/foo`,
+    // 子路由 strict routing 形同失效。
     func stripMountPath(path: String, mountSegments: Int64): String {
         let parts = pathSegments(path)
         if (parts.size <= mountSegments) {
@@ -863,6 +948,9 @@ public class Router {
         while (i < parts.size) {
             rebuilt += "/" + parts[i]
             i += 1
+        }
+        if (path.endsWith("/") && !rebuilt.endsWith("/")) {
+            rebuilt += "/"
         }
         return rebuilt
     }
