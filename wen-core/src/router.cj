@@ -477,8 +477,13 @@ public class Router {
     // Allow 头。另外，若是 HEAD 请求但没有对应的 HEAD 路由，则回退去走 GET 路由，
     // 最终只回头部、不回正文。
     public func handle(req: HttpRequest, res: HttpResponse): Unit {
-        if (req.method == HttpMethod.HEAD && !hasMethodForPath(HttpMethod.HEAD, req.path) && hasMethodForPath(
-            HttpMethod.GET, req.path)) {
+        // HEAD 兜底:无 HEAD 路由但有 GET 路由 → 临时改方法跑 GET,然后还原 method、抹掉 body。
+        // 注:hasMethodForPath 是纯查表函数,但 cjlint 的 G.EXP.03 不允许在 && 短路右操作数
+        // 里调函数(怕副作用),故把两次查表抽到局部变量再判断。
+        let isHead = req.method == HttpMethod.HEAD
+        let noHeadRoute = if (isHead) { !hasMethodForPath(HttpMethod.HEAD, req.path) } else { false }
+        let hasGetRoute = if (noHeadRoute) { hasMethodForPath(HttpMethod.GET, req.path) } else { false }
+        if (hasGetRoute) {
             req.method = HttpMethod.GET
             dispatchTop(req, res)
             req.method = HttpMethod.HEAD
