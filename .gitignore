@@ -12,9 +12,7 @@ wen-contrib/target/
 .cache/
 
 # Local runnable demo / scratch (not part of the library)
-demo/src/main.cj
-demo/target/
-demo/cjpm.lock
+demo/
 wen-core/src/main.cj
 src/main.cj
 demo.exe
