@@ -56,22 +56,28 @@ class SocketConnection <: ResponseConnection {
 public class HttpServer {
     let app: Application
 
-    // 允许接收的请求体最大字节数（默认 1 MiB = 1048576 字节）。超过此值会抛出
-    // PayloadTooLargeException，从而拒绝过大的请求体，防止单个请求耗尽内存。
-    public var maxBodySize: Int64 = 1048576
-    // 单次套接字读操作的超时时间（毫秒）。它用于防御慢速/空闲的对端：如果一个
-    // 客户端建立连接后迟迟不发数据（典型的 Slowloris 慢速攻击），读操作会在
-    // 超时后失败，连接随即被放弃，避免线程被长期占住。
-    public var readTimeoutMs: Int64 = 15000
-    // 同时并发处理的连接数上限（默认 1024）。它通过信号量限制在途连接的数量，
-    // 从而间接限制了 spawn 出来的线程数：当连接洪水（大量并发连接）涌入时，
-    // 多出来的连接会在 accept 之前被挡住，不会无限制地创建线程而把资源耗尽。
-    public var maxConnections: Int64 = 1024
+    // 服务器可调参数。**1.0 锁定决定(P0-L)**:这 4 个字段降为同包可见(去 public),
+    // 用户配置统一走 Application(app.maxBodySize / app.readTimeoutMs / app.maxConnections
+    // / app.maxHeaderBytes)— 单一入口,避免 double-source 锁死("到底 Application
+    // 上设的值与 HttpServer 上设的值哪个生效")。Application.buildServer() 在 listen()
+    // 启动前把 4 个值一次性拷到这里,运行期不再可写。
+    //
+    // 允许接收的请求体最大字节数(默认 1 MiB = 1048576 字节)。超过此值会抛出
+    // PayloadTooLargeException,从而拒绝过大的请求体,防止单个请求耗尽内存。
+    var maxBodySize: Int64 = 1048576
+    // 单次套接字读操作的超时时间(毫秒)。它用于防御慢速/空闲的对端:如果一个
+    // 客户端建立连接后迟迟不发数据(典型的 Slowloris 慢速攻击),读操作会在
+    // 超时后失败,连接随即被放弃,避免线程被长期占住。
+    var readTimeoutMs: Int64 = 15000
+    // 同时并发处理的连接数上限(默认 1024)。它通过信号量限制在途连接的数量,
+    // 从而间接限制了 spawn 出来的线程数:当连接洪水(大量并发连接)涌入时,
+    // 多出来的连接会在 accept 之前被挡住,不会无限制地创建线程而把资源耗尽。
+    var maxConnections: Int64 = 1024
     // 请求头部块(状态行 + 全部头)的最大字节数,默认 64 KiB。早先头部仅靠
     // `maxBodySize + 65536` 这个组合上限挡 — 当 body 上限被调到几十 MB 时,header
     // 也跟着可以膨胀到几十 MB,单条 Cookie 头都能把内存撑爆。独立设置头部上限是
     // 标准实践(参考 nginx 8 KiB / Apache 8 KiB / Go 1 MiB)。
-    public var maxHeaderBytes: Int64 = 65536
+    var maxHeaderBytes: Int64 = 65536
 
     // ---- 优雅关闭相关状态 ----
     // 关闭信号:置 true 后,accept 循环退出,handleConnection 不再复用 keep-alive。
