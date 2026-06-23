@@ -3,9 +3,10 @@ target/
 wen-core/target/
 wen-contrib/target/
 
-# IDE
+# IDE / Claude Code 本地工具配置
 .idea/
 .vscode/
+.claude/
 
 # LSP / 工具缓存
 .cache/
