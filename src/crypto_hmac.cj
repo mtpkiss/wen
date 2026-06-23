@@ -245,7 +245,7 @@ func bytesToHex(data: Array<UInt8>): String {
 
 // 对外入口:用 key 对 msg 计算 HMAC-SHA256,返回十六进制字符串。这是框架做签名
 // Cookie / session 时唯一依赖的签名原语(即"替换缝"的对外契约)。
-public func hmacSha256Hex(key: String, msg: String): String {
+func hmacSha256Hex(key: String, msg: String): String {
     return bytesToHex(hmacSha256(key.toArray(), msg.toArray()))
 }
 

@@ -1053,7 +1053,7 @@ func parseHexLen(s: String): Int64 {
 // 把查询字符串（如 "a=1&b=2"）解析进 into 这个映射表：先按 "&" 拆成若干
 // 键值对，再按第一个 "=" 把每对拆成键与值，并分别做 URL 解码（百分号编码与
 // '+' 还原）。空串直接返回；空的键值对片段会被跳过。
-public func parseQuery(qs: String, into: HashMap<String, String>): Unit {
+func parseQuery(qs: String, into: HashMap<String, String>): Unit {
     if (qs.isEmpty()) {
         return
     }
@@ -1069,7 +1069,7 @@ public func parseQuery(qs: String, into: HashMap<String, String>): Unit {
 // 尽力而为（best-effort）的十进制整数解析：从字符串开头逐位读取数字，遇到
 // 第一个非数字字符就停止，忽略其后的所有"杂质"。若开头一个数字都没有，则返回
 // 0。它不抛异常、不报错，适合解析那些可能不规整的报文头数值。
-public func parseInt(s: String): Int64 {
+func parseInt(s: String): Int64 {
     var result = 0
     let bytes = s.toArray()
     var i = 0
@@ -1094,7 +1094,7 @@ public func parseInt(s: String): Int64 {
 // 解码出的字节先统统累积到一个字节缓冲里，直到最后才整体按 UTF-8 解释成字符串。
 // 这样一来，一个跨多字节的 UTF-8 序列（例如 "%E4%B8%AD" 对应汉字 "中"）能被
 // 完整地重新拼接，而不会因为"每解出一个字节就单独转成字符"而被拆坏、产生乱码。
-public func urlDecode(s: String): String {
+func urlDecode(s: String): String {
     let bytes = s.toArray()
     let out = ArrayList<UInt8>()
     var i = 0

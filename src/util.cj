@@ -8,7 +8,7 @@ import std.collection.*
 
 // 返回某个 HTTP 状态码对应的标准原因短语（reason phrase），用于状态行。
 // 仅覆盖框架常用的一批状态码；对未列出的状态码统一回退为通用的 "Status"。
-public func reasonPhrase(code: Int64): String {
+func reasonPhrase(code: Int64): String {
     match (code) {
         case 200 => "OK"
         case 201 => "Created"
@@ -43,7 +43,7 @@ public func reasonPhrase(code: Int64): String {
 // 如果字符串里根本不含 `sep`，则返回 (原串, "")，即 tail 为空串。
 // 由于只在“第一个”分隔符处切分，因此 tail 中即便再出现 `sep` 也会被原样保留，
 // 适合解析 "key=value"（value 里可能再含 "="）这类场景。
-public func splitOnce(s: String, sep: String): (String, String) {
+func splitOnce(s: String, sep: String): (String, String) {
     let idx = s.indexOf(sep)
     match (idx) {
         case Some(i) =>
@@ -56,13 +56,13 @@ public func splitOnce(s: String, sep: String): (String, String) {
 
 // 去除字符串首尾的 ASCII 空白字符。仅对 trimAscii 的一层薄封装，
 // 提供一个语义更直白的名字供框架其它地方调用。
-public func trimWs(s: String): String {
+func trimWs(s: String): String {
     return s.trimAscii()
 }
 
 // 判断 `list` 中是否已经包含 `value`（按字符串相等逐个比较）。
 // 命中即返回 true，遍历完仍未找到则返回 false。
-public func listContains(list: ArrayList<String>, value: String): Bool {
+func listContains(list: ArrayList<String>, value: String): Bool {
     for (item in list) {
         if (item == value) {
             return true
@@ -75,7 +75,7 @@ public func listContains(list: ArrayList<String>, value: String): Bool {
 let B64_TABLE: Array<UInt8> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toArray()
 
 // 标准 base64 编码(带 "=" 填充)。
-public func base64Encode(data: Array<UInt8>): String {
+func base64Encode(data: Array<UInt8>): String {
     let out = ArrayList<UInt8>()
     let n = data.size
     var i = 0
@@ -110,7 +110,7 @@ public func base64Encode(data: Array<UInt8>): String {
 }
 
 // 标准 base64 解码:忽略 "="、空白与非法字符。buf 始终掩到 24 位以免溢出。
-public func base64Decode(s: String): Array<UInt8> {
+func base64Decode(s: String): Array<UInt8> {
     let out = ArrayList<UInt8>()
     var buf = 0
     var bits = 0
@@ -174,7 +174,7 @@ func isHexByte(b: UInt8): Bool {
 
 // 返回字符串中最后一个 "." 的下标;不存在则返回 -1。用于在 "<value>.<sig>" 形式
 // 的签名 Cookie 中,从右侧切出签名部分(value 自身可以包含 ".")。
-public func lastIndexOfDot(s: String): Int64 {
+func lastIndexOfDot(s: String): Int64 {
     let bytes = s.toArray()
     var i = bytes.size - 1
     while (i >= 0) {
@@ -188,7 +188,7 @@ public func lastIndexOfDot(s: String): Int64 {
 
 // 把一个路径按 "/" 拆分成若干非空的路径段，自动丢弃因前导/末尾/连续斜杠
 // 产生的空段。例如 "/a/b/" 会得到 ["a", "b"]。
-public func pathSegments(path: String): Array<String> {
+func pathSegments(path: String): Array<String> {
     let raw = path.split("/")
     let parts = ArrayList<String>()
     for (seg in raw) {
@@ -211,7 +211,7 @@ public func pathSegments(path: String): Array<String> {
 // 返回值是 root + "/" + safeRel 形式的结合路径,可直接传给 std.fs(由 File.readFrom 等
 // 读取)。symlink 攻击不在本函数职责范围内——若 root 内存在可写场景,部署侧应禁止用户
 // 创建 symlink。
-public func resolveWithinRoot(root: String, relPath: String): String {
+func resolveWithinRoot(root: String, relPath: String): String {
     let normRel = normalizeRelPath(relPath)
     let r = stripTrailingSep(root)
     if (normRel.isEmpty()) {
