@@ -108,10 +108,46 @@
   等访问器,而非 case JsonString(s) 直接 match",来日加 `JsonBigInt` 等分支时只
   破坏 match 用户。
 
+### Core 收缩(P0-J,Express 5 拆 csurf 同款模式)
+
+- **wen 仓改 cjpm workspace + wen-contrib 子包(Phase 1 / Phase 2)**:Express 4→5
+  把 `body-parser` / `cookie-parser` / `csurf` 移出 core 是因为安全策略变化频繁,
+  绑死 core 后小补丁要等框架 release。wen 在 1.0 锁定前一次性把"会随安全态势 /
+  行业惯例频繁迭代"的 7 个可选中间件拆到 `wen_contrib` 子包,core 收敛到协议
+  + 数据流必需的最小集。
+- **顶层目录结构改造**:
+    - `cjpm.toml` 改 `[workspace] members = ["wen-core", "wen-contrib"]`
+    - `wen-core/`(原 `src/` 整体搬过来)— 主框架 `package wen`
+    - `wen-contrib/` — 可选中间件 `package wen_contrib`,via path deps 引主包
+    - `demo/`(新)— 独立 executable 演示项目,deps wen + wen_contrib
+    - `examples/cjpm.toml` + `benchmark/cjpm.toml` 的 `wen` path 从 `../` 改 `../wen-core`
+- **wen_contrib 包含的 7 个中间件**:
+    - `helmet`(安全响应头)
+    - `csrf`(双提交 Cookie)
+    - `cors`(跨域)
+    - `basicAuth` / `bearerAuth`(认证)
+    - `logger`(请求日志)
+    - `requestId`(请求关联 ID)
+    - `methodOverride` / `methodOverrideField`(HTML 表单方法重写)
+- **wen 主包保留的中间件**:`cookieParser` / `jsonParser` / `urlencodedParser` /
+  `textParser` / `rawParser` / `multipart` / `staticFiles` / `session` / `etag`
+  — 这些是协议层 / 核心数据流必需,与 HTTP 框架本身的"分发 + 解析"职责直接绑定。
+- **wen_contrib 内 helper inline**:`mw_requestid` 内 inline 一份 `toHex64` —
+  避免把 `session.cj` 的私有 helper 提升到 wen 主包的 public API。
+- **wen 主包内 5 个 P0-F internal 函数恢复 public**(跨包依赖):`splitOnce` /
+  `base64Encode` / `base64Decode` / `constantTimeEquals` / `hmacSha256Hex`。其它 8 个
+  P0-F internal 函数继续 internal(`reasonPhrase` / `trimWs` / `listContains` /
+  `lastIndexOfDot` / `pathSegments` / `resolveWithinRoot` / `parseQuery` /
+  `parseInt` / `urlDecode`)。
+
 ### 破坏性变更
 
 > 1.0 锁定前最后窗口的破坏性收敛,2.0 前 1.x 仍向前兼容。
 
+- **`helmet` / `csrf` / `cors` / `basicAuth` / `bearerAuth` / `logger` / `requestId`
+  / `methodOverride` / `methodOverrideField` 不再从 `import wen.*` 直接可见**。
+  用户应用须新增 `wen_contrib` 依赖 + `import wen_contrib.*`。这是
+  `Express 4 + body-parser` → `Express 5 + 内置 / 拆 csurf` 的同款迁移模式。
 - `public let HttpResponse.headers` → `let headers`(同包可见)。用户代码若曾直接
   `res.headers["X-Y"] = "z"` 读写,需迁移到 `res.set("X-Y", "z")` / `res.get("X-Y")`
   / `res.append / res.has / res.remove`。新访问器全部 case-insensitive。
