@@ -520,6 +520,11 @@ public class Router {
                 try {
                     throw e
                 } catch (he: HttpException) {
+                    // 套上异常携带的响应头(P0-D):429 Retry-After / 401 WWW-Authenticate
+                    // / 405 Allow / 503 Retry-After 等场景的标准做法。
+                    for ((k, v) in he.headers) {
+                        res.set(k, v)
+                    }
                     res.status(he.status).send(he.message)
                 } catch (_: Exception) {
                     res.status(500).send("Internal Server Error")

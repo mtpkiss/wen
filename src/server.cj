@@ -281,11 +281,11 @@ public class HttpServer {
         } catch (he: HttpException) {
             // 仅在本条请求的响应头尚未写出时才回错误响应;否则保持沉默,让连接关闭。
             if (!responseStarted) {
-                writeError(client, he.status, he.message)
+                writeError(client, he.status, he.message, he.headers)
             }
         } catch (_: Exception) {
             if (!responseStarted) {
-                writeError(client, 500, "Internal Server Error")
+                writeError(client, 500, "Internal Server Error", HashMap<String, String>())
             }
         } finally {
             client.close()
@@ -311,10 +311,16 @@ public class HttpServer {
         return req.httpVersion.trimAscii().contains("1.1")
     }
 
-    func writeError(client: TcpSocket, code: Int64, message: String): Unit {
+    func writeError(client: TcpSocket, code: Int64, message: String, headers: HashMap<String, String>): Unit {
         try {
             let res = HttpResponse()
-            res.status(code).send(message)
+            res.status(code)
+            // P0-D:HttpException 携带的响应头(如 Retry-After / WWW-Authenticate /
+            // Allow)在底层写错误时也要套上。普通 catch(_)路径传空 map 即可。
+            for ((k, v) in headers) {
+                res.set(k, v)
+            }
+            res.send(message)
             client.write(serializeResponse(res))
         } catch (_: Exception) {
             ()
