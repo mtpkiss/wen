@@ -1,3 +1,8 @@
+---
+title: API 参考
+nav_order: 4
+---
+
 # API 参考
 
 简明 API 速览。所有核心类型都在 `wen` 包内,`import wen.*` 即可。

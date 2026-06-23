@@ -1,4 +1,16 @@
 title: Wen
 description: 仓颉(Cangjie)Express 风格 Web 框架 — 纯标准库、零第三方依赖
-theme: jekyll-theme-cayman
-show_downloads: false
+
+remote_theme: just-the-docs/just-the-docs
+plugins:
+  - jekyll-remote-theme
+
+color_scheme: light
+search_enabled: true
+heading_anchors: true
+
+aux_links:
+  "GitHub 仓库":
+    - "https://github.com/mtpkiss/wen"
+
+aux_links_new_tab: true

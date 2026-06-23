@@ -1,5 +1,6 @@
 ---
-title: Wen 文档
+title: 首页
+nav_order: 1
 description: 仓颉(Cangjie)Express 风格 Web 框架 — 官方文档
 ---
 
