@@ -2,9 +2,135 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [Unreleased] - 1.0 锁定就绪
 
-(尚无未发布的改动)
+定位为「1.0 锁定前最后一个安全 / API 表面收敛版本」。本批基于四轮深度审查
+(round1 50 项 / round2 / round3 复核 / 白盒测试 / 1.0 架构治理)系统落地
+**Top 5 安全修复** + **10 项 P0 锁定项**;无可远程触发的崩溃 / 数据损坏。
+**包含若干破坏性变更**,详见下方"破坏性"段。
+
+### 安全 / 协议级修复
+
+- **chunked trailer drain — 堵 RFC 7230 §4.1.2 走私通道(P1-A / round3 P1-12)**:
+  之前 `size=0` 终止块后只消费一个 CRLF。若客户端发了 trailer 字段
+  (`name: value\r\n`...`\r\n\r\n`),wen 把 trailer 字节留在 buf,被下次 readMessage
+  当作下一个请求的开头解析,与上游代理对"哪几个字节属于上一个请求"的解读分歧 —
+  构成请求走私通道。修复:size=0 后循环读取行直到看到空行;trailer 字段不解析
+  但必须 drain 干净;trailer 累计字节有 `maxHeaderBytes` 上限防 DoS。同时修白盒
+  报告 G1(trailer 读到一半 EOF 时旧实现返 `Some(残缺帧)`,现在返 `None`)。
+- **拒绝多个 `Content-Type` 头,堵类型混淆(P1-D)**:RFC 7231 §3.1.1.5 明确
+  Content-Type 必须是单值;wen 之前沿用 RFC 7230 的同名头合并规则,会把
+  `application/json` + `image/png` 合并成 `application/json, image/png` —
+  `decodeBodyTextIfApplicable` 用 `startsWith` 仍命中 `application/json`,把 PNG
+  二进制当 UTF-8 解码进 `req.body`,业务据此判定"是 JSON"实际是 PNG。修复:头部
+  合并入口检测,出现第二次 Content-Type 直接 400。
+- **form / multipart 跳过 framework-reserved attribute 键(P1-B / round3 P1-10)**:
+  framework 内置中间件用 `req.attributes` 存内部状态(`authUser` / `csrfToken` /
+  `originalMethod` / `requestId` / `text`)。urlencoded form 解析直接
+  `parseQuery(body, attributes)`,multipart 文本字段直接 `attributes[name] = value`
+  — 攻击者 POST `authUser=admin` 即可覆盖框架内部状态,下游若用 `req.attribute("authUser")`
+  判定身份即被绕过。修复:新增 `isFrameworkReservedAttribute(key)` 判定保留键,form
+  / multipart 解析路径跳过这些键;`setAttribute` 显式 API 不在拦截范围(信任边界
+  由调用方承担)。
+
+### 1.0 锁定准备(P0 系列)
+
+> 这些改动旨在把 1.0 后 SemVer 锁定前的「API 表面、状态机契约、扩展点」收齐,
+> 避免一两年后再用 major 版本翻新。多数为**接续 round2/3/工程评审**报告点出的
+> 设计取舍最后窗口。
+
+- **`Application.legacyCookieSecrets: Array<String>` 支持密钥在线轮换(P0-A)**:
+  `cookieSecret: String` 单值锁住后无法在线轮换 — 改密钥即作废所有已签发 cookie
+  / session。新增 `legacyCookieSecrets` 仅作验签 fallback;`cookieSecret` 仍是
+  签发主密钥,不破坏现有 API。`verifySignedCookie` 先尝试主密钥,失败再依次试
+  legacy 列表 — 任一匹配即视为有效。部署流程:`cookieSecret = "new",
+  legacyCookieSecrets = ["old"]` → 等持旧 cookie 客户端续期 / 过期被切到 new →
+  清空 legacy 完成轮换。对应 Express `cookie-parser(['new','old'])` 同款语义。
+  session sid cookie 走同一验签路径,自动受益。
+- **`HttpResponse.headers` 改 case-insensitive 访问器(P0-B / round2 P2-2 / round3 P2-7)**:
+  之前 `public let headers: HashMap<String, String>` case-sensitive,会让
+  `res.set("X-Foo","a") + res.append("x-foo","b")` 输出两行同名头。改用 dual map
+  设计:`headers` 按用户提供的原始大小写存(输出保留惯例如 `Content-Type` /
+  `WWW-Authenticate` / `ETag`),`headersLookup` (lowercase → 原始 key) 做去重索引。
+  公开 `set / get / append / has / remove` 全部 case-insensitive;字段降级为同包
+  可见。framework 内部 18 处 `res.headers[k] = v` 已统一迁移到 `set()`。
+- **`HttpException` 加 `headers: HashMap<String, String>` 字段 + 兜底套头(P0-D)**:
+  典型场景 `429 + Retry-After: 60` / `401 + WWW-Authenticate` / `405 + Allow` /
+  `503 + Retry-After`。1.0 前预留字段免得未来加破坏 SemVer。兜底:router 默认
+  `onError` 把 `he.headers` 套到 res 上;server.handleConnection 的 writeError
+  同样把 he.headers 套上。既有 `HttpException(status, msg)` 构造仍可用,默认
+  headers 为空 map;子类(`PayloadTooLargeException` / `BadRequestException`)签名
+  不变。
+- **`SessionStore.touch` 默认实现 + Session.dirty flag(P0-E / round2 P2-7)**:
+  接口加 `touch(id)` **带默认实现**(转调 load + save) — 不破坏既有自定义存储。
+  Redis 等高级实现可重写为单条 EXPIRE。session 中间件根据 `Session.dirty` 决定
+  `save vs touch`:`set`/`remove` 置 dirty,`regenerate` 也置 dirty。无脏请求只
+  touch 不重写整张 hash,顺手修 round2 P2-7 写放大。
+- **HttpServer 4 个服务器配置字段去 public(P0-L)**:`maxBodySize` / `readTimeoutMs`
+  / `maxConnections` / `maxHeaderBytes` 之前在 `Application` 和 `HttpServer` 各有
+  一份,用户不知道"哪个才是真生效的值"。降为同包可见,用户配置统一走
+  `app.xxx`;HttpServer 是内部 detail。极少数直接 `HttpServer(app)` 构造 + 改字段
+  的用户代码需迁移。
+- **13 个内部工具函数去 public(P0-F)**:`reasonPhrase` / `splitOnce` / `trimWs`
+  / `listContains` / `base64Encode` / `base64Decode` / `lastIndexOfDot` /
+  `pathSegments` / `resolveWithinRoot` (util.cj) + `parseQuery` / `parseInt` /
+  `urlDecode` (server.cj) + `hmacSha256Hex` (crypto_hmac.cj) — 之前公开但都是包内
+  辅助。1.0 锁定后任何签名变化都是 SemVer 破坏,提前缩 API 表面避免永久 freeze
+  错误抽象。同包代码(framework + 测试)不受影响。
+
+### 性能
+
+- **ConnReader 改 readStart 指针 + 阈值化 compact(#42 / 工程评审 §1.4)**:之前
+  `dropFront` 每条 keep-alive 请求都把剩余字节整段拷回 ArrayList 头部 — O(n)/请求,
+  长 pipeline 退化为 O(n²)。改用 `readStart` 指针推进(O(1))+ 累计废字节 ≥
+  `maxHeaderBytes` 时一次性物理 compact,摊销 O(1)/请求。配套 `headerSeparatorIndex`
+  / `findCRLF` / `sliceList` / `dropFront` 收编为 ConnReader 方法,统一按"逻辑下标
+  0 = readStart"工作;`readChunked` 用 `byteAt(i)` 抽象不再直接触碰物理偏移。
+- **`hexVal` / `isHexByte` 集中到 util.cj(#45)**:与已有 `b64Val` 并列,作为包内
+  字节级 hex 工具的单一来源(`json.cj` readHex4 原本就是同包引用,无需改动调用点)。
+
+### 文档化的契约(1.0 锁定但无代码变化)
+
+- **`Application.handle` 显式契约"req 不可复用"(P0-H 替代改名 / round3 P3-原P1-3)**:
+  每对 `(req, res)` 只能 handle 一次。原因:`req.bodyParsed` / `req.cookiesParsed`
+  是一次性闸门;`req.res` 互相引用,二次调用篡改前一次链;`res.finished` /
+  `headersSent` / `hijacked` 是单调标志位。测试场景每条用例都要 new 一对,不要复用。
+  改名 `handle → inject` 涉及 157 处调用,价值低(纯 cosmetic),用文档化替代。
+- **Middleware 同步执行契约 + 1.x async 演进路径(P0-K)**:1.0 锁定前明确
+  Middleware 是同步的(返回前视为"未完成",next() 必须显式调);仓颉协程模型
+  未成熟前无 async/await 等价,重 IO 建议中间件内自己 spawn。1.x 内**可**平行加
+  `AsyncMiddleware` 别名;**不会**把 Middleware 改名为 SyncMiddleware(避免 import
+  大改)。避免 Koa 1→2 的破坏式迁移重演。
+- **`JsonValue` enum 1.0 锁定语言限制说明(P0-G 撤回)**:原计划 enum 限 internal
+  只暴露访问器 / 工厂,但 `public type ViewEngine = (String, JsonValue) -> String`
+  等公开类型契约要求用户必须持有 JsonValue;仓颉 enum 公开则分支必公开,语言层面
+  无法既保 public 又隐藏分支。退路:文档化"用户应优先用 asString/asInt/get/at/keys
+  等访问器,而非 case JsonString(s) 直接 match",来日加 `JsonBigInt` 等分支时只
+  破坏 match 用户。
+
+### 破坏性变更
+
+> 1.0 锁定前最后窗口的破坏性收敛,2.0 前 1.x 仍向前兼容。
+
+- `public let HttpResponse.headers` → `let headers`(同包可见)。用户代码若曾直接
+  `res.headers["X-Y"] = "z"` 读写,需迁移到 `res.set("X-Y", "z")` / `res.get("X-Y")`
+  / `res.append / res.has / res.remove`。新访问器全部 case-insensitive。
+- `public var HttpServer.maxBodySize` / `readTimeoutMs` / `maxConnections` /
+  `maxHeaderBytes` → 同包可见 `var`。直接 `HttpServer(app).maxBodySize = ...` 的极少数
+  高级用户需改走 `app.maxBodySize = ...`(Application 主路径)。
+- `public func reasonPhrase` / `splitOnce` / `trimWs` / `listContains` /
+  `base64Encode` / `base64Decode` / `lastIndexOfDot` / `pathSegments` /
+  `resolveWithinRoot` / `parseQuery` / `parseInt` / `urlDecode` / `hmacSha256Hex`
+  改 internal。若用户曾直接调用任一函数,1.0 升级时需自己实现等价物。
+- `SessionStore` 接口加 `touch(id)` 方法 — 提供默认实现,既有自定义存储零变化即可
+  工作(默认转调 load + save);Redis / DB 实现可重写为单条 EXPIRE 提速。
+
+### 已修但不在本批次的关联缺陷
+
+(详见上一批 commit `7d0aef4` "批量修复请求走私 / 并发 / 状态机审查问题":round1 50
+项缺陷 25 项修复 + 复核)
+
+
 
 ## [0.3.0] - 2026-06-17
 
