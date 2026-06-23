@@ -2,16 +2,26 @@
 
 ## 安装
 
-Wen 是一个 cjpm 库,在你的模块 `cjpm.toml` 中加入 git 依赖:
+Wen 0.4.0 起拆为 cjpm **workspace** 两个子包:
+
+- **`wen`**(core,必装)— 路由 / 请求响应 / 解析 / 流式 / 文件 / 会话 / ETag。
+- **`wen_contrib`**(可选)— `logger` / `helmet` / `csrf` / `cors` / `basicAuth` /
+  `bearerAuth` / `requestId` / `methodOverride` / `methodOverrideField`。
+
+在你的模块 `cjpm.toml` 中加入 git 依赖:
 
 ```toml
 [dependencies]
-  wen = { git = "https://github.com/mtpkiss/wen.git", branch = "main" }
+  # 必装:core
+  wen = { git = "https://github.com/mtpkiss/wen.git", branch = "main", path = "wen-core" }
+
+  # 可选:contrib(只有用到上述中间件才装)
+  wen_contrib = { git = "https://github.com/mtpkiss/wen.git", branch = "main", path = "wen-contrib" }
 ```
 
 > 需要 Cangjie 编译器 **cjc 1.1.3 及以上**。Wen 本身**零第三方依赖**(仅用标准库 `std`)。
 
-## 第一个应用
+## 第一个应用(纯 core)
 
 ```cangjie
 package demo
@@ -20,8 +30,6 @@ import wen.*
 
 main(): Int64 {
     let app = wen()
-
-    app.use(logger())
 
     app.get("/", { _: HttpRequest, res: HttpResponse =>
         res.send("Hello from Wen!")
@@ -55,14 +63,19 @@ cjpm run     # 若你的模块 output-type = "executable"
 - **路由**:支持 `:param`、可选 `:param?`、正则约束 `:param(\d+)`、通配 `*`,以及一条路径
   挂多个处理器 `app.get(path, [mw1, mw2])`。
 
-## 一个更完整的例子
+## 一个更完整的例子(用到 wen_contrib)
 
 ```cangjie
+package demo
+
+import wen.*
+import wen_contrib.*   // helmet / cors / logger 在此包
+
 let app = wen()
 
-app.use(etag())                        // 动态 ETag + 条件 GET
-app.use(helmet())                      // 安全响应头
-app.use(cors())
+app.use(etag())                        // [wen] 动态 ETag + 条件 GET
+app.use(helmet())                      // [wen_contrib] 安全响应头
+app.use(cors())                        // [wen_contrib]
 // JSON / 表单 / multipart / Cookie 解析已内置:req.json()/attribute()/file()/cookie() 首次访问即自动解析,无需注册
 
 app.param("id", { req, _, value =>

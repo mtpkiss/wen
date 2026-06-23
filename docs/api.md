@@ -1,6 +1,9 @@
 # API 参考
 
-简明 API 速览。所有类型都在 `wen` 包内,`import wen.*` 即可。
+简明 API 速览。所有核心类型都在 `wen` 包内,`import wen.*` 即可。
+**0.4.0 起**:`helmet` / `csrf` / `cors` / `basicAuth` / `bearerAuth` / `logger`
+/ `requestId` / `methodOverride` / `methodOverrideField` 等可选中间件在
+`wen_contrib` 子包,使用前 `import wen_contrib.*`,详见 [中间件参考](./middleware.md)。
 
 ## 函数类型
 
@@ -57,7 +60,7 @@
 - `cookie(name): ?String` / `signedCookie(name): ?String`
 - `json(): ?JsonValue` —— 自动解析 `application/json` 请求体(无需中间件)
 - `file(name): ?UploadedFile` —— 自动解析 `multipart/form-data`(无需中间件)
-- `requestId(): ?String`
+- `requestId(): ?String` — 仅在用 `wen_contrib.requestId()` 中间件后有值
 - `setting(key): ?String`
 - `hostname(): ?String` / `isType(t): Bool`
 - `accepts(t): Bool` / `accepts(types: Array<String>): ?String`(带 q 值最佳匹配)

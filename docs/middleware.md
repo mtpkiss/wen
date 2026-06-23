@@ -4,9 +4,21 @@
 路由或路径前缀上。建议的注册顺序:ETag / 安全头 / 认证 / 方法重写 / CSRF 等「横切关注点」
 靠前,业务路由靠后。
 
+## 包归属(0.4.0 起)
+
+wen 拆为 cjpm workspace 两个子包,中间件按"协议层/数据流必需 vs 随安全策略迭代"分配:
+
+| 包 | 中间件 |
+|---|---|
+| **`wen`** (core,`import wen.*`) | `etag` · `multipart` · `session` · `staticFiles`;以及内置的请求体 / Cookie 解析 |
+| **`wen_contrib`** (可选,`import wen_contrib.*`) | `logger` · `requestId` · `cors` · `helmet` · `basicAuth` · `bearerAuth` · `csrf` · `methodOverride` · `methodOverrideField` |
+
+> 下面每节标题后用 **[wen_contrib]** 或 **[wen]** 标注归属。1.0 锁定方案,Express 5
+> 把 `csurf` 移出 core 的同款迁移模式。
+
 ---
 
-## logger() / logger(format)
+## logger() / logger(format) **[wen_contrib]**
 
 每个请求**完成后**打一行,默认 `METHOD path status durationMs`。需要别的字段或上色时,
 传入 `format` 函数(拿到 `req`、`res`、处理耗时毫秒,返回整行)自行排版——核心不为每个
@@ -20,7 +32,7 @@ app.use(logger())
 app.use(logger({ req, res, ms => "${req.method} ${req.path} ${res.statusCode} ${ms}ms ip=${req.clientIp()}" }))
 ```
 
-## requestId(headerName! = "X-Request-Id")
+## requestId(headerName! = "X-Request-Id") **[wen_contrib]**
 
 为每个请求关联一个 ID:请求已带该头则沿用,否则生成随机 ID;写回响应头,`req.requestId()` 读取。
 
@@ -29,7 +41,7 @@ app.use(requestId())
 app.get("/", { req, res => res.send(req.requestId() ?? "") })
 ```
 
-## cors() / cors(origin)
+## cors() / cors(origin) **[wen_contrib]**
 
 加 `Access-Control-Allow-*` 头;`OPTIONS` 预检直接以 204 应答,不再下传。
 
@@ -38,7 +50,7 @@ app.use(cors())              // 允许任意来源
 app.use(cors("https://a.com"))
 ```
 
-## helmet(csp!, hsts!, hstsMaxAge!, hstsIncludeSubDomains!, hstsPreload!, frameOptions!, referrerPolicy!, noSniff!, coop!, corp!)
+## helmet(csp!, hsts!, hstsMaxAge!, hstsIncludeSubDomains!, hstsPreload!, frameOptions!, referrerPolicy!, noSniff!, coop!, corp!) **[wen_contrib]**
 
 批量下发安全响应头。设计取向:**默认只发部署无关、且不会误伤业务的头**;策略性强、易因
 部署 / 内容打挂页面的头改为 opt-in(显式传值才发)。
@@ -75,7 +87,7 @@ app.use(helmet(csp: "default-src 'self'", coop: "same-origin", corp: "same-origi
 
 任何字符串参数传空串、或把布尔设为 `false`,均表示「不发送该头」。
 
-## etag()
+## etag() **[wen]**
 
 为 200 的 GET/HEAD 动态响应(`send/json/sendBytes`)按内容算 `ETag`;`If-None-Match` 命中
 则回 304。已带 ETag(文件响应)或已带 `Content-Encoding`(如被边缘压缩)则跳过。
@@ -84,7 +96,7 @@ app.use(helmet(csp: "default-src 'self'", coop: "same-origin", corp: "same-origi
 app.use(etag())
 ```
 
-## basicAuth(verify, realm!) / bearerAuth(verify, realm!)
+## basicAuth(verify, realm!) / bearerAuth(verify, realm!) **[wen_contrib]**
 
 HTTP Basic / Bearer 认证。校验回调返回 `Bool`;失败回 401 + `WWW-Authenticate`。Basic 成功后
 把用户名存入 `req.attribute("authUser")`。
@@ -131,7 +143,7 @@ app.get("/c", { req, res => res.send(req.cookie("sid") ?? "anon") })   // Cookie
 > `multipart(...)` 见下一节(配额与过滤)。`textParser()` / `rawParser()` 处理非默认
 > 类型(纯文本 / 原始字节),仍需显式注册。
 
-## multipart(maxFileSize!, maxFiles!, maxFields!, fileFilter!)
+## multipart(maxFileSize!, maxFiles!, maxFields!, fileFilter!) **[wen]**
 
 文件上传的**配额与过滤**。multipart 解析本身是内置的(`req.file(name)` 首次访问即触发);
 本中间件的作用是给这次解析施加上限,以及白名单过滤。
@@ -168,7 +180,7 @@ app.post("/upload", { req, res =>
 > fileFilter 拒绝是业务策略,**静默丢弃**——handler 仍会执行,只是被拒文件不会进 `req.files`。
 > 这与 multer 的语义一致。
 
-## session(store?)
+## session(store?) **[wen]**
 
 会话:用签名的 `sid` Cookie 关联服务端会话数据。设置 `app.cookieSecret` 即可(Cookie 解析已内置)。
 默认 `MemorySessionStore`(线程安全),可实现 `SessionStore` 接入外部存储。
@@ -190,7 +202,7 @@ app.get("/counter", { req, res =>
 })
 ```
 
-## methodOverride(headerName! = "X-HTTP-Method-Override") / methodOverrideField(field! = "_method")
+## methodOverride(headerName! = "X-HTTP-Method-Override") / methodOverrideField(field! = "_method") **[wen_contrib]**
 
 让 HTML 表单(只能发 GET / POST)借助一个请求头、隐藏字段或查询串把方法改写为
 `PUT` / `DELETE` / `PATCH`,从而复用同一套 RESTful 路由。
@@ -214,7 +226,7 @@ app.delete("/items/:id", { req, res =>
 })
 ```
 
-## csrf(cookieName!, field!, signed!, httpOnly!, secure!, sameSite!)
+## csrf(cookieName!, field!, signed!, httpOnly!, secure!, sameSite!) **[wen_contrib]**
 
 对应 Express 生态的 csurf,采用**签名双提交 Cookie**。服务端为浏览器签发一个随机 token,
 经 HMAC 签名的 Cookie(默认 `_csrf`,`HttpOnly` + `SameSite=Lax`)下发;对**非安全方法**
@@ -239,7 +251,7 @@ app.get("/form", { req, res =>
 app.post("/save", { _, res => res.send("saved") })   // 校验通过才会到这里
 ```
 
-## staticFiles(root, index!, maxAge!, dotfiles!, etag!, lastModified!, immutable!, setHeaders!, redirect!)
+## staticFiles(root, index!, maxAge!, dotfiles!, etag!, lastModified!, immutable!, setHeaders!, redirect!) **[wen]**
 
 从 `root` 目录服务静态文件(GET/HEAD),**二进制安全**,自动带 `ETag` / `Last-Modified` /
 `Range`,支持条件 GET(304)和分片下载(206 / 416)。

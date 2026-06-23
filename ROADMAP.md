@@ -1,11 +1,26 @@
 # wen 路线图(对标 Express.js)
 
-> 更新于 2026-06-15。基于源码逐项核对(`cjpm test` 233/233 全绿)。
+> 更新于 2026-06-23(0.4.0 批次)。`cjpm test` 291/291 全绿。
 > 图例:✅ 已实现 · ⚠️ 部分(底层已具备但未暴露 Express 风格 API)· ❌ 未实现
 >
 > 粗估:核心 HTTP API 已覆盖 Express 4.x 常用面 **约 85%**。路由 / 中间件 / 请求 /
 > 响应 / 会话 / 视图 / 流式均较完整,缺口集中在内容协商细分、请求级缓存与 Range 助手,
 > 以及 HTTPS / WebSocket 等传输层能力。
+
+## 0.4.0 — 1.0 锁定就绪批次(2026-06-23)
+
+四轮深度审查后系统落地的 1.0 锁定批次。完整说明见 [CHANGELOG](./CHANGELOG.md) Unreleased。
+
+- **协议层走私修复**:trailer drain(P1-A)、Content-Type 多值检测(P1-D)、
+  form/multipart 跳过 framework-reserved 键(P1-B)
+- **1.0 API 锁定**:cookieSecret 在线轮换(P0-A)、HttpResponse.headers case-insensitive(P0-B)、
+  HttpException + headers(P0-D)、SessionStore.touch + dirty(P0-E)、
+  HttpServer 字段 internal(P0-L)、13 个工具函数 internal(P0-F)、
+  Middleware 同步契约文档化(P0-K)
+- **Core 收缩**:wen 改 cjpm workspace,7 个可选中间件(helmet / csrf / cors /
+  basicAuth / bearerAuth / logger / requestId / methodOverride)拆到 `wen_contrib`
+  子包;core 仅留 etag / multipart / session / staticFiles + 内置解析。
+- **性能**:ConnReader readStart 指针(摊销 O(1) 取代 O(n²))、hexVal 集中
 
 ---
 
