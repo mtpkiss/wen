@@ -655,13 +655,14 @@ public class HttpRequest {
     }
 
     // 验签单个 Cookie 原始值:无密钥 / 形态不对 / HMAC 不一致都返回 None。
+    // 主密钥失败后会依次尝试 app.legacyCookieSecrets(密钥轮换期重叠认证)。
     private func verifySignedCookie(raw: String): ?String {
-        let secret = match (this.app) {
-            case Some(a) => a.cookieSecret
+        let app = match (this.app) {
+            case Some(a) => a
             case None => return None
         }
-        warnIfWeakCookieSecret(this.app, secret)
-        if (secret.isEmpty()) {
+        warnIfWeakCookieSecret(this.app, app.cookieSecret)
+        if (app.cookieSecret.isEmpty()) {
             return None
         }
         // 以最后一个 "." 分隔出 value 与签名(value 自身可包含 ".")。
@@ -671,8 +672,19 @@ public class HttpRequest {
         }
         let value = raw[0..idx]
         let sig = raw[(idx + 1)..raw.size]
-        if (constantTimeEquals(sig, hmacSha256Hex(secret, value))) {
+        // 先用主密钥验签。
+        if (constantTimeEquals(sig, hmacSha256Hex(app.cookieSecret, value))) {
             return Some(value)
+        }
+        // 主密钥失败 → 依次尝试 legacy 密钥列表。任何一个匹配即视为有效。
+        // 这是密钥在线轮换的关键路径:旧 cookie 持续被接受直到 legacy 清空。
+        for (legacy in app.legacyCookieSecrets) {
+            if (legacy.isEmpty()) {
+                continue
+            }
+            if (constantTimeEquals(sig, hmacSha256Hex(legacy, value))) {
+                return Some(value)
+            }
         }
         return None
     }

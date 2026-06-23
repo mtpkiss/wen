@@ -72,10 +72,22 @@ public class Application {
     // 仅当应用确实部署在可信代理(如 Nginx)之后才开启,否则客户端可伪造这些头。
     public var trustProxy: Bool = false
 
-    // 签名 Cookie / session 所用的 HMAC 密钥。设为非空后,res.cookie(..., signed: true)
+    // 签名 Cookie / session 所用的 HMAC 主密钥。设为非空后,res.cookie(..., signed: true)
     // 会对值签名、req.signedCookie 会验签;session() 中间件也依赖它来保护 sid。
     // 生产环境请设为足够随机的长字符串,且妥善保管、不要硬编码进版本库。
+    //
+    // **新签发**始终用本主密钥;**验签**先用主密钥,失败再依次尝试 legacyCookieSecrets。
     public var cookieSecret: String = ""
+
+    // 密钥轮换期间的"旧密钥列表"。验签时,主 cookieSecret 失败后会依次尝试这里的每个
+    // 密钥;一旦匹配即视为有效。新签发(res.cookie / sid 续期)始终用主密钥,确保下次
+    // 请求即被切换到新密钥。典型流程:
+    //   1. 现有部署:cookieSecret = "old"
+    //   2. 升级:cookieSecret = "new",legacyCookieSecrets = ["old"]
+    //   3. 等所有持有旧 cookie 的客户端在过期 / 续期后被切换到 new
+    //   4. 清空 legacyCookieSecrets,完成轮换
+    // 对应 Express cookie-parser(['new', 'old']) 的语义,但分离主签发与 fallback。
+    public var legacyCookieSecrets: Array<String> = Array<String>()
 
     // 已注册的视图引擎表:键为扩展名(不含点,如 "html"),值为对应的渲染引擎。
     // 经 app.engine(ext, fn) 注册;res.render 时按模板扩展名在此查找,未注册即抛异常。
