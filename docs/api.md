@@ -38,8 +38,13 @@ nav_order: 4
 - `set(key, value)` / `setting(key): ?String`
 - `enable/disable(key)` / `enabled/disabled(key): Bool`
 - `locals: HashMap<String, Any>` / `setLocal(key, value)` / `local(key): ?Any`
-- 字段:`trustProxy: Bool`、`cookieSecret: String`、`maxBodySize: Int64`、
-  `readTimeoutMs: Int64`、`maxConnections: Int64`
+- 字段:`trustProxy: Bool`、`cookieSecret: String`、`legacyCookieSecrets: Array<String>`、
+  `maxBodySize: Int64`、`readTimeoutMs: Int64`、`maxConnections: Int64`
+
+> `cookieSecret` 是当前**签发主密钥**;`legacyCookieSecrets` 仅作**验签 fallback**,
+> 用于密钥在线轮换。部署流程:`cookieSecret = "new", legacyCookieSecrets = ["old"]` →
+> 等持旧 cookie 客户端续期 / 过期被切到 new → 清空 legacy 完成轮换。session sid
+> cookie 走同一验签路径,自动受益。对应 Express `cookie-parser(['new','old'])`。
 
 ### 派发与启动
 
@@ -62,13 +67,19 @@ nav_order: 4
 - `param(name): ?String` / `queryParam(name): ?String`
 - `setAttribute(k, v)` / `attribute(k): ?String`
 - `setLocal(k, v)` / `local(k): ?Any`
-- `cookie(name): ?String` / `signedCookie(name): ?String`
+- `cookie(name): ?String` / `signedCookie(name): ?String` / `signedCookies(): HashMap<String, String>`
 - `json(): ?JsonValue` —— 自动解析 `application/json` 请求体(无需中间件)
 - `file(name): ?UploadedFile` —— 自动解析 `multipart/form-data`(无需中间件)
 - `requestId(): ?String` — 仅在用 `wen_contrib.requestId()` 中间件后有值
 - `setting(key): ?String`
 - `hostname(): ?String` / `isType(t): Bool`
 - `accepts(t): Bool` / `accepts(types: Array<String>): ?String`(带 q 值最佳匹配)
+- `acceptsCharsets / acceptsEncodings / acceptsLanguages` —— 各两个重载:
+  `(Array<String>): ?String` 按 q 值返回最佳匹配,`(String): Bool` 判定单值是否可接受
+- `fresh(): Bool` / `stale(): Bool` —— 条件请求新鲜度:GET/HEAD 配合响应的 `ETag` /
+  `Last-Modified` 与请求的 `If-None-Match` / `If-Modified-Since` 校验,可用于回 304
+- `range(size: Int64): RangeRequest` —— 解析 `Range` 头;返回 enum
+  `Satisfiable(Array<ByteRange>) | Unsatisfiable | Malformed | NoRange`(`ByteRange { start, end }`)
 - 代理感知(配合 `app.trustProxy`):`protocol(): String`、`secure(): Bool`、
   `ips(): ArrayList<String>`、`clientIp(): String`、`subdomains(): ArrayList<String>`、`xhr(): Bool`
 - `nextRoute()` —— 跳过当前路由的剩余处理器(等价 `next("route")`)
@@ -97,19 +108,57 @@ nav_order: 4
 - `format([(type, () -> Unit)...])` —— 内容协商
 - `stream((StreamWriter) -> Unit)` / `sse((SseWriter) -> Unit)`
 
+### 字段
+
+- `statusCode: Int64`、`body: String`
+- `charset: String` —— 独立于 MIME 的字符集,序列化前自动并入 `Content-Type`
+- `headers: HashMap<String, String>` —— **case-insensitive** 访问(0.4.0 起);
+  通过 `set / get / append / has / remove` 操作,大小写惯例(`Content-Type` / `ETag` /
+  `WWW-Authenticate`)保留为输出 key
+- `headersSent: Bool`、`finished: Bool`、`locals: HashMap<String, Any>`
+- `suppressBody: Bool` —— HEAD 请求自动置 true,框架在序列化时省略响应体
+
+## 异常类型
+
+- `HttpException(status: Int64, message: String)` /
+  `HttpException(status, message, headers: HashMap<String, String>)` —— 抛出后框架据
+  `status` 回状态码、`message` 作响应体、`headers` 自动套到响应头。典型用法:
+
+  ```cangjie
+  let h = HashMap<String, String>(); h["Retry-After"] = "60"
+  throw HttpException(429, "rate limited", h)   // → 429 + Retry-After: 60
+  ```
+
+  `401 + WWW-Authenticate`、`405 + Allow`、`503 + Retry-After` 同理。`open class`,可继承
+  自定义子类。
+- `PayloadTooLargeException <: HttpException` —— 请求体或上传超 `app.maxBodySize` /
+  `multipart` 配额时抛(默认 413)
+- `BadRequestException <: HttpException` —— 协议解析错误(默认 400)
+- `JsonException <: Exception` —— `parseJson` 解析失败
+- `IllegalStateException <: Exception` —— 非法 API 顺序(如对同一对 `(req, res)` 重复调用 `app.handle`)
+
 ## JSON
 
 - `JsonValue` 枚举:`asString/asBool/asInt/asFloat(): ?T`、`isNull()`、`get(key)`、`at(i)`、
   `size()`、`keys()`、`toJsonString()`
 - `JsonObj`:链式 `.put(key, value).build()`(`value` 可为 `String/Int64/Float64/Bool/JsonValue`)
-- 顶层:`parseJson(text): JsonValue`、`jsonOf(...)`、`jsonArray(items)`
+- 顶层:`parseJson(text): JsonValue`(失败抛 `JsonException`)、`jsonOf(...)`、
+  `jsonArray(items)`、`jsonNull(): JsonValue`
 
 ## 其它公开类型 / 工具
 
-- `Router`、`Route`、`UploadedFile`、`Session`、`SessionStore`、`MemorySessionStore`、
-  `StreamWriter`、`SseWriter`
-- 工具:`hmacSha256Hex(key, msg)`、`base64Encode/Decode`、
-  `parseJson`、`parseQuery`、`urlDecode`、`contentTypeFor`、`reasonPhrase`
+- **类型**:`Router`、`Route`、`UploadedFile`、`Session`、`SessionStore`、`MemorySessionStore`、
+  `StreamWriter`、`SseWriter`、`ResponseConnection`(扩展点 interface)、
+  `HttpMethod`(常量类:`GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS/ALL`)、
+  `MultipartOptions`(`multipart(...)` 配额结构,详见 [中间件参考](./middleware.md#multipartmaxfilesize-maxfiles-maxfields-filefilter-wen))、
+  `ByteRange { start, end }`、`RangeRequest` enum
+- **加密 / 安全**:`hmacSha256Hex(key, msg)`、`constantTimeEquals(a, b)`(防时序侧信道)、
+  `secureRandomBytes(n): Array<UInt8>`、`secureRandomHex(n): String`(CSPRNG;
+  自定义 session id / token 等用此,不要用 `std.random.Random`)
+- **编码 / 解析**:`base64Encode/Decode`、`parseJson`、`parseQuery`、`urlDecode`
+- **MIME**:`contentTypeFor(value): String`、`registerMimeType(ext, mimeType): Unit`
+  —— 注册自定义扩展名 → MIME 映射,被 `staticFiles` / `res.contentType` 等使用
+- **HTTP 工具**:`reasonPhrase(status): String`
 
-> 这两处实现(JSON / HMAC-SHA256)均为零依赖自写,封装在单文件「替换缝」内,日后可
+> JSON / HMAC-SHA256 / 安全随机数均为零依赖自写,封装在单文件「替换缝」内,日后可
 > 整体切换到官方 `stdx`。压缩(gzip)与 TLS 不自写,交给 nginx 等边缘。

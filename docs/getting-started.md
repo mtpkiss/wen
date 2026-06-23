@@ -100,10 +100,11 @@ app.post("/echo", { req, res =>
 })
 
 app.use({ e: Exception, _: HttpRequest, res: HttpResponse, _: Next =>
-    res.status(500).json("{\"error\":\"${e.message}\"}")
+    res.status(500).json(JsonObj().put("error", e.message).build())
 })
 
 app.listen(8080)
 ```
 
-更多见:[中间件参考](./middleware.md) · [API 参考](./api.md) · [README](../README.md) 的「完整示例」。
+更多见:[中间件参考](./middleware.md) · [API 参考](./api.md) ·
+[README](https://github.com/mtpkiss/wen#完整示例) 的「完整示例」。
