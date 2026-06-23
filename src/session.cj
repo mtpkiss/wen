@@ -31,6 +31,11 @@ public class Session {
     public var isNew: Bool
     // regenerate() 标记:由中间件在 next() 返回后处理。
     var regenerateRequested: Bool = false
+    // P0-E:dirty 标志位 — set/remove 置 true。中间件结束时:
+    //   - dirty=true → store.save(id, values)(写整张 hash)
+    //   - dirty=false → store.touch(id)(仅刷新 lastAccess)
+    // 修 round2 P2-7 的"每请求无脑 save"写放大。
+    var dirty: Bool = false
 
     init(id: String, values: HashMap<String, String>, isNew: Bool) {
         this.id = id
@@ -46,11 +51,13 @@ public class Session {
     // 写入/覆盖会话中某个键的值。
     public func set(key: String, value: String): Unit {
         values[key] = value
+        this.dirty = true
     }
 
     // 删除会话中某个键。
     public func remove(key: String): Unit {
         values.remove(key)
+        this.dirty = true
     }
 
     // 在「认证边界」(典型为用户登录成功后)调用,为当前会话换发一枚新的随机 sid:
@@ -75,6 +82,18 @@ public interface SessionStore {
     func destroy(id: String): Unit
     // 生成一个新的、唯一的会话 id。
     func newId(): String
+    // 仅刷新会话的"最近访问时间",不重写会话数据本体(P0-E)。中间件在 next()
+    // 后处理无脏 sess.values 的请求时,只需 touch 而不必 save(),避免:
+    //   1. 后端把整张 hash 重写一次(对 Redis 是一条 HSET + EXPIRE 而非整体 SET);
+    //   2. 与并发请求的 save 竞争覆盖。
+    // 默认实现转调 save(读出旧值再写回),内存实现可重写为「只更新 lastAccess」。
+    // 此处提供默认实现避免破坏现有 SessionStore 实现(无需补 touch 方法)。
+    func touch(id: String): Unit {
+        match (load(id)) {
+            case Some(v) => save(id, v)
+            case None => ()
+        }
+    }
 }
 
 // 单个会话在存储里的内部表示。`lastAccess` 用于 TTL 滑动过期(每次 load/save 都刷新)。
@@ -156,6 +175,20 @@ public class MemorySessionStore <: SessionStore {
         try {
             data.remove(id)
             removeFromOrderLocked(id)
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    // 仅刷新 lastAccess(P0-E)。比默认实现"load + save"省一次复制 + FIFO 写。
+    // 不存在的 id 静默忽略。
+    public func touch(id: String): Unit {
+        lock.lock()
+        try {
+            match (data.get(id)) {
+                case Some(entry) => entry.lastAccess = nowSec()
+                case None => ()
+            }
         } finally {
             lock.unlock()
         }
@@ -243,9 +276,16 @@ public func session(store: SessionStore, cookieName!: String = "sid", path!: Str
                 sess.id = store.newId()
                 sess.isNew = true
                 sess.regenerateRequested = false
+                sess.dirty = true // 换发新 id 必须落盘新条目
             }
-            // 请求处理完毕后回存会话;新会话再下发一枚签名的 sid Cookie。
-            store.save(sess.id, sess.values)
+            // 请求处理完毕后回存会话:
+            //   - 新会话 / 数据有改动 → save 写整张 hash
+            //   - 否则 → 只 touch 刷新 lastAccess,不重写数据(P0-E,修 round2 P2-7)
+            if (sess.isNew || sess.dirty) {
+                store.save(sess.id, sess.values)
+            } else {
+                store.touch(sess.id)
+            }
             if (sess.isNew) {
                 res.cookie(cookieName, sess.id, path: path, maxAge: maxAge, httpOnly: httpOnly, secure: secure,
                     sameSite: sameSite, signed: true)
