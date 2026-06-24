@@ -424,9 +424,17 @@ class JsonParser {
         this.buf = text.toArray()
     }
 
-    // 解析整份文档：先跳过前导空白，解析出顶层值，再跳过尾随空白；若之后仍有
-    // 剩余内容（即一份文档里出现了多个值或多余字符），视为非法并抛异常。
+    // 解析整份文档：先跳过 UTF-8 BOM(若有)与前导空白，解析出顶层值，再跳过尾
+    // 随空白；若之后仍有剩余内容（即一份文档里出现了多个值或多余字符），视为非
+    // 法并抛异常。
+    //
+    // BOM 处理:RFC 8259 §8.1 规定生产端不得发 BOM(EF BB BF),但 Windows /
+    // .NET 客户端默认写入带 BOM 的 JSON。严格不跳会让首字节非合法 JSON 起始字
+    // 符,直接抛 "unexpected character at offset 0" — 接收端宽容是行业惯例。
     func parseDocument(): JsonValue {
+        if (buf.size >= 3 && buf[0] == UInt8(0xEF) && buf[1] == UInt8(0xBB) && buf[2] == UInt8(0xBF)) {
+            pos = 3
+        }
         skipWs()
         let v = parseValue()
         skipWs()

@@ -1,6 +1,5 @@
 package wen_contrib
 
-
 import wen.*
 /*
  * CORS（跨域资源共享）插件。

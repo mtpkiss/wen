@@ -94,6 +94,11 @@ public class HttpRequest {
     // 内部状态:请求体 / Cookie 是否已解析(懒解析的一次性闸门,见 ensureBody / ensureCookies)。
     var bodyParsed: Bool = false
     var cookiesParsed: Bool = false
+    // 内部状态:本次请求中,哪些 signed cookie 是凭 legacyCookieSecrets 命中而非主密
+    // 钥。session / csrf 等中间件用 [[signedCookieFromLegacy]] 探测,据此用主密钥
+    // 重签 cookie 完成无感轮换 — 否则活跃会话永远停留在 legacy 签名上,文档承诺的
+    // "等所有客户端续期到主密钥"那一步根本不会发生。
+    let signedCookieLegacyHits: HashMap<String, Bool> = HashMap<String, Bool>()
 
     public init(method: String, url: String) {
         this.method = method
@@ -660,7 +665,11 @@ public class HttpRequest {
             case Some(v) => v
             case None => return None
         }
-        return verifySignedCookie(raw)
+        let (v, legacy) = verifySignedCookie(raw)
+        if (legacy) {
+            this.signedCookieLegacyHits[name] = true
+        }
+        return v
     }
 
     // 把所有验签通过的 Cookie 收集成一张 name -> 已验签值 的映射,对应 Express 的
@@ -670,29 +679,49 @@ public class HttpRequest {
         ensureCookies()
         let out = HashMap<String, String>()
         for ((name, raw) in this.cookies) {
-            match (verifySignedCookie(raw)) {
-                case Some(v) => out[name] = v
+            let (v, legacy) = verifySignedCookie(raw)
+            match (v) {
+                case Some(value) =>
+                    out[name] = value
+                    if (legacy) {
+                        this.signedCookieLegacyHits[name] = true
+                    }
                 case None => ()
             }
         }
         return out
     }
 
-    // 验签单个 Cookie 原始值:无密钥 / 形态不对 / HMAC 不一致都返回 None。
+    // 上一次签名验证里,指定的 cookie 是否凭 [[Application.legacyCookieSecrets]] 命中
+    // 而非主密钥。`session` / `csrf` 等中间件据此用主密钥重签 cookie 下发,完成密钥
+    // 轮换的"续期到主密钥"步骤 — 否则活跃会话永远停留在 legacy 签名上,文档承诺的
+    // 轮换流程不能真正完成,legacy 实际上不可回收。
+    public func signedCookieFromLegacy(name: String): Bool {
+        match (this.signedCookieLegacyHits.get(name)) {
+            case Some(b) => return b
+            case None => return false
+        }
+    }
+
+    // 验签单个 Cookie 原始值。返回 (value, fromLegacy) 二元组:
+    //   - value     验签成功时是原值,失败 None;
+    //   - fromLegacy true 表示 value 是凭 legacy 密钥命中而非主密钥(供调用方决定
+    //                是否用主密钥重签 cookie 完成轮换)。
+    // 无密钥 / 形态不对 / HMAC 不一致都返回 (None, false)。
     // 主密钥失败后会依次尝试 app.legacyCookieSecrets(密钥轮换期重叠认证)。
-    private func verifySignedCookie(raw: String): ?String {
+    private func verifySignedCookie(raw: String): (?String, Bool) {
         let app = match (this.app) {
             case Some(a) => a
-            case None => return None
+            case None => return (None, false)
         }
         warnIfWeakCookieSecret(this.app, app.cookieSecret)
         if (app.cookieSecret.isEmpty()) {
-            return None
+            return (None, false)
         }
         // 以最后一个 "." 分隔出 value 与签名(value 自身可包含 ".")。
         let idx = lastIndexOfDot(raw)
         if (idx < 0) {
-            return None
+            return (None, false)
         }
         let value = raw[0..idx]
         let sig = raw[(idx + 1)..raw.size]
@@ -700,7 +729,8 @@ public class HttpRequest {
         // 与"legacy 命中需先 hmac N 次 legacy"之间存在可观测时序差,攻击者反复请求即可
         // 推断"自己 cookie 用的是主密钥还是 legacy",泄露轮换进度。把所有 HMAC 都算完
         // 后再判定,密钥轮换状态对外不可观察。
-        var matched = constantTimeEquals(sig, hmacSha256Hex(app.cookieSecret, value))
+        let mainMatched = constantTimeEquals(sig, hmacSha256Hex(app.cookieSecret, value))
+        var matched = mainMatched
         for (legacy in app.legacyCookieSecrets) {
             if (legacy.isEmpty()) {
                 continue
@@ -712,9 +742,12 @@ public class HttpRequest {
             matched = matched || thisOne
         }
         if (matched) {
-            return Some(value)
+            // fromLegacy = 整体命中 AND 主密钥没命中。注意:**不可** 在循环里用
+            // anyLegacyMatched 累计 — 那会暴露轮换状态的时序通道。先得到最终
+            // matched/mainMatched,再异或一次得到 legacy 标志,保持常量时间。
+            return (Some(value), matched && !mainMatched)
         }
-        return None
+        return (None, false)
     }
 
     // 取某个字段名的上传文件(同名多文件时返回第一个);不存在则返回 None。
@@ -762,7 +795,7 @@ public class HttpRequest {
     // 内置请求体解析:按主 Content-Type 分派到 json / urlencoded / multipart;均为
     // 「尽力解析、失败不报错」(非法 JSON 时 jsonBody 保持 None)。其它类型不处理。
     func runBuiltinBodyParser(mainType: String, ctRaw: String): Unit {
-        if (mainType == "application/json") {
+        if (isJsonContentType(mainType)) {
             if (!this.body.isEmpty()) {
                 try {
                     this.jsonBody = Some(parseJson(this.body))
@@ -833,6 +866,17 @@ public class HttpRequest {
 func primaryContentType(ct: String): String {
     let (head, _) = splitOnce(ct, ";")
     return head.trimAscii().toAsciiLower()
+}
+
+// 是否为 JSON 类内容类型:精确 "application/json" 或 RFC 6839 §3.1 的 "+json" 结构
+// 化后缀(application/vnd.api+json、application/ld+json、application/hal+json 等)。
+// 这类后缀在现代 REST API 极常见,框架的 jsonParser / ensureBody 必须按统一规则识
+// 别 — 硬编码 == "application/json" 会让 +json 客户端 jsonBody = None,业务以为
+// "没有 JSON 字段"走默认回退分支,等同于 JSON 校验被静默绕过。
+// 入参约定:已经过 primaryContentType 处理(去参数、小写、trim);若直接传原始
+// Content-Type,应先 primaryContentType(ct) 再调本函数。
+func isJsonContentType(mainType: String): Bool {
+    return mainType == "application/json" || mainType.endsWith("+json")
 }
 
 // 判断一个键名是否属于框架保留的 attribute 命名空间。这些名字被框架内置中间件

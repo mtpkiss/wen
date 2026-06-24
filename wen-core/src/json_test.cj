@@ -197,4 +197,50 @@ class JsonTest {
         app.handle(req, res)
         @Assert(res.body == "no")
     }
+
+    // RFC 8259 规定 JSON 数字不能有多余的前导零(单独的 0 当然 OK,但 "00123"
+    // 不合法)。某些宽松解析器把它当合法数字接受,导致"解析 → 序列化"往返会把
+    // 非法 JSON 当合法吐出去,下游消费方按规范拒绝就出现"自己产的 JSON 自己拒"
+    // 的诡异故障。断言遇到 "00123" 时直接抛异常。
+    @TestCase
+    func testNumberRejectsLeadingZero(): Unit {
+        var caught = false
+        try {
+            parseJson("00123")
+        } catch (_: Exception) {
+            caught = true
+        }
+        @Assert(caught)
+    }
+
+    // 同上,".5" 这种缺整数部分的小数也不是合法 JSON(必须写 "0.5")。断言解析
+    // 器严格按 RFC 8259 拒绝。
+    @TestCase
+    func testNumberRejectsBareDot(): Unit {
+        var caught = false
+        try {
+            parseJson(".5")
+        } catch (_: Exception) {
+            caught = true
+        }
+        @Assert(caught)
+    }
+
+    // RFC 8259 §8.1 规定生产端不得发 UTF-8 BOM,但接收端宽容是常态:Windows /
+    // .NET 客户端默认写入带 BOM 的 JSON,严格不跳会导致首字节非合法起始字符,
+    // 直接抛 "unexpected character at offset 0"。这条断言带 BOM 的合法 JSON 仍
+    // 能被解析。
+    @TestCase
+    func testParsesJsonWithUtf8Bom(): Unit {
+        let buf = ArrayList<UInt8>()
+        buf.add(UInt8(0xEF))
+        buf.add(UInt8(0xBB))
+        buf.add(UInt8(0xBF))
+        for (b in "{\"v\":1}".toArray()) {
+            buf.add(b)
+        }
+        let withBom = String.fromUtf8(buf.toArray())
+        let v = parseJson(withBom)
+        @Assert(si(field(v, "v")) == 1)
+    }
 }

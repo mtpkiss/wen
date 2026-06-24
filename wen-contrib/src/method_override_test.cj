@@ -1,6 +1,5 @@
 package wen_contrib
 
-
 import wen.*
 import std.unittest.*
 import std.unittest.testmacro.*
@@ -12,11 +11,14 @@ class MethodOverrideTest {
     func testHeaderOverride(): Unit {
         let app = wen()
         app.use(methodOverride())
-        app.delete("/items/:id", {
-            req: HttpRequest, res: HttpResponse =>
-                let om = req.attribute("originalMethod") ?? "?"
-                res.send("deleted ${req.param("id") ?? "?"} (was ${om})")
-        })
+        app.delete(
+            "/items/:id",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let om = req.attribute("originalMethod") ?? "?"
+                    res.send("deleted ${req.param("id") ?? "?"} (was ${om})")
+            }
+        )
         let req = HttpRequest("POST", "/items/7");
         req.path = "/items/7"
         req.headers["x-http-method-override"] = "DELETE"
@@ -96,6 +98,44 @@ class MethodOverrideTest {
         req.path = "/x"
         req.headers["x-http-method-override"] = "BOGUS"
         let res = HttpResponse();
+        app.handle(req, res)
+        @Assert(res.body == "posted")
+    }
+
+    // POST 改写为安全方法(GET / HEAD / OPTIONS)不被允许:
+    //
+    // 攻击者发 POST + `X-HTTP-Method-Override: GET` 想让 csrf 中间件按"GET 是安全
+    // 方法"放行 csrf 校验,从而绕过 csrf token。把目标动词限制在非安全方法
+    // (PUT/DELETE/PATCH)能堵掉这条耦合面,与 Express 5 的 method-override 默认
+    // 行为一致。这里同时注册 /x 的 POST 与 GET,断言 `X-HTTP-Method-Override: GET`
+    // 不生效,请求仍命中 POST 路由。
+    @TestCase
+    func testRejectsSafeMethodAsOverrideTarget(): Unit {
+        let app = wen()
+        app.use(methodOverride())
+        app.post("/x", {_: HttpRequest, res: HttpResponse => res.send("posted")})
+        app.get("/x", {_: HttpRequest, res: HttpResponse => res.send("got")})
+        let req = HttpRequest("POST", "/x")
+        req.path = "/x"
+        req.headers["x-http-method-override"] = "GET"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.body == "posted")
+    }
+
+    // 表单字段同理:POST + `_method=HEAD` 不应改写,免得借这条把 POST 变成 HEAD
+    // 又被某些路由按 GET 处理时绕过校验。
+    @TestCase
+    func testFieldRejectsSafeMethodAsOverrideTarget(): Unit {
+        let app = wen()
+        app.use(methodOverrideField())
+        app.post("/x", {_: HttpRequest, res: HttpResponse => res.send("posted")})
+        app.head("/x", {_: HttpRequest, res: HttpResponse => res.send("headed")})
+        let req = HttpRequest("POST", "/x")
+        req.path = "/x"
+        req.headers["content-type"] = "application/x-www-form-urlencoded"
+        req.body = "_method=HEAD"
+        let res = HttpResponse()
         app.handle(req, res)
         @Assert(res.body == "posted")
     }

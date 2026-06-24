@@ -1,6 +1,5 @@
 package wen_contrib
 
-
 import wen.*
 import std.collection.*
 import std.unittest.*
@@ -110,5 +109,24 @@ class HelmetTest {
     func testHstsWithoutIncludeSubDomains(): Unit {
         let res = run(helmet(hstsIncludeSubDomains: false))
         @Assert(hv(res, "Strict-Transport-Security") == "max-age=15552000")
+    }
+
+    // 默认应发 `X-XSS-Protection: 0` 关闭浏览器内置的 XSS auditor。Chrome 78 之前
+    // 与 Safari 当前仍内置该机制,而该 auditor 本身可作为跨源信息泄露的利用面
+    // (Masato Kinugawa 2018 等多次研究证实),helmet.js v3 起默认就是显式发 0。
+    // wen 不发的话,等同对站点保留一条遗留漏洞利用面 — 没有理由比同配的 Express
+    // 应用更不安全。
+    @TestCase
+    func testXssProtectionDefaultZero(): Unit {
+        let res = run(helmet())
+        @Assert(hv(res, "X-XSS-Protection") == "0")
+    }
+
+    // 同其他头,xssProtection: false 时不下发该头(给到需要保留旧行为或自己用其
+    // 它中间件控制该头的场景一个逃生口)。
+    @TestCase
+    func testXssProtectionCanBeDisabled(): Unit {
+        let res = run(helmet(xssProtection: false))
+        @Assert(hv(res, "X-XSS-Protection") == "")
     }
 }

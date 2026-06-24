@@ -43,7 +43,7 @@ public func jsonParser(strict!: Bool = false): Middleware {
             if (strict) {
                 match (req.header("content-type")) {
                     case Some(ct) =>
-                        if (primaryContentType(ct) == "application/json" && !req.body.isEmpty()) {
+                        if (isJsonContentType(primaryContentType(ct)) && !req.body.isEmpty()) {
                             match (req.jsonBody) {
                                 case None => throw BadRequestException()
                                 case Some(_) => ()

@@ -275,4 +275,100 @@ class MultipartTest {
         @Assert(back[3] == UInt8(250))
         remove(path)
     }
+
+    // 上传文件名含 "../../../etc/passwd" 这种路径遍历模式:multipart 解析必须把
+    // UploadedFile.filename 归一为 basename(只保留最后一段,剥掉所有 "/"),避免
+    // 业务代码用直觉写法 `file.saveTo("uploads/" + file.filename)` 直接写出沙箱外。
+    // 客户端发的 "../../../etc/passwd" 应被解析为 "passwd"。
+    @TestCase
+    func testFilenameStripsForwardSlash(): Unit {
+        let body = "--BOUNDARY\r\n" + "Content-Disposition: form-data; name=\"f\"; filename=\"../../../etc/passwd\"\r\n" +
+            "Content-Type: text/plain\r\n\r\n" + "evil\r\n" + "--BOUNDARY--\r\n"
+        let req = HttpRequest("POST", "/upload")
+        req.headers["content-type"] = "multipart/form-data; boundary=BOUNDARY"
+        req.bodyBytes = body.toArray()
+        match (req.file("f")) {
+            case Some(f) => @Assert(f.filename == "passwd")
+            case None => @Assert(false)
+        }
+    }
+
+    // 同上,Windows 风格的反斜杠 "..\..\evil.txt" 也必须被剥成 basename。仓颉运行
+    // 在双平台,文件名规范化要同时处理 "/" 和 "\",否则 Windows 部署会有等价的
+    // 穿越面。
+    @TestCase
+    func testFilenameStripsBackslash(): Unit {
+        let body = "--BOUNDARY\r\n" + "Content-Disposition: form-data; name=\"f\"; filename=\"..\\..\\evil.txt\"\r\n" +
+            "Content-Type: text/plain\r\n\r\n" + "x\r\n" + "--BOUNDARY--\r\n"
+        let req = HttpRequest("POST", "/upload")
+        req.headers["content-type"] = "multipart/form-data; boundary=BOUNDARY"
+        req.bodyBytes = body.toArray()
+        match (req.file("f")) {
+            case Some(f) => @Assert(f.filename == "evil.txt")
+            case None => @Assert(false)
+        }
+    }
+
+    // multipart part 的 Content-Disposition 头里,引号包起的 name 值 "a; b" 中含分
+    // 号 — 解析器必须按 quote-aware 切分,识别出引号边界,不能在引号内的分号上切
+    // 坏(把字段名误切成 "a" 与 "b\"" 两段)。断言带分号的字段名能正确解析回
+    // attribute 表。
+    @TestCase
+    func testFieldNameWithSemicolonInQuotes(): Unit {
+        let body = "--BOUNDARY\r\n" + "Content-Disposition: form-data; name=\"a; b\"\r\n\r\n" + "value\r\n" +
+            "--BOUNDARY--\r\n"
+        let req = HttpRequest("POST", "/")
+        req.headers["content-type"] = "multipart/form-data; boundary=BOUNDARY"
+        req.bodyBytes = body.toArray()
+        match (req.attribute("a; b")) {
+            case Some(v) => @Assert(v == "value")
+            case None => @Assert(false)
+        }
+    }
+
+    // Content-Type 参数串 "multipart/form-data; foo=boundary=fake; boundary=real":
+    // 若 boundary 提取用 `indexOf("boundary=")` 子串匹配,会被前面参数 foo 的值
+    // (恰好含 "boundary=" 子串)误命中,取出伪 boundary "fake",而真 body 用
+    // "real" 分隔。除了让本端解析不出任何 part 外,更严重的是与上游代理 / WAF 的
+    // 参数列表解析(按 quote-aware splitter 取 boundary 参数)产生分歧 — 上游
+    // 验过的字段集与后端实际解析出的字段集不同,WAF 绕过的硬入口。
+    // 修法:用 quote-aware splitter 切参数列表,逐项匹配 k=="boundary"。
+    @TestCase
+    func testBoundaryNotConfusedByOtherParamValue(): Unit {
+        let body = "--real\r\n" + "Content-Disposition: form-data; name=\"k\"\r\n\r\n" + "v\r\n" + "--real--\r\n"
+        let req = HttpRequest("POST", "/")
+        req.headers["content-type"] = "multipart/form-data; foo=boundary=fake; boundary=real"
+        req.bodyBytes = body.toArray()
+        // 期望:wen 用真正的 boundary "real" 解析,字段 k=v 进入 attributes。
+        match (req.attribute("k")) {
+            case Some(v) => @Assert(v == "v")
+            case None => @Assert(false)
+        }
+    }
+
+    // RFC 2046 §5.1.1:真正的 boundary 前必须有 CRLF(body 起始除外)。攻击者
+    // 上传文件,在文件内容里嵌入字面 "--BOUNDARY--" 字节序列 — 若解析器只按
+    // "--BOUNDARY" 子串扫描而不要求前置 CRLF,会把文件内容中的伪 boundary 当作
+    // 真分隔符:后续合法的 part(token / 业务字段)在解析时"凭空消失",业务以
+    // 为表单不完整、走默认分支;同时与上游代理(按规范要求前置 CRLF)的解析视
+    // 图分歧,构成 multipart 走私基底。
+    //
+    // 这条断言构造一个文件 part(内容里塞 "--BOUNDARY--more")+ 一个字段 part:
+    // 修后应正确解析出 1 个文件 + 字段 k=v。
+    @TestCase
+    func testBoundaryRequiresCrlfPrefix(): Unit {
+        let body = "--BOUNDARY\r\n" + "Content-Disposition: form-data; name=\"f\"; filename=\"x.txt\"\r\n" +
+            "Content-Type: text/plain\r\n\r\n" + "AAA--BOUNDARY--more\r\n" + "--BOUNDARY\r\n" +
+            "Content-Disposition: form-data; name=\"k\"\r\n\r\n" + "v\r\n" + "--BOUNDARY--\r\n"
+        let req = HttpRequest("POST", "/")
+        req.headers["content-type"] = "multipart/form-data; boundary=BOUNDARY"
+        req.bodyBytes = body.toArray()
+        // req.file 触发 ensureBody — 直接读 req.files 字段不会触发懒解析。
+        match (req.file("f")) {
+            case Some(_) => @Assert(true)
+            case None => @Assert(false)
+        }
+        @Assert(req.files.size == 1)
+        @Assert(req.attribute("k") == Some("v"))
+    }
 }

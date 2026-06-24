@@ -128,16 +128,27 @@ public func multipart(
 
 // 从 Content-Type 中取出 boundary 的值(boundary 值大小写敏感,故在原串上切取;
 // 值两端可能带引号,会被去掉)。
+//
+// 用 quote-aware 参数切分器把整个 Content-Type 拆成 [k=v, ...] 片段,再逐项匹配
+// k.toAsciiLower() == "boundary" 取 v。不能用 `indexOf("boundary=")` 这种子串匹配 —
+// 形如 `multipart/form-data; foo=boundary=fake; boundary=real` 的合法参数串(参数
+// foo 的值恰好含 "boundary=" 子串)会让子串匹配命中错误位置取出伪 boundary,与上
+// 游代理 / WAF 按规范切分后取出的真 boundary 产生分歧解析,是 WAF 绕过的硬入口。
+// 多次 boundary= 出现时取最后一个(与浏览器 / curl / WAF 多数实现一致)。
 func extractBoundary(ct: String): ?String {
-    match (ct.toAsciiLower().indexOf("boundary=")) {
-        case Some(i) =>
-            let after = ct[(i + "boundary=".size)..ct.size]
-            let (b, _) = splitOnce(after, ";")
-            let bv = unquote(b.trimAscii())
+    var found: ?String = None
+    for (param in splitParamsQuoteAware(ct)) {
+        let (k, v) = splitOnce(param.trimAscii(), "=")
+        if (k.toAsciiLower().trimAscii() == "boundary") {
+            found = Some(unquote(v.trimAscii()))
+        }
+    }
+    match (found) {
+        case Some(bv) =>
             // RFC 2046 §5.1.1:boundary 长度 1..=70,仅含 bcharsnospace 字符集
-            // (字母、数字、'()+_,-./:=? 和单引号)。超长会让朴素 indexOfBytes O(n*m) 退化
-            // 成放大 CPU 攻击(ReDoS 类变体),非法字符可能让解析无限循环或异常行为。
-            // 不合规一律 400 -> 早早拒绝。
+            // (字母、数字、'()+_,-./:=? 和单引号)。超长会让朴素 indexOfBytes O(n*m)
+            // 退化成放大 CPU 攻击(ReDoS 类变体),非法字符可能让解析无限循环或异常
+            // 行为。不合规一律 400 → 早早拒绝。
             if (!isValidMultipartBoundary(bv)) {
                 throw BadRequestException()
             }
@@ -176,6 +187,12 @@ func parseMultipart(req: HttpRequest, boundary: String): Unit {
     let sep = "\r\n\r\n".toArray() // part 内的「头/体」分隔
 
     // 先找出所有分隔符出现的位置(包含结尾的 --BOUNDARY-- 也会命中 --BOUNDARY)。
+    //
+    // RFC 2046 §5.1.1 要求真正的 boundary 前必须有 CRLF(body 起始除外)。文件
+    // part 的内容里凑巧出现字面 "--BOUNDARY" 字节序列时,若不要求前置 CRLF,解析
+    // 器会把它当作真分隔符 — 后续合法 part 在解析时"凭空消失"(业务以为表单不
+    // 完整走默认分支),与上游代理 / WAF(按规范前置 CRLF 解析)的字段视图分歧,
+    // 构成 multipart 走私基底。这里在收集阶段直接过滤掉伪命中。
     let occ = ArrayList<Int64>()
     var p = 0
     while (true) {
@@ -183,7 +200,10 @@ func parseMultipart(req: HttpRequest, boundary: String): Unit {
         if (k < 0) {
             break
         }
-        occ.add(k)
+        let validHere = k == 0 || (k >= 2 && body[k - 2] == UInt8(13) && body[k - 1] == UInt8(10))
+        if (validHere) {
+            occ.add(k)
+        }
         p = k + dash.size
     }
 

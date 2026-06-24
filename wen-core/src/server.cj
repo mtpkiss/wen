@@ -399,7 +399,16 @@ public class HttpServer {
             case Some(p) => p + 4
             case None => raw.size
         }
-        let headerPart = String.fromUtf8(subArray(raw, 0, headerEnd))
+        // 头部块整体 UTF-8 解码:严格拒非法字节(裸 0x80–0xFF 等)。RFC 7230 头值
+        // 允许 obs-text(0x80–0xFF),但实践上主流客户端不发,放任高位字节会让
+        // headerHasContentLength 等的子串校验出现编码歧义。fromUtf8 抛通用 Exception
+        // 时,我们要把它收口成 BadRequestException → 对外 400,而非落到 catch
+        // (_: Exception) 映射的 500(协议层错误本应是 400)。
+        let headerPart = try {
+            String.fromUtf8(subArray(raw, 0, headerEnd))
+        } catch (_: Exception) {
+            throw BadRequestException()
+        }
         let bodyBytes = subArray(raw, bodyStart, raw.size)
 
         // 拒绝 LF-only 行结束(RFC 7230 要求 CRLF):某些代理会"宽容"地把 LF 当作行
@@ -441,6 +450,15 @@ public class HttpServer {
         }
         if (target.isEmpty()) {
             throw BadRequestException()
+        }
+        // RFC 3986 不允许 URI 含 CTL(<0x21,含 NUL/CR/LF/HT 等)与 DEL(0x7F)。
+        // wen 入口若放行 NUL,C 风格的 fs 调用按 NUL 截断 → 路径解析分歧;CR/LF 嵌
+        // 入则与某些代理的"宽容行 / 续行"解读分歧 — 都是走私 / 路径绕过的入口。
+        // SP(0x20)已被 splitOnce 切掉,这里挡所有 CTL + DEL。
+        for (b in target.toArray()) {
+            if (b < UInt8(0x21) || b == UInt8(0x7F)) {
+                throw BadRequestException()
+            }
         }
         // P1-1:HTTP 版本必须严格 ^HTTP/\d+\.\d+$;早先未校验,客户端发 "xx1.1"
         // 或 "HTTP-1.1" 都被吞下,与上游代理对版本的解读分歧形成走私利用面。
@@ -626,19 +644,35 @@ public class HttpServer {
         // 补上 Date 响应头(HTTP/1.1 建议服务器发送当前时间)。
         ensureDateHeader(res)
         applyCharsetIfSet(res)
-        // 按 RFC 7230 规定，204 No Content 与 304 Not Modified 这两类响应
-        // 既不携带响应体，也不能带 Content-Length 头。因此下面对这两个状态码
-        // 特殊处理：清空响应体并移除已设置的 Content-Length。
+        // 按 RFC 7230 规定:
+        //   - 1xx(100 Continue / 101 Switching Protocols / 102 / 103):MUST NOT
+        //     含 Content-Length,且必须无 body。
+        //   - 204 No Content / 304 Not Modified:同 1xx,既不带 body 也不带 CL。
+        // 所以下面对这几个状态码统一做 bodyless 抑制:清掉 body 与 CL。
         let bodyless = res.statusCode == 204 || res.statusCode == 304
-        // res.suppressBody 为真对应 HEAD 请求的响应：HEAD 要求返回与同样的 GET
-        // 完全一致的头部（包括那个表示 GET 正文长度的 Content-Length），但绝不
-        // 发送正文。所以这里保留已设好的 Content-Length，只把正文置空。其余普通
+            || (res.statusCode >= 100 && res.statusCode < 200)
+        // 用户若显式写过 Transfer-Encoding(典型场景:自己实现 chunked / SSE),
+        // 框架不能再自动写 Content-Length — 同时声明 TE + CL 违反 RFC 7230
+        // §3.3.3,接收方按 chunked 解析 4 字节裸 body 会失败,与上游反代对响应边
+        // 界产生分歧(响应方向的 framing 走私 / 缓存污染基底)。尊重用户意图、
+        // 跳过自动 CL。
+        let userSetTE = res.get("Transfer-Encoding").isSome()
+        // res.suppressBody 为真对应 HEAD 请求的响应:HEAD 要求返回与同样的 GET
+        // 完全一致的头部(包括那个表示 GET 正文长度的 Content-Length),但绝不
+        // 发送正文。所以这里保留已设好的 Content-Length,只把正文置空。其余普通
         // 情况则根据实际正文内容计算并写入 Content-Length。
         let bodyBytes = if (res.suppressBody) {
             Array<UInt8>()
         } else if (bodyless) {
             res.remove("Content-Length")
             Array<UInt8>()
+        } else if (userSetTE) {
+            let real = match (res.bodyBytes) {
+                case Some(raw) => raw
+                case None => res.body.toArray()
+            }
+            res.remove("Content-Length")
+            real
         } else {
             let real = match (res.bodyBytes) {
                 case Some(raw) => raw
@@ -678,8 +712,18 @@ public class HttpServer {
 // 由上层错误处理流水线兜底),从而彻底堵住 HTTP 响应分割注入。
 func buildHeadBlock(res: HttpResponse): Array<UInt8> {
     let out = ArrayList<UInt8>()
+    // 状态行写入前校验:statusMessage 不许含 CR/LF/NUL(否则响应字节里夹入伪头,
+    // 等同状态行级别的响应分割),statusCode 必须落在 100..999。statusMessage 与
+    // statusCode 都是 public var,任何中间件 / 业务代码都能写,框架必须在最后一道
+    // 兜底也校验一遍,与 res.set 入口的 checkHeaderSafe 形成对偶。
+    checkHeaderSafe(res.statusMessage)
+    let code = if (res.statusCode < 100 || res.statusCode > 999) {
+        500
+    } else {
+        res.statusCode
+    }
     appendAscii(out, "HTTP/1.1 ")
-    appendAscii(out, res.statusCode.toString())
+    appendAscii(out, code.toString())
     appendAscii(out, " ")
     appendAscii(out, res.statusMessage)
     appendAscii(out, "\r\n")
@@ -911,7 +955,14 @@ class ConnReader {
         var pos: Int64 = 0
         while (true) {
             var lineEnd = findCRLF(pos)
+            // 单行预算保护:每个 chunk-size 行最多 maxHeaderBytes 字节(规范上只需
+            // 几十字节存十六进制大小 + chunk-extension)。若客户端持续灌字符却不发
+            // CRLF,fill 会无限把数据搬进 buf,单条恶意连接即可推到 OOM。先于 fill
+            // 检查"当前行已累积字节数",超出立刻 413 拒。
             while (lineEnd < 0) {
+                if (available() - pos > maxHeaderBytes) {
+                    throw PayloadTooLargeException()
+                }
                 if (!fill()) {
                     return None
                 }
@@ -935,7 +986,13 @@ class ConnReader {
                 let trailerStart = pos
                 while (true) {
                     var endLine = findCRLF(pos)
+                    // 同 chunk-size 行的预算保护:trailer 行单行也按 maxHeaderBytes
+                    // 截。无此防护时,trailer 段一行不发 CRLF 也能让 buf 无界增长 —
+                    // 与 chunk-size 行同款 OOM 路径,只是触发点不同。
                     while (endLine < 0) {
+                        if (available() - pos > maxHeaderBytes) {
+                            throw PayloadTooLargeException()
+                        }
                         if (!fill()) {
                             return None
                         }
@@ -1045,8 +1102,20 @@ func parseContentLengthStrict(s: String): Int64 {
 
 // 判断头部块中是否存在 Content-Length 头(只看有无,不取值)。专门用于走私防护:
 // 与 headerIsChunked 配合,检测"同时声明 chunked 与 Content-Length"这种二义分帧。
+//
+// obs-fold 续行(行首 SP/HT)不是独立头,而是上一条头 value 的续接;parseRequest 阶段
+// 已拒整段含 obs-fold 的请求,但 readMessage 在更早的预扫阶段也会跑这个函数判分帧。
+// 这里同样跳过 obs-fold 续行,避免续行内容凑巧形如 "Content-Length: 5" 时被误识为
+// 真有 CL 头(合法请求被错拒为走私分帧)。
 func headerHasContentLength(headerText: String): Bool {
     for (line in headerText.split("\r\n")) {
+        if (line.isEmpty()) {
+            continue
+        }
+        let firstByte = line.toArray()[0]
+        if (firstByte == UInt8(32) || firstByte == UInt8(9)) {
+            continue
+        }
         let (k, _) = splitOnce(line, ":")
         if (k.toAsciiLower().trimAscii() == "content-length") {
             return true
@@ -1068,6 +1137,15 @@ func headerIsChunked(headerText: String): Bool {
     var anyChunked = false
     var chunkedIsLast = false
     for (line in headerText.split("\r\n")) {
+        if (line.isEmpty()) {
+            continue
+        }
+        // 同 headerHasContentLength:跳过 obs-fold 续行,避免续行内容误识为
+        // 独立 Transfer-Encoding 头。
+        let firstByte = line.toArray()[0]
+        if (firstByte == UInt8(32) || firstByte == UInt8(9)) {
+            continue
+        }
         let (k, v) = splitOnce(line, ":")
         if (k.toAsciiLower().trimAscii() != "transfer-encoding") {
             continue
@@ -1186,7 +1264,11 @@ func parseQuery(qs: String, into: HashMap<String, String>): Unit {
             continue
         }
         let (k, v) = splitOnce(pair, "=")
-        into[urlDecode(k)] = urlDecode(v)
+        // key 保留原始字节(不做 urlDecode):防 "?admin=user&%61dmin=root" 这种
+        // 携带百分号编码 key 的请求被合并成同一条目(last-wins 后 admin=root,
+        // 业务用 wen 看到的与上游 WAF / 反代按字节相等去重的视图不一致 → ACL
+        // 绕过)。value 仍正常解码,符合 application/x-www-form-urlencoded 规范。
+        into[k] = urlDecode(v)
     }
 }
 

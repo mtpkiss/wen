@@ -1,6 +1,5 @@
 package wen_contrib
 
-
 import wen.*
 import std.unittest.*
 import std.unittest.testmacro.*
@@ -130,5 +129,29 @@ class AuthTest {
         app.handle(r2, s2)
         @Assert(s2.body == "trace-123")
         @Assert((match (s2.get("X-Request-Id")) { case Some(v) => v; case None => "" }) == "trace-123")
+    }
+
+    // basicAuth 的 realm 来自配置 / i18n / 业务字符串拼接,可能不慎带入 CR / LF /
+    // NUL(i18n 字符串末尾误带换行是常见情况)。若不转义直接写进 WWW-Authenticate
+    // 头,会触发 header 安全校验抛异常 → 401 路径反而变 500,认证 UX 完全断掉。
+    // 这里把 realm 设成 "evil\r\nrealm",断言响应仍是 401 且 WWW-Authenticate 头
+    // 里没有原始 CR/LF 残留(实现用 "_" 替换)。
+    @TestCase
+    func testAuthRealmWithCrLfReplaced(): Unit {
+        let app = wen()
+        app.use(basicAuth({_: String, _: String => false}, realm: "evil\r\nrealm"))
+        app.get("/", {_: HttpRequest, res: HttpResponse => res.send("hi")})
+        let req = HttpRequest("GET", "/")
+        req.path = "/"
+        let res = HttpResponse()
+        app.handle(req, res)
+        // 期望:401(由 basicAuth 拒);WWW-Authenticate 头存在且不含 CR/LF。
+        @Assert(res.statusCode == 401)
+        match (res.get("WWW-Authenticate")) {
+            case Some(v) =>
+                @Assert(!v.contains("\r"))
+                @Assert(!v.contains("\n"))
+            case None => @Assert(false)
+        }
     }
 }

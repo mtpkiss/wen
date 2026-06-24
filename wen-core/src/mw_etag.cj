@@ -14,6 +14,12 @@ package wen
  *
  * 跳过的情形:流式响应、非 200、非 GET/HEAD、空体、已自带 ETag(如文件响应)、已被
  * 压缩(带 `Content-Encoding`)。
+ *
+ * **HEAD 限制**:HEAD 处理器通常不写 body(契约上 HEAD 响应不带正文),本中间件以
+ * "实际写出的字节流" 作为 ETag 输入,空体即跳过。结果是动态响应路径下 HEAD +
+ * `If-None-Match` 不会命中 304。客户端若需用 HEAD 预校验后续 GET 的缓存有效性,
+ * 应改用 [[staticFiles]] / [[sendFile]] 的弱 ETag(W/"size-mtime") — 那条路径上
+ * 弱 ETag 由文件元数据生成,HEAD 与 GET 完全一致,条件请求工作正常。
  */
 public func etag(): Middleware {
     return {

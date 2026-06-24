@@ -117,4 +117,36 @@ class BodyParserTest {
         app.handle(req, res)
         @Assert(res.body == "v")
     }
+
+    // RFC 6839 §3.1 规定 "+json" 结构化后缀(如 application/vnd.api+json、
+    // application/ld+json、application/hal+json)都应被当作 JSON 处理。当前若
+    // 硬编码 `mainType == "application/json"`,这类常见的 API 类型不会被解析 —
+    // jsonBody = None,业务以为"没有 JSON 字段"走默认分支(典型:默认 admin=false),
+    // 等同安全回退被绕过。这条断言 application/vnd.api+json 的 body 同样进 jsonBody。
+    @TestCase
+    func testJsonParserHandlesVndApiJsonSuffix(): Unit {
+        let app = wen()
+        app.use(jsonParser())
+        app.post(
+            "/",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let name = match (req.json()) {
+                        case Some(j) => match (j.get("name")) {
+                            case Some(v) => v.asString() ?? "?"
+                            case None => "?"
+                        }
+                        case None => "?"
+                    }
+                    res.send(name)
+            }
+        )
+        let req = HttpRequest("POST", "/")
+        req.path = "/"
+        req.headers["content-type"] = "application/vnd.api+json"
+        req.body = "{\"name\":\"bob\"}"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.body == "bob")
+    }
 }

@@ -1,5 +1,7 @@
 package wen
 
+import std.collection.*
+
 /*
  * 流式响应（Server-Sent Events 背后的底层原语）。
  *
@@ -90,7 +92,10 @@ public class SseWriter {
 
     // 发送一个带名字的事件：先写出 "event: 名称" 行，再写出数据。
     // 客户端可用 addEventListener(name, ...) 监听这个具名事件。
+    // 事件名一旦含 CR/LF/NUL 即可注入新的 SSE 帧(向同会话客户端推送伪造事件,
+    // 如把 name 设成 "logout" 让 UI 退出),入口必须拒。
     public func event(name: String, data: String): Unit {
+        checkSseFieldSafe(name)
         w.write("event: ${name}\n")
         emitData(data)
     }
@@ -103,7 +108,10 @@ public class SseWriter {
 
     // 为接下来的事件设置 id。客户端会记住它，并在断线重连时通过
     // Last-Event-ID 请求头回传，从而支持断点续传式的事件恢复。
+    // 同 event,id 值含 CR/LF/NUL 即可注入新帧 — 业务把外部用户名直接喂进来
+    // (`sse.id(req.attribute("userId"))`)是常见写法,入口必须拒。
     public func id(value: String): Unit {
+        checkSseFieldSafe(value)
         w.write("id: ${value}\n")
     }
 
@@ -114,17 +122,59 @@ public class SseWriter {
 
     // 写出一行 SSE 注释（以 ":" 开头的行，客户端会忽略其内容）。
     // 它常被用作保活心跳（keep-alive ping），用来防止中间代理或连接因长时间
-    // 无数据而超时断开。
+    // 无数据而超时断开。注释内容含 CR/LF/NUL 同样能注入下一帧,入口拒。
     public func comment(text: String): Unit {
+        checkSseFieldSafe(text)
         w.write(": ${text}\n\n")
     }
 
     // 按 SSE 规范输出数据：把 data 按换行拆成多行，每一行都加上 "data: " 前缀
     // 单独写出（这样多行文本能被正确表达），最后再写一个空行来标记本次事件结束。
+    // 行尾按 SSE 规范同时识别 \r\n、\n、\r 三种 — 只按 \n 切的话,含 \r 的 data
+    // 在浏览器端会被当作"新行"再次拆分,等同于注入新字段名。
     func emitData(data: String): Unit {
-        for (line in data.split("\n")) {
+        for (line in splitSseLines(data)) {
             w.write("data: ${line}\n")
         }
         w.write("\n")
     }
+}
+
+// 拒 SSE 字段值含 CR/LF/NUL — 任一字符落进 event/id/comment 都能让攻击者凭空向
+// 同会话客户端推送伪造事件。同 checkHeaderSafe 风格,违反就抛。
+func checkSseFieldSafe(s: String): Unit {
+    for (b in s.toArray()) {
+        if (b == UInt8(0) || b == UInt8(10) || b == UInt8(13)) {
+            throw Exception("SSE 字段含 CR/LF/NUL,拒绝写入以防事件帧注入")
+        }
+    }
+}
+
+// 按 SSE 行尾(CR / LF / CRLF 任一)切。emitData 用之确保浏览器侧的行划分与
+// wen 输出一致。
+func splitSseLines(s: String): Array<String> {
+    let out = ArrayList<String>()
+    let bytes = s.toArray()
+    var start = 0
+    var i = 0
+    while (i < bytes.size) {
+        let b = bytes[i]
+        if (b == UInt8(13)) {
+            out.add(String.fromUtf8(bytes[start..i]))
+            if (i + 1 < bytes.size && bytes[i + 1] == UInt8(10)) {
+                i += 2
+            } else {
+                i += 1
+            }
+            start = i
+        } else if (b == UInt8(10)) {
+            out.add(String.fromUtf8(bytes[start..i]))
+            i += 1
+            start = i
+        } else {
+            i += 1
+        }
+    }
+    out.add(String.fromUtf8(bytes[start..bytes.size]))
+    return out.toArray()
 }

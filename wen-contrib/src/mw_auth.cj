@@ -1,6 +1,5 @@
 package wen_contrib
 
-
 import wen.*
 import std.collection.*
 

@@ -237,3 +237,27 @@ class StaticOptionsTest {
         }
     }
 }
+
+// ---- 子路由继承顶层 strict / case sensitive 设置 ----
+
+@Test
+class SubRouterSettingsTest {
+    // 顶层 app 开启 "strict routing" 后,所有挂载的子路由都应继承这一设置:子路由
+    // 内部的路径匹配也按严格末尾斜杠规则。这里把 "/foo" 路由挂在 "/api" 前缀下,
+    // 客户端发 "/api/foo/" 末尾多带斜杠,strict 模式下应判 404 — 而不是被宽容地
+    // 命中。若设置传递缺失,子路由会按默认非严格规则把请求当 "/foo" 处理,本测
+    // 试就会得到 200,触发回归。
+    @TestCase
+    func testSubRouterInheritsStrictSetting(): Unit {
+        let app = wen()
+        app.enable("strict routing")
+        let sub = Router()
+        sub.get("/foo", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        app.use("/api", sub)
+        let req = HttpRequest("GET", "/api/foo/")
+        req.path = "/api/foo/"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 404)
+    }
+}

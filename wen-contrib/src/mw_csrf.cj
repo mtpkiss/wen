@@ -1,7 +1,7 @@
 package wen_contrib
 
-
 import wen.*
+import std.time.*
 /*
  * CSRF(跨站请求伪造)防护中间件 —— 对应 Express 生态的 csurf,采用「签名双提交 Cookie」。
  *
@@ -38,28 +38,68 @@ func nextCsrfToken(): String {
     return secureRandomHex(16)
 }
 
-public func csrf(cookieName!: String = "_csrf", field!: String = "_csrf", signed!: Bool = true,
-    httpOnly!: Bool = true, secure!: Bool = false, sameSite!: String = "Lax"): Middleware {
+public func csrf(cookieName!: String = "_csrf", field!: String = "_csrf", signed!: Bool = true, httpOnly!: Bool = true,
+    secure!: Bool = false, sameSite!: String = "Lax", rotateAfterSeconds!: Int64 = -1): Middleware {
     return {
         req: HttpRequest, res: HttpResponse, next: Next =>
             // 1. 复用此前下发 Cookie 里的 token;没有有效 token 则新生成并下发。
+            //
+            // rotateAfterSeconds 选项(opt-in,默认 -1 关闭):开启时 cookie value 形
+            // 如 "${token}@${iat_unix_sec}",iat 嵌入并随整体签名;每次请求检查
+            // now - iat,超过 rotateAfterSeconds 即视为过期,重生 token + 重发 cookie。
+            // 这缩小了 token 泄露的有效利用窗口 — 否则同一 token 整个会话期复用,
+            // 从代理日志 / 浏览器历史 / 网络抓包任一处泄露后,攻击者就有整段窗口可
+            // 利用。默认关是为了与 Express csurf 行为对齐 + 不引入"每次请求都换"
+            // 的体验断裂(若想极致,业务自行设置短窗口)。
             var token = ""
+            var needNewCookie = false
             let existing = if (signed) {
                 req.signedCookie(cookieName)
             } else {
                 req.cookie(cookieName)
             }
             match (existing) {
-                case Some(t) => if (!t.isEmpty()) {
-                    token = t
-                }
+                case Some(t) =>
+                    if (!t.isEmpty()) {
+                        if (rotateAfterSeconds > 0) {
+                            // 启用 rotate 模式:期望 cookie value 形如 "tok@iat"。
+                            match (splitTokenAndIat(t)) {
+                                case Some((tok, iat)) =>
+                                    let nowSec = DateTime.now().toUnixTimeStamp().toSeconds()
+                                    if (nowSec - iat <= rotateAfterSeconds) {
+                                        token = tok
+                                    } else {
+                                        // 过期 → 抛弃旧 token,下面会新生 + 下发。
+                                        needNewCookie = true
+                                    }
+                                case None =>
+                                    // 旧裸 token 格式(未启用 rotate 前下发的)→
+                                    // 升级到新格式重发。
+                                    needNewCookie = true
+                            }
+                        } else {
+                            // 未启用 rotate:旧行为,直接复用 token。
+                            token = t
+                        }
+                    }
                 case None => ()
             }
             if (token.isEmpty()) {
                 token = nextCsrfToken()
-                res.cookie(cookieName, token, httpOnly: httpOnly, secure: secure, sameSite: sameSite, signed: signed)
+                needNewCookie = true
+            }
+            if (needNewCookie) {
+                let cookieValue = if (rotateAfterSeconds > 0) {
+                    let nowSec = DateTime.now().toUnixTimeStamp().toSeconds()
+                    "${token}@${nowSec}"
+                } else {
+                    token
+                }
+                res.cookie(cookieName, cookieValue, httpOnly: httpOnly, secure: secure, sameSite: sameSite,
+                    signed: signed)
             }
             // 2. 暴露给视图 / 下游:渲染进表单隐藏字段或 meta 标签,供后续请求回传。
+            //    客户端回传的始终是裸 token(表单字段 / 请求头),不含 @iat 部分。
             req.attributes["csrfToken"] = token
 
             // 3. 安全方法放行不校验;非安全方法必须回传匹配的 token。
@@ -67,11 +107,12 @@ public func csrf(cookieName!: String = "_csrf", field!: String = "_csrf", signed
                 next()
             } else {
                 match (readCsrfToken(req, field)) {
-                    case Some(sent) => if (constantTimeEquals(sent, token)) {
-                        next()
-                    } else {
-                        rejectCsrf(res)
-                    }
+                    case Some(sent) =>
+                        if (constantTimeEquals(sent, token)) {
+                            next()
+                        } else {
+                            rejectCsrf(res)
+                        }
                     case None => rejectCsrf(res)
                 }
             }
@@ -101,9 +142,10 @@ func readCsrfToken(req: HttpRequest, field: String): ?String {
         case None => ()
     }
     match (req.queryParam(field)) {
-        case Some(v) => if (!v.isEmpty()) {
-            return Some(v)
-        }
+        case Some(v) =>
+            if (!v.isEmpty()) {
+                return Some(v)
+            }
         case None => ()
     }
     // P1-9:**只**在 Content-Type 是 application/x-www-form-urlencoded 时才读 form 字段。
@@ -112,9 +154,10 @@ func readCsrfToken(req: HttpRequest, field: String): ?String {
     // 回传 token(AJAX 标准做法)。其它 Content-Type 同理 — token 应走 header / query。
     if (isUrlencodedContentType(req)) {
         match (req.attribute(field)) {
-            case Some(v) => if (!v.isEmpty()) {
-                return Some(v)
-            }
+            case Some(v) =>
+                if (!v.isEmpty()) {
+                    return Some(v)
+                }
             case None => ()
         }
     }
@@ -148,4 +191,33 @@ func csrfHeader(req: HttpRequest, name: String): ?String {
 // 校验失败:回 403。
 func rejectCsrf(res: HttpResponse): Unit {
     res.status(403).send("invalid csrf token")
+}
+
+// 把 rotate 模式下的 cookie value 拆成 (token, iat)。形态不对、iat 非法十进制
+// 数字、或缺 @ 一律返回 None,调用方据此降级到"重发新格式 cookie"路径 — 这样
+// 既容错(用户从未启用 rotate 切到启用 rotate 时,旧裸 token cookie 不会爆),
+// 又防止攻击者塞畸形 cookie 让 iat 解析意外接受。
+func splitTokenAndIat(value: String): ?(String, Int64) {
+    let atIdx = match (value.indexOf("@")) {
+        case Some(i) => i
+        case None => return None
+    }
+    let tok = value[0..atIdx]
+    let iatStr = value[(atIdx + 1)..value.size]
+    if (tok.isEmpty() || iatStr.isEmpty()) {
+        return None
+    }
+    // 严格十进制解析:任何非数字字符或溢出都视为非法(不像 parseInt 那样宽容)。
+    var iat: Int64 = 0
+    for (b in iatStr.toArray()) {
+        if (b < UInt8(48) || b > UInt8(57)) {
+            return None
+        }
+        let d = Int64(b) - 48
+        if (iat > (Int64.Max - d) / 10) {
+            return None
+        }
+        iat = iat * 10 + d
+    }
+    return Some((tok, iat))
 }

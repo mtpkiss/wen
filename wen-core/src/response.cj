@@ -199,10 +199,12 @@ public class HttpResponse {
     public func cookie(name: String, value: String, path!: String = "/", maxAge!: Int64 = -1, httpOnly!: Bool = false,
         secure!: Bool = false, sameSite!: String = "", domain!: String = "", expires!: String = "",
         signed!: Bool = false): HttpResponse {
-        // 防 HTTP 响应分割:Cookie 的各个组成片段都不允许出现 CR/LF/NUL。
-        // 拼成 Set-Cookie 行后整体不再含 \r\n,避免攻击者通过 Cookie 注入新头部。
-        checkHeaderSafe(name)
-        checkHeaderSafe(value)
+        // 防 HTTP 响应分割 + 防 cookie attribute 注入:cookie 的 name 与 value 都
+        // 必须严格落在 RFC 6265 cookie-octet 范围内,attributes 至少要挡 CR/LF/NUL。
+        // 若 value 放任分号 / 空格 / 引号通过,攻击者就能用 `xxx; Domain=evil.com`
+        // 这种形态把恶意属性塞进 Set-Cookie 头,让浏览器把 cookie 跨域投递。
+        checkCookieOctet(name)
+        checkCookieOctet(value)
         checkHeaderSafe(path)
         checkHeaderSafe(domain)
         checkHeaderSafe(expires)
@@ -652,6 +654,23 @@ func checkHeaderSafe(v: String): Unit {
     for (b in v.toArray()) {
         if (b == UInt8(13) || b == UInt8(10) || b == UInt8(0)) {
             throw Exception("响应头值含非法控制字符(CR/LF/NUL),拒绝写入以防 HTTP 响应分割")
+        }
+    }
+}
+
+// 防 cookie attribute 注入:cookie 的 name 与 value 都必须严格落在 RFC 6265 §4.1.1
+// cookie-octet 范围内 — 0x21、0x23-0x2B、0x2D-0x3A、0x3C-0x5B、0x5D-0x7E。
+// 排除字符:CTL(<0x21)、SP(0x20)、DQUOTE(0x22)、","(0x2C)、";"(0x3B)、
+// "\\"(0x5C)、DEL(0x7F)。一旦放任分号 / 空格 / 引号通过,就出现了 cookie attribute
+// 注入面 — 业务把外部串当 value(常见写法)会让攻击者拼出
+// `xxx; Domain=evil.com` 这类形态,浏览器解析后把 cookie 跨域投递。比 percent-encode
+// 更稳的做法是直接抛,让调用方先把外部输入清洗或显式编码。
+func checkCookieOctet(v: String): Unit {
+    for (b in v.toArray()) {
+        let bad = b < UInt8(0x21) || b == UInt8(0x22) || b == UInt8(0x2C) || b == UInt8(0x3B)
+            || b == UInt8(0x5C) || b > UInt8(0x7E)
+        if (bad) {
+            throw Exception("cookie 字段含 RFC 6265 cookie-octet 范围外字符(0x${b}),拒绝写入以防 attribute 注入")
         }
     }
 }

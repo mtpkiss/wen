@@ -20,7 +20,11 @@ demo.exe
 
 # 测试运行产生的临时文件
 ._cjx_*
+test_data_static/
 wen-core/test_data_static/
+
+# cjpm test macro 展开的中间产物
+*.macrocall
 
 # cjpm 锁文件(本地构建副产物)
 cjpm.lock

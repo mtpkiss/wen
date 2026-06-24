@@ -78,6 +78,12 @@ public class PathPattern {
         // 仅当路径非根("/" 仅一个字符,但 endsWith("/") 为真)且确实以 "/" 结尾时记为有尾斜杠。
         let trailing = path.size > 1 && path.endsWith("/")
         for (raw in pathSegments(path)) {
+            // 通配段 "*" 之后再出现任意段都会被静默吞掉(匹配阶段 Wildcard 直接 return
+            // true,trie 索引也只走到 Wildcard 后中断),与文档承诺的"通配只在末尾有
+            // 意义"不符。注册阶段拒掉中间段 wildcard,让歧义在编译期就报出来。
+            if (wildcard) {
+                throw Exception("wen: 通配段 '*' 只允许出现在路径末尾;中段之后的段会被静默吞掉")
+            }
             if (raw == "*") {
                 segs.add(Segment(Wildcard, "*"))
                 wildcard = true
@@ -96,12 +102,25 @@ public class PathPattern {
                     case Some(p) =>
                         if (spec.endsWith(")")) {
                             let name = spec[0..p]
+                            // 空参数名("/users/:" / "/users/:(\d+)")是 typo,会导致
+                            // params[""] 静默写入,后续 req.param("") 才取得到 — 注册
+                            // 时直接拒,debug 友好。
+                            if (name.isEmpty()) {
+                                throw Exception("wen: 参数段缺少参数名(写法 ':name')")
+                            }
                             let pat = spec[(p + 1)..(spec.size - 1)]
                             segs.add(Segment(Param, name, Some(Regex("^(?:" + pat + ")$")), optional))
                         } else {
+                            if (spec.isEmpty()) {
+                                throw Exception("wen: 参数段缺少参数名(写法 ':name')")
+                            }
                             segs.add(Segment(Param, spec, None, optional))
                         }
-                    case None => segs.add(Segment(Param, spec, None, optional))
+                    case None =>
+                        if (spec.isEmpty()) {
+                            throw Exception("wen: 参数段缺少参数名(写法 ':name')")
+                        }
+                        segs.add(Segment(Param, spec, None, optional))
                 }
             } else {
                 segs.add(Segment(Literal, raw))
@@ -319,6 +338,12 @@ public class Router {
     // P1-7:挂载的子 Router 引用列表。markFrozen / handle 兜底路径会递归把
     // case sensitive / strict 设置下发到所有子 router — 否则全局开关只在顶级生效。
     let mountedSubRouters: ArrayList<Router> = ArrayList<Router>()
+    // layer idx → 挂载在该 prefix-mount layer 下的子 Router。
+    // hasMethodForPath / methodsForPath / hasAllRouteForPath 用它递归到子路由,
+    // 让 HEAD-fallback 与 Allow 头能覆盖子路由内的方法注册。父级 router 只持有
+    // 一个把请求转发给 sub.handleAsMiddleware 的 lambda layer,无法从 layer 反推
+    // 出子 router 引用,所以单独建一份映射(以 layer idx 为键)。
+    let mountedRouterByLayer: HashMap<Int64, Router> = HashMap<Int64, Router>()
 
     public init() {}
 
@@ -502,6 +527,8 @@ public class Router {
         add(None, path, {
             req: HttpRequest, res: HttpResponse, next: Next => sub.handleAsMiddleware(req, res, next)
         }, true)
+        // 把 prefix-mount layer 与子 router 关联,留待 hasMethodForPath 等查表时递归。
+        mountedRouterByLayer[layers.size - 1] = sub
     }
 
     // 一次挂载多个全局/前缀中间件。
@@ -628,6 +655,11 @@ public class Router {
 
     // 收集所有「路径能精确匹配该 path」的路由层上显式声明的、互不重复的方法名。
     // trie 圈候选 + matchExact 二次验证,O(M + K) 代替原来扫全部 layer。
+    //
+    // 还要合并所有挂载子路由的方法集 — 否则 `app.use("/api", sub)` + `sub.post(
+    // "/items", h)` 场景下,顶级 router 看不到 sub 的 POST,onExhausted 走 404 而非
+    // 405,Allow 头也漏 POST(违反 RFC 7231)。在每个 prefix-mount layer 上剥前缀
+    // 后递归查 sub.methodsForPath,把结果并入 out。
     func methodsForPath(path: String): ArrayList<String> {
         let out = ArrayList<String>()
         let parts = pathSegments(path)
@@ -653,10 +685,24 @@ public class Router {
                 case None => ()
             }
         }
+        for ((idx, sub) in mountedRouterByLayer) {
+            let layer = layers[idx]
+            match (layer.pattern.matchPrefix(path, caseSensitive: this.caseSensitive)) {
+                case Some(_) =>
+                    let stripped = stripMountPath(path, layer.pattern.segments.size)
+                    for (m in sub.methodsForPath(stripped)) {
+                        if (!listContains(out, m)) {
+                            out.add(m)
+                        }
+                    }
+                case None => ()
+            }
+        }
         return out
     }
 
     // P2-I:路径上是否注册了 ALL 路由(用于 onExhausted 区分 404 vs 405)。
+    // 同样要看挂载子路由内的 ALL 注册,否则 405/404 判定与方法表不一致。
     func hasAllRouteForPath(path: String): Bool {
         let parts = pathSegments(path)
         let cands = collectTrieCandidates(routeTrie, parts)
@@ -676,9 +722,24 @@ public class Router {
                 case None => ()
             }
         }
+        for ((idx, sub) in mountedRouterByLayer) {
+            let layer = layers[idx]
+            match (layer.pattern.matchPrefix(path, caseSensitive: this.caseSensitive)) {
+                case Some(_) =>
+                    let stripped = stripMountPath(path, layer.pattern.segments.size)
+                    if (sub.hasAllRouteForPath(stripped)) {
+                        return true
+                    }
+                case None => ()
+            }
+        }
         return false
     }
 
+    // 路径上是否注册了指定 HTTP 方法。同上,要递归到挂载的子 router — 否则父级
+    // HEAD-fallback("路径有 GET 路由即把 HEAD 切到 GET")完全看不到子路由内的
+    // GET,SEO 爬虫 / CDN 预取 / 反代探活的 HEAD 请求在子路由场景下永远落到 404 /
+    // 405,与 Express 行为(HEAD 自动覆盖任意层级 GET)不一致。
     func hasMethodForPath(method: String, path: String): Bool {
         let parts = pathSegments(path)
         let cands = collectTrieCandidates(routeTrie, parts)
@@ -694,6 +755,17 @@ public class Router {
                             case Some(_) => return true
                             case None => ()
                         }
+                    }
+                case None => ()
+            }
+        }
+        for ((idx, sub) in mountedRouterByLayer) {
+            let layer = layers[idx]
+            match (layer.pattern.matchPrefix(path, caseSensitive: this.caseSensitive)) {
+                case Some(_) =>
+                    let stripped = stripMountPath(path, layer.pattern.segments.size)
+                    if (sub.hasMethodForPath(method, stripped)) {
+                        return true
                     }
                 case None => ()
             }

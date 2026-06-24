@@ -127,4 +127,41 @@ class SignedCookiesMapTest {
             case None => @Assert(!m.contains("bad"))
         }
     }
+
+    // 签名 cookie 的值含字面 "+" 字符:写入端原样写出,而读取端会对整段 cookie 值
+    // 做 urlDecode 把 "+" 当空格。两端不对称会让重算的 HMAC 与签名段对不上,签名
+    // 验证错误地失败。这里直接用未编码的 "a+b" 拼出合法签名,断言 signedCookie
+    // 仍能取回原值,确认读写两端对编码的处理一致。
+    @TestCase
+    func testSignedCookieWithPlusChar(): Unit {
+        let app = wen()
+        app.cookieSecret = "the-secret"
+        let value = "a+b"
+        let signed = "${value}.${hmacSha256Hex(app.cookieSecret, value)}"
+        let req = HttpRequest("GET", "/")
+        req.app = Some(app)
+        req.headers["cookie"] = "x=${signed}"
+        match (req.signedCookie("x")) {
+            case Some(v) => @Assert(v == "a+b")
+            case None => @Assert(false)
+        }
+    }
+
+    // 同上,验证 cookie 值含字面 "%" 字符也能正确还原。"%" 是 percent-encoding 的
+    // 转义引子,稍不留意就会被读取端误当作编码序列再次解码。用 "raw%20literal" 这
+    // 种"看起来像编码的明文"做反例,断言写读链路保留原始字节。
+    @TestCase
+    func testSignedCookieWithPercentLiteral(): Unit {
+        let app = wen()
+        app.cookieSecret = "the-secret"
+        let value = "raw%20literal"
+        let signed = "${value}.${hmacSha256Hex(app.cookieSecret, value)}"
+        let req = HttpRequest("GET", "/")
+        req.app = Some(app)
+        req.headers["cookie"] = "x=${signed}"
+        match (req.signedCookie("x")) {
+            case Some(v) => @Assert(v == "raw%20literal")
+            case None => @Assert(false)
+        }
+    }
 }

@@ -1,6 +1,5 @@
 package wen_contrib
 
-
 import wen.*
 /*
  * 方法重写(method override)中间件 —— 对应 Express 的 method-override。
@@ -58,21 +57,24 @@ public func methodOverrideField(field!: String = "_method"): Middleware {
     }
 }
 
-// 把候选字符串归一为大写方法名;若是已知 HTTP 方法,则记下原方法并改写 req.method。
-// 非已知方法一律忽略(保持原方法不变)。
+// 把候选字符串归一为大写方法名;若是合法的"重写目标"(非安全方法),则记下原
+// 方法并改写 req.method。其余一律忽略(保持原方法不变)。
 func applyMethodOverride(req: HttpRequest, candidate: String): Unit {
     let m = candidate.trimAscii().toAsciiUpper()
-    if (isKnownHttpMethod(m)) {
+    if (isOverrideTarget(m)) {
         req.attributes["originalMethod"] = req.method
         req.method = m
     }
 }
 
-// 是否为已知 HTTP 方法名(入参须已大写)。仅这些方法允许作为重写目标,杜绝把请求方法
-// 改写成任意字符串。
-func isKnownHttpMethod(m: String): Bool {
+// 是否为合法的方法重写目标。**只允许非安全方法(PUT / DELETE / PATCH)**,这与
+// Express 5 的 method-override 默认行为一致 — POST → 任意安全方法(GET / HEAD /
+// OPTIONS)的改写会让 csrf 中间件(基于"GET 是安全方法"放行)整段绕过校验,本是
+// 中间件之间的耦合面。把目标动词限制在非安全方法能从源头切断这条耦合,需要其他
+// 动词的场景由调用方在外层显式判定 — 框架不替业务决定"改成 GET 是否安全"。
+func isOverrideTarget(m: String): Bool {
     match (m) {
-        case "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD" | "OPTIONS" | "TRACE" | "CONNECT" => return true
+        case "PUT" | "DELETE" | "PATCH" => return true
         case _ => return false
     }
 }

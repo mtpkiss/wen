@@ -1,6 +1,5 @@
 package wen_contrib
 
-
 import wen.*
 /*
  * 安全响应头中间件(对标 Node 生态里的 helmet)。
@@ -37,6 +36,7 @@ public func helmet(
     frameOptions!: String = "SAMEORIGIN",
     referrerPolicy!: String = "no-referrer",
     noSniff!: Bool = true,
+    xssProtection!: Bool = true,
     coop!: String = "",
     corp!: String = ""
 ): Middleware {
@@ -63,6 +63,13 @@ public func helmet(
                     hdr += "; preload"
                 }
                 res.set("Strict-Transport-Security", hdr)
+            }
+            if (xssProtection) {
+                // X-XSS-Protection: 0 关闭浏览器内置的 XSS auditor。Chrome 78
+                // 之前 / Safari 当前仍内置该机制,而该 auditor 本身曾被多次研究
+                // 证实可作跨源信息泄露利用面(Masato Kinugawa 2018 等),helmet.js
+                // v3 起默认行为也是显式发 0。注意是 "0"(关闭),不是 "1"。
+                res.set("X-XSS-Protection", "0")
             }
             if (!coop.isEmpty()) {
                 res.set("Cross-Origin-Opener-Policy", coop)

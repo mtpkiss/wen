@@ -1,5 +1,7 @@
 package wen
 
+import std.collection.*
+import std.fs.*
 import std.unittest.*
 import std.unittest.testmacro.*
 
@@ -101,5 +103,79 @@ class EtagTest {
         app.handle(req, res)
         @Assert(res.statusCode == 200)
         @Expect(!(match (res.get("ETag")) { case Some(v) => v; case None => "" }).isEmpty())
+    }
+
+    // staticFiles 中间件默认使用弱 ETag(W/"size-mtime" 格式),而不是对整个文件
+    // 内容算 hash。弱 ETag 只用文件元数据,代价恒定 O(1),对大文件友好;强 ETag
+    // 要读整个文件,大文件高并发会吃满内存,Range 请求取末字节也会被迫拉全文。
+    // 这条断言中间件发出的 ETag 头以 "W/" 开头,证明走的是弱 ETag 路径。
+    @TestCase
+    func testStaticFilesUsesWeakETag(): Unit {
+        let app = wen()
+        app.use("/s", staticFiles("./test_data_static"))
+        let dir = "./test_data_static"
+        try {
+            Directory.create(Path(dir), recursive: true)
+        } catch (_: Exception) {
+            ()
+        }
+        let testFile = "${dir}/probe.txt"
+        File.writeTo(testFile, "hi".toArray())
+        let req = HttpRequest("GET", "/s/probe.txt")
+        req.path = "/s/probe.txt"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        match (res.get("ETag")) {
+            case Some(v) => @Assert(v.startsWith("W/\""))
+            case None => @Assert(false)
+        }
+    }
+
+    // staticFiles 默认应发 `X-Content-Type-Options: nosniff`。一旦用户把 staticFiles
+    // 对外提供用户上传目录,攻击者上传带 `<script>` 的 SVG,浏览器会把 image/svg+xml
+    // 当 HTML 渲染 — 存储型 XSS 入口。nosniff 头明确禁止 MIME 嗅探,让浏览器拒绝
+    // 按非声明 Content-Type 解析。框架替业务把这道默认头加上,免得用户在不知情时
+    // 把 staticFiles 接到上传目录上踩坑。
+    @TestCase
+    func testStaticFilesSendsNoSniffByDefault(): Unit {
+        let app = wen()
+        app.use("/s", staticFiles("./test_data_static"))
+        let dir = "./test_data_static"
+        try {
+            Directory.create(Path(dir), recursive: true)
+        } catch (_: Exception) {
+            ()
+        }
+        let testFile = "${dir}/probe-nosniff.txt"
+        File.writeTo(testFile, "hi".toArray())
+        let req = HttpRequest("GET", "/s/probe-nosniff.txt")
+        req.path = "/s/probe-nosniff.txt"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(res.get("X-Content-Type-Options") == Some("nosniff"))
+    }
+
+    // nosniff: false 时允许关闭该头(某些极少数场景下需要保留浏览器 MIME 嗅探,
+    // 框架不替业务决定 — 给一个逃生口)。
+    @TestCase
+    func testStaticFilesNoSniffCanBeDisabled(): Unit {
+        let app = wen()
+        app.use("/s", staticFiles("./test_data_static", nosniff: false))
+        let dir = "./test_data_static"
+        try {
+            Directory.create(Path(dir), recursive: true)
+        } catch (_: Exception) {
+            ()
+        }
+        let testFile = "${dir}/probe-no-nosniff.txt"
+        File.writeTo(testFile, "hi".toArray())
+        let req = HttpRequest("GET", "/s/probe-no-nosniff.txt")
+        req.path = "/s/probe-no-nosniff.txt"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(res.get("X-Content-Type-Options").isNone())
     }
 }

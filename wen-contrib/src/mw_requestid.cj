@@ -1,6 +1,5 @@
 package wen_contrib
 
-
 import wen.*
 import std.sync.*
 import std.random.*
@@ -37,8 +36,7 @@ class RequestIdGen {
 // 安全:上游传入的 X-Request-Id 不被无条件信任 —— 须满足 isValidRequestId 字符白名单
 // (长度 ≤ 128;字符限于 [A-Za-z0-9_-])。不合规的值被丢弃、按新请求重新生成。这能挡掉
 // 日志注入(攻击者塞 CR/LF 污染日志行)、控制字符欺骗等。其它字符集需求请自行包装 generator。
-public func requestId(headerName!: String = "X-Request-Id",
-    generator!: () -> String = defaultRequestIdGen()): Middleware {
+public func requestId(headerName!: String = "X-Request-Id", generator!: () -> String = defaultRequestIdGen()): Middleware {
     return {
         req: HttpRequest, res: HttpResponse, next: Next =>
             let id = match (req.header(headerName)) {
@@ -64,9 +62,9 @@ func isValidRequestId(s: String): Bool {
         return false
     }
     for (b in s.toArray()) {
-        let alnum = (b >= UInt8(48) && b <= UInt8(57))    // 0-9
-            || (b >= UInt8(65) && b <= UInt8(90))         // A-Z
-            || (b >= UInt8(97) && b <= UInt8(122))        // a-z
+        let alnum = (b >= UInt8(48) && b <= UInt8(57)) // 0-9
+            || (b >= UInt8(65) && b <= UInt8(90)) // A-Z
+            || (b >= UInt8(97) && b <= UInt8(122)) // a-z
         if (!alnum && b != UInt8(45) && b != UInt8(95)) { // - _
             return false
         }
@@ -78,7 +76,7 @@ func isValidRequestId(s: String): Bool {
 // requestId() 中间件实例内共享一个线程安全的生成器(RequestIdGen 内部用 Mutex 保护 Random)。
 func defaultRequestIdGen(): () -> String {
     let gen = RequestIdGen()
-    return { => gen.next() }
+    return {=> gen.next()}
 }
 
 // 把 UInt64 转 16 位小写十六进制字符串(大端,固定宽度)。

@@ -46,7 +46,7 @@ import std.fs.*
  */
 public func staticFiles(root: String, index!: String = "index.html", maxAge!: Int64 = -1, dotfiles!: String = "ignore",
     etag!: Bool = true, lastModified!: Bool = true, immutable!: Bool = false,
-    setHeaders!: ?(HttpResponse, String) -> Unit = None, redirect!: Bool = true): Middleware {
+    setHeaders!: ?(HttpResponse, String) -> Unit = None, redirect!: Bool = true, nosniff!: Bool = true): Middleware {
     // 仓颉的 std.fs 不会处理路径开头的 "./"，因此这里把它去掉，这样调用方
     // 无论传 "public" 还是 "./public" 都能正常工作。
     let base = if (root.startsWith("./")) {
@@ -131,6 +131,15 @@ public func staticFiles(root: String, index!: String = "index.html", maxAge!: In
                     cc += ", immutable"
                 }
                 res.set("Cache-Control", cc)
+            }
+
+            // 默认 X-Content-Type-Options: nosniff:挡浏览器的 MIME 嗅探。最大风险在
+            // "用户上传目录"场景:攻击者上传带 <script> 的 SVG 等文件,浏览器可能
+            // 按嗅探结果当 HTML 渲染 → 存储型 XSS。框架在静态文件路径上默认发该头,
+            // 让 staticFiles("/uploads") 这种最直觉的写法也是安全的;特殊场景显式传
+            // `nosniff: false` 撤掉。本头先于 setHeaders 钩子,用户回调可覆盖 / 移除。
+            if (nosniff) {
+                res.set("X-Content-Type-Options", "nosniff")
             }
 
             // 自定义响应头钩子:在文件发送前调用,可任意改写响应头。

@@ -325,12 +325,20 @@ func parseRange(header: String, total: Int64): RangeResult {
     let aStr = a.trimAscii()
     let bStr = b.trimAscii()
 
+    // 内层 parseInt 在数字超 Int64 表达范围时会抛 ArithmeticException(乘加溢
+    // 出)。客户端可发 `bytes=99999999999999999999-...` 一行就把任意 sendFile /
+    // staticFiles 打成 500 — RFC 7233 要求无法解析的 Range 应被忽略,这里捕获后
+    // 当作 RangeIgnore 处理。
     if (aStr.isEmpty()) {
         // 形如 "-N":请求末尾 N 个字节。
         if (bStr.isEmpty()) {
             return RangeIgnore
         }
-        let n = parseInt(bStr)
+        let n = try {
+            parseInt(bStr)
+        } catch (_: Exception) {
+            return RangeIgnore
+        }
         if (n <= 0) {
             return RangeUnsatisfiable
         }
@@ -345,14 +353,22 @@ func parseRange(header: String, total: Int64): RangeResult {
     }
 
     // 形如 "start-" 或 "start-end"。
-    let start = parseInt(aStr)
+    let start = try {
+        parseInt(aStr)
+    } catch (_: Exception) {
+        return RangeIgnore
+    }
     if (start >= total) {
         return RangeUnsatisfiable
     }
     var end = if (bStr.isEmpty()) {
         total - 1
     } else {
-        parseInt(bStr)
+        try {
+            parseInt(bStr)
+        } catch (_: Exception) {
+            return RangeIgnore
+        }
     }
     if (end >= total) {
         end = total - 1

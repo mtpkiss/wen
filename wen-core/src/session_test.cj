@@ -168,4 +168,69 @@ class SessionTest {
         @Assert(res.body == "anon")
         @Assert(res.setCookies.size == 1) // 新会话下发 sid
     }
+
+    // cookieSecret 轮换 (cookieSecret = "new",legacyCookieSecrets = ["old"]) 时,
+    // 客户端带的旧 sid Cookie 用 legacy 密钥能验签通过 — 文档承诺的轮换路径是:
+    //   1. 部署主密钥 + legacy        2. 等所有客户端续期到主密钥        3. 清 legacy
+    // 但只有"isNew"才重发 cookie 的话,活跃会话会**永远停留在 legacy 签名**:
+    // 步骤 2 实际不会发生,直到该 sid 过期 — 等价于把 "legacy 不可回收" 写进了
+    // 框架。修后:legacy 命中即用主密钥重签同一 sid 下发,完成无感切换。
+    @TestCase
+    func testLegacySidResignedWithMainSecret(): Unit {
+        let app = wen()
+        app.cookieSecret = "new-secret"
+        app.legacyCookieSecrets = ["old-secret"]
+        let store = MemorySessionStore()
+        // 在 store 中预先存一个 sid(对应"轮换前已登录的活跃会话")。
+        let sid = store.newId()
+        store.save(sid, HashMap<String, String>())
+
+        app.use(session(store))
+        app.get("/", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+
+        // 客户端持有的 cookie 用 legacy 密钥签名。
+        let signed = "${sid}.${hmacSha256Hex("old-secret", sid)}"
+        let req = HttpRequest("GET", "/")
+        req.path = "/"
+        req.headers["cookie"] = "sid=${signed}"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+
+        // 期望:Set-Cookie 含主密钥重签的同一 sid(legacy 已彻底退出此 cookie)。
+        let expectedSig = hmacSha256Hex("new-secret", sid)
+        var found = false
+        for (c in res.setCookies) {
+            if (c.contains(sid) && c.contains(expectedSig)) {
+                found = true
+            }
+        }
+        @Assert(found)
+    }
+
+    // 反例:同款配置下,sid 已经是主密钥签的(不来自 legacy),无需重发 cookie。
+    // 否则每次请求都白白下一条 Set-Cookie,放大响应字节 + 让客户端误以为会话刚换。
+    @TestCase
+    func testMainSecretSidNotResigned(): Unit {
+        let app = wen()
+        app.cookieSecret = "new-secret"
+        app.legacyCookieSecrets = ["old-secret"]
+        let store = MemorySessionStore()
+        let sid = store.newId()
+        store.save(sid, HashMap<String, String>())
+
+        app.use(session(store))
+        app.get("/", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+
+        // 客户端已用主密钥签的 cookie。
+        let signed = "${sid}.${hmacSha256Hex("new-secret", sid)}"
+        let req = HttpRequest("GET", "/")
+        req.path = "/"
+        req.headers["cookie"] = "sid=${signed}"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        // 既有会话 + 无改动 + 非 legacy → 不应触发 Set-Cookie。
+        @Assert(res.setCookies.size == 0)
+    }
 }

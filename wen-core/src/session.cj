@@ -318,7 +318,11 @@ public func session(store: SessionStore, cookieName!: String = "sid", path!: Str
             } else {
                 store.touch(sess.id)
             }
-            if (sess.isNew) {
+            // legacy 命中时也强制重发 cookie(用主密钥重签同一 sid),完成密钥轮换
+            // 的"续期到主密钥"步骤;否则活跃会话会永远停在 legacy 签名上,文档承诺
+            // 的轮换流程实际上不可完成,legacy 不可回收。
+            let cameFromLegacy = req.signedCookieFromLegacy(cookieName)
+            if (sess.isNew || cameFromLegacy) {
                 res.cookie(cookieName, sess.id, path: path, maxAge: maxAge, httpOnly: httpOnly, secure: secure,
                     sameSite: sameSite, signed: true)
             }
