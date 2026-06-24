@@ -317,4 +317,69 @@ class HeadersSentTest {
         let res = HttpResponse()
         @Assert(!res.headersSent)
     }
+
+    // res.vary 追加 Vary 字段,已存在的字段不重复。RFC 7231 §7.1.4 要求 Vary 值为
+    // 逗号分隔的 token 列表,拼接到响应时应在逗号后保留一个空格。早前实现用
+    // "${v}, ${field}" 形式,若 v 末尾已含空格(例如已有值 "Accept, Origin ",再追
+    // 加 "User-Agent"),会生成 "Accept, Origin , User-Agent"(逗号前多空格),不
+    // 符合规范。修法:每次拼接时统一 trim 所有片段 + 去重 + 规范化为 "field1, field2"。
+    // 本测试先手动构造一个末尾带空格的已有值,验证 vary 能规范化。
+    @TestCase
+    func testVaryAppendNormalizesSpacing(): Unit {
+        let res = HttpResponse()
+        res.set("Vary", "Accept, Origin ")
+        res.vary("User-Agent")
+        let v = match (res.get("Vary")) {
+            case Some(v) => v
+            case None => ""
+        }
+        // 期望:trim 所有片段 → "Accept, Origin, User-Agent"(每个逗号后一个空格)
+        @Assert(v == "Accept, Origin, User-Agent")
+    }
+
+    // 正常路径:多次 vary 调用且没有异常空格时,仍应规范化。
+    @TestCase
+    func testVaryMultipleCallsNoTrailingSpace(): Unit {
+        let res = HttpResponse()
+        res.vary("Accept")
+        res.vary("Origin")
+        res.vary("User-Agent")
+        let v = match (res.get("Vary")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(v == "Accept, Origin, User-Agent")
+    }
+
+    // Vary 追加时对大小写不敏感,不重复追加同一字段。
+    @TestCase
+    func testVaryCaseInsensitiveDedup(): Unit {
+        let res = HttpResponse()
+        res.vary("Accept")
+        res.vary("ACCEPT")
+        res.vary("accept")
+        let v = match (res.get("Vary")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(v == "Accept")
+    }
+
+    // res.format 自动加 Vary: Accept,与已有 Vary 合并时不破坏既有值。
+    @TestCase
+    func testFormatAppendsVaryAccept(): Unit {
+        let res = HttpResponse()
+        let req = HttpRequest("GET", "/")
+        req.headers["accept"] = "text/html"
+        res.req = Some(req)
+        res.format([
+            ("html", { => res.send("<h1>ok</h1>") }),
+            ("default", { => res.status(406).send("not acceptable") })
+        ])
+        let v = match (res.get("Vary")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(v == "Accept")
+    }
 }

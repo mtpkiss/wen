@@ -449,17 +449,40 @@ public class HttpResponse {
     }
 
     // 往 Vary 头追加一个字段(已存在则不重复),对应 Express 的 res.vary。
+    // RFC 7231 §7.1.4:Vary 值为逗号分隔的字段名列表,字段名大小写不敏感。每次追加
+    // 时统一 trim 所有片段、去重、用单一 ", " 分隔符拼接,避免 "field1, field2 , field3"
+    // 这种不规范形式。输出保留原始大小写。
     public func vary(field: String): HttpResponse {
+        let want = field.toAsciiLower()
         match (this.get("Vary")) {
             case Some(v) =>
-                var present = false
+                // 拆分已有值,trim 每部分,转为小写用于比较。
+                let existingParts = ArrayList<String>()  // 原始大小写
+                let normalized = ArrayList<String>()    // 小写,用于比较
+                var seen = false
                 for (part in v.split(",")) {
-                    if (part.trimAscii().toAsciiLower() == field.toAsciiLower()) {
-                        present = true
+                    let trimmed = part.trimAscii()
+                    if (!trimmed.isEmpty()) {
+                        let lower = trimmed.toAsciiLower()
+                        existingParts.add(trimmed)
+                        normalized.add(lower)
+                        if (lower == want) {
+                            seen = true
+                        }
                     }
                 }
-                if (!present) {
-                    this.set("Vary", "${v}, ${field}")
+                if (!seen) {
+                    // 新字段用传入的 field 原样。
+                    existingParts.add(field)
+                    // 拼接:统一 ", " 分隔。
+                    var joined = ""
+                    for (i in 0..existingParts.size) {
+                        if (i > 0) {
+                            joined += ", "
+                        }
+                        joined += existingParts[i]
+                    }
+                    this.set("Vary", joined)
                 }
             case None => this.set("Vary", field)
         }
@@ -509,8 +532,17 @@ public class HttpResponse {
         // 该响应随 Accept 头而变,补上 Vary 以利缓存正确性。
         match (this.get("Vary")) {
             case Some(v) =>
-                if (!v.contains("Accept")) {
-                    this.set("Vary", "${v}, Accept")
+                // 大小写不敏感检查是否已含 Accept。
+                var hasAccept = false
+                for (part in v.split(",")) {
+                    if (part.trimAscii().toAsciiLower() == "accept") {
+                        hasAccept = true
+                        break
+                    }
+                }
+                if (!hasAccept) {
+                    // 规范化拼接:trim v + ", Accept"
+                    this.set("Vary", "${v.trimAscii()}, Accept")
                 }
             case None => this.set("Vary", "Accept")
         }
