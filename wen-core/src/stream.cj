@@ -12,14 +12,24 @@ package wen
  * 成把数据追加到 res.body 上，这样测试就能对写出的内容做断言。
  */
 
-// 服务端交给流式处理器使用的一条真实（活动）连接的抽象接口。
+/**
+ * 服务端交给流式处理器使用的一条真实(活动)连接的抽象接口。
+ *
+ * 由 [[StreamWriter]] / [[SseWriter]] 使用;wen 内置的实现把它适配到底层
+ * `TcpSocket`。测试场景下可注入自定义实现以捕获写出的字节。
+ */
 public interface ResponseConnection {
     func write(data: Array<UInt8>): Unit
     func close(): Unit
 }
 
-// 流式响应的增量写入器。第一次写入时会先把状态行和响应头刷出去（仅一次），
-// 之后每次写入都直接把原始数据块转发到连接上。
+/**
+ * 流式响应的增量写入器。
+ *
+ * 第一次写入时会先把状态行和响应头刷出去(仅一次),之后每次写入都直接把原始数据块
+ * 转发到连接上。由 `res.stream` 取得;当没有真实连接时(单元测试场景),写入退化成
+ * 追加到 `res.body`,便于断言。
+ */
 public class StreamWriter {
     let res: HttpResponse
     var started: Bool = false
@@ -64,8 +74,13 @@ public class StreamWriter {
     }
 }
 
-// Server-Sent Events（SSE）写入器：在 StreamWriter 之上负责把数据格式化成
-// 符合 SSE 规范的帧（event/data/id/retry/注释 等行），再交由底层写出。
+/**
+ * Server-Sent Events(SSE)写入器。
+ *
+ * 在 [[StreamWriter]] 之上负责把数据格式化成符合 SSE 规范的帧
+ * (`event` / `data` / `id` / `retry` / 注释等行),再交由底层写出。由 `res.sse` 取
+ * 得。
+ */
 public class SseWriter {
     let w: StreamWriter
 

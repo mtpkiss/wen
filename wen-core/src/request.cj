@@ -2,12 +2,13 @@ package wen
 
 import std.collection.*
 
-/*
+/**
  * 一个进入服务端的 HTTP 请求对象。
+ *
  * 注意:请求头(header)的键统一以小写形式存储,这样按名字查找时就与大小写无关,
  * 符合 HTTP 规范中"字段名大小写不敏感"的要求(例如 "Content-Type" 与
- * "content-type" 视为同一个头)。配套的 header()/get() 方法在查询前也会把传入的
- * 名字转成小写,从而保证写入和读取两端一致。
+ * "content-type" 视为同一个头)。配套的 `header()` / `get()` 方法在查询前也会把
+ * 传入的名字转成小写,从而保证写入和读取两端一致。
  */
 public class HttpRequest {
     public var method: String
@@ -880,8 +881,11 @@ func isIpv4Like(s: String): Bool {
     return true
 }
 
-// 一个字节区间 [start, end](闭区间,含两端)。req.range(size) 解析出的每个可满足
-// 区间都用它表示。
+/**
+ * 一个字节区间 `[start, end]`(闭区间,含两端)。
+ *
+ * `req.range(size)` 解析出的每个可满足区间都用它表示。参见 [[HttpRequest]].range。
+ */
 public struct ByteRange {
     public let start: Int64
     public let end: Int64
@@ -891,7 +895,14 @@ public struct ByteRange {
     }
 }
 
-// req.range(size) 的解析结果,详见 HttpRequest.range 的文档说明。
+/**
+ * `req.range(size)` 的解析结果,详见 [[HttpRequest]].range 的文档说明。
+ *
+ * - `Satisfiable`:语法合法且至少一个区间可满足,携带去重 / 合并后的所有 [[ByteRange]]
+ * - `Unsatisfiable`:语法合法但全部区间越界(对应 416 状态码)
+ * - `Malformed`:Range 头存在但语法无效
+ * - `NoRange`:请求未携带 Range 头
+ */
 public enum RangeRequest {
     | Satisfiable(Array<ByteRange>)
     | Unsatisfiable

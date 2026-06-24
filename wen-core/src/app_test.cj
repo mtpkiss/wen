@@ -647,7 +647,9 @@ class AppTest {
         var i = 0
         while (true) {
             match (s.indexOf("Secure", i)) {
-                case Some(k) => count += 1; i = k + 6
+                case Some(k) =>
+                    count += 1
+                    i = k + 6
                 case None => break
             }
         }

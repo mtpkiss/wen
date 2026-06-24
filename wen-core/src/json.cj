@@ -26,24 +26,31 @@ import std.convert.*
  * 中没有任何一处调用点会因为底层实现的替换而发生改变。
  */
 
-// 当输入不是格式良好（well-formed）的 JSON 时抛出此异常。
+/**
+ * 当输入不是格式良好(well-formed)的 JSON 时抛出此异常。由 [[parseJson]] 抛出。
+ */
 public class JsonException <: Exception {
     public init(msg: String) {
         super("JSON: ${msg}")
     }
 }
 
-// 一个 JSON 值。JSON 规定的六种值类型在这里用枚举的各个分支表示：null、布尔、
-// 数字、字符串、数组、对象。其中对象（JsonObject）刻意用"有序的键值对列表"而非
-// 哈希表来保存成员：这样就能严格保持成员的插入顺序，从而使序列化结果具有确定性
-// （deterministic），并且"解析 -> 序列化"能可预期地保序往返（round-trip）。
-//
-// **1.0 锁定说明**:本想把 enum 限同包可见(只暴露访问器 / 工厂),让未来加分支
-// 不破坏 SemVer — 但 `public type ViewEngine = (String, JsonValue) -> String`
-// 等公开类型契约要求用户必须持有 JsonValue,仓颉的 enum 公开则分支必公开,语言
-// 层面无法既保 public 又隐藏分支。最稳的退路是**文档化"用户应优先用访问器,
-// 不要 match 分支"**,使来日加 JsonBigInt 等分支时只破坏 match-fall-through 用户,
-// 不破坏访问器用户。
+/**
+ * 一个 JSON 值。
+ *
+ * JSON 规定的六种值类型在这里用枚举的各个分支表示:null、布尔、数字、字符串、数组、
+ * 对象。其中对象(`JsonObject`)刻意用"有序的键值对列表"而非哈希表来保存成员:这样
+ * 就能严格保持成员的插入顺序,从而使序列化结果具有确定性(deterministic),并且
+ * "解析 → 序列化"能可预期地保序往返(round-trip)。
+ *
+ * **1.0 锁定说明 / 兼容性**:用户应**优先用 [[asString]] / [[asInt]] / [[asObject]]
+ * 等访问器**取值,而**不要直接对 match 分支做 fall-through**。本想把 enum 限同包可
+ * 见(只暴露访问器 / 工厂),让未来加分支不破坏 SemVer——但
+ * `public type ViewEngine = (String, JsonValue) -> String` 等公开类型契约要求用户必
+ * 须持有 JsonValue,仓颉的 enum 公开则分支必公开,语言层面无法既保 public 又隐藏分
+ * 支。最稳的退路是约定"用户应优先用访问器",使来日加 `JsonBigInt` 等分支时只破坏
+ * match-fall-through 用户,不破坏访问器用户。
+ */
 public enum JsonValue {
     | JsonNull
     | JsonBool(Bool)
@@ -165,11 +172,12 @@ public enum JsonValue {
     func appendJsonInto(out: ArrayList<UInt8>): Unit {
         match (this) {
             case JsonNull => appendAscii(out, "null")
-            case JsonBool(b) => if (b) {
-                appendAscii(out, "true")
-            } else {
-                appendAscii(out, "false")
-            }
+            case JsonBool(b) =>
+                if (b) {
+                    appendAscii(out, "true")
+                } else {
+                    appendAscii(out, "false")
+                }
             case JsonNumber(n) => appendAscii(out, n)
             case JsonString(s) =>
                 out.add(UInt8(34)) // "
@@ -215,37 +223,52 @@ func appendAscii(out: ArrayList<UInt8>, s: String): Unit {
 
 // ---- 构建器 -------------------------------------------------------------
 
-// 一组便捷的重载工厂函数，把仓颉的原生值快速包装成对应的 JsonValue 分支。
-// 注意数字一律先 toString() 成词法字面量再存入 JsonNumber，与上面"逐字保留"的
-// 设计保持一致。
+/**
+ * 把仓颉的原生值快速包装成对应的 [[JsonValue]] 分支。
+ *
+ * 一组便捷的重载工厂函数。注意数字一律先 `toString()` 成词法字面量再存入
+ * `JsonNumber`,与"逐字保留"的设计保持一致。
+ */
 public func jsonOf(v: String): JsonValue {
     return JsonString(v)
 }
 
+/** 把 Int64 包装成 `JsonNumber`。参见 [[jsonOf]]`(String)`。 */
 public func jsonOf(v: Int64): JsonValue {
     return JsonNumber(v.toString())
 }
 
+/** 把 Float64 包装成 `JsonNumber`。参见 [[jsonOf]]`(String)`。 */
 public func jsonOf(v: Float64): JsonValue {
     return JsonNumber(v.toString())
 }
 
+/** 把 Bool 包装成 `JsonBool`。参见 [[jsonOf]]`(String)`。 */
 public func jsonOf(v: Bool): JsonValue {
     return JsonBool(v)
 }
 
+/** 取一个 `JsonNull` 值。 */
 public func jsonNull(): JsonValue {
     return JsonNull
 }
 
+/** 把 `JsonValue` 列表包装成 `JsonArray`。 */
 public func jsonArray(items: ArrayList<JsonValue>): JsonValue {
     return JsonArray(items)
 }
 
-// 符合人体工学的"有序对象"链式构建器，可链式调用并最终 build：
-// JsonObj().put("id", 42).put("name", "a").build()
-// 内部用与 JsonObject 相同的"有序键值对列表"存放成员，因此 put 的先后顺序就是
-// 最终序列化时的输出顺序。多个 put 重载分别接受不同类型的值并就地完成包装。
+/**
+ * 符合人体工学的"有序对象"链式构建器,可链式调用并最终 `build`。
+ *
+ * 用法:
+ * ```
+ * JsonObj().put("id", 42).put("name", "a").build()
+ * ```
+ *
+ * 内部用与 `JsonObject` 相同的"有序键值对列表"存放成员,因此 `put` 的先后顺序就是
+ * 最终序列化时的输出顺序。多个 `put` 重载分别接受不同类型的值并就地完成包装。
+ */
 public class JsonObj {
     let pairs = ArrayList<(String, JsonValue)>()
 
@@ -282,8 +305,12 @@ public class JsonObj {
 
 // ---- 对外入口 ---------------------------------------------------
 
-// 解析一份 JSON 文档，返回对应的 JsonValue。输入若不合法（malformed）则抛出
-// JsonException。这是整个解析功能对外暴露的唯一入口，内部委托给 JsonParser。
+/**
+ * 解析一份 JSON 文档,返回对应的 [[JsonValue]]。
+ *
+ * 输入若不合法(malformed)则抛出 [[JsonException]]。这是整个解析功能对外暴露的唯
+ * 一入口,内部委托给 JsonParser。
+ */
 public func parseJson(text: String): JsonValue {
     return JsonParser(text).parseDocument()
 }

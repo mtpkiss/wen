@@ -20,7 +20,6 @@ import std.collection.*
  * 中间件(isPrefix=true)与错误层(isError=true)不进 trie——前者顺序敏感、由 Router 顺序
  * 扫描;后者无路径语义、按全局错误流水线处理。
  */
-
 class RouteNode {
     // 字面量子节点:key 为段的 lowercase 形式。
     let literal: HashMap<String, RouteNode> = HashMap<String, RouteNode>()

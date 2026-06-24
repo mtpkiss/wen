@@ -173,13 +173,14 @@ func formatHttpDate(t: DateTime): String {
 }
 
 let HTTP_DAYS: Array<String> = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-let HTTP_MONTHS: Array<String> = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+let HTTP_MONTHS: Array<String> = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 func abbrevDayOfWeek(t: DateTime): String {
     let s = t.dayOfWeek.toString()
-    if (s.size >= 3 && isAsciiAlpha(s[0..3])) {
-        return s[0..3]
+    if (s.size >= 3) {
+        if (isAsciiAlpha(s[0..3])) {
+            return s[0..3]
+        }
     }
     // 回退到固定 ASCII 数组 — std 区域化时不会破坏 RFC 格式。
     match (t.dayOfWeek) {
@@ -195,8 +196,10 @@ func abbrevDayOfWeek(t: DateTime): String {
 
 func abbrevMonth(t: DateTime): String {
     let s = t.month.toString()
-    if (s.size >= 3 && isAsciiAlpha(s[0..3])) {
-        return s[0..3]
+    if (s.size >= 3) {
+        if (isAsciiAlpha(s[0..3])) {
+            return s[0..3]
+        }
     }
     match (t.month) {
         case January => return HTTP_MONTHS[0]

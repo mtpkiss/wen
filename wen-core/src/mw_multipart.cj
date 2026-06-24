@@ -27,7 +27,12 @@ import std.fs.*
  *   - 文件     -> 封装成 UploadedFile 加入 req.files,用 req.file(name) 取
  */
 
-// 一个已上传的文件。bytes 是其原始字节;可用 text() 取文本视图,或 saveTo 落盘。
+/**
+ * 一个已上传的文件。
+ *
+ * `bytes` 是其原始字节;可用 [[text]] 取文本视图,或 [[saveTo]] 落盘。由 multipart
+ * 解析填充并塞进 `req.files`,用 `req.file(name)` / `req.files` 取出。
+ */
 public class UploadedFile {
     public let fieldName: String // 表单字段名(Content-Disposition 的 name)
     public let filename: String // 客户端给出的原始文件名
@@ -57,11 +62,16 @@ public class UploadedFile {
     }
 }
 
-// multipart 解析的配额与过滤选项。所有 *上限 ≤ 0 表示「不限」;fileFilter 缺省即不做白名单过滤。
-//
-// 超过 maxFileSize / maxFiles / maxFields 一律抛 PayloadTooLargeException(框架默认会回 413,
-// 用户也可通过错误处理中间件自定义);fileFilter 返回 false 时该文件**静默丢弃**(不计入 req.files
-// 也不算超额),这与 multer 的语义一致——「过滤」是业务策略,「超额」才是协议错误。
+/**
+ * multipart 解析的配额与过滤选项。
+ *
+ * 所有 `*上限 ≤ 0` 表示「不限」;`fileFilter` 缺省即不做白名单过滤。
+ *
+ * 超过 `maxFileSize` / `maxFiles` / `maxFields` 一律抛 [[PayloadTooLargeException]]
+ * (框架默认会回 413,用户也可通过错误处理中间件自定义);`fileFilter` 返回 false
+ * 时该文件**静默丢弃**(不计入 `req.files` 也不算超额),这与 multer 的语义一致——
+ * 「过滤」是业务策略,「超额」才是协议错误。
+ */
 public class MultipartOptions {
     public let maxFileSize: Int64 // 单文件最大字节数;≤ 0 表示不限
     public let maxFiles: Int64 // 文件总数上限;≤ 0 表示不限
@@ -81,16 +91,20 @@ public class MultipartOptions {
     }
 }
 
-// multipart/form-data 解析中间件。
-//
-// 解析现在是内置的——首次通过 req.file(name) / req.files 访问时自动解析(见 HttpRequest.ensureBody)。
-// 本中间件的作用有二:(1)提前触发解析,把潜在错误推到中间件链的早期被错误处理捕获;
-// (2)注入配额与过滤选项 —— 单文件大小、文件数、字段数上限,以及 fileFilter 白名单。
-//
-// **配额生效的前提**:本中间件必须先于任何会触发 req.ensureBody 的代码注册。否则解析早已发生,
-// 后塞入的选项不再生效(ensureBody 是一次性闸门)。
-//
-// 超额一律抛 PayloadTooLargeException,默认错误回 413 Payload Too Large。
+/**
+ * multipart/form-data 解析中间件。
+ *
+ * 解析现在是内置的——首次通过 `req.file(name)` / `req.files` 访问时自动解析(见
+ * `HttpRequest.ensureBody`)。本中间件的作用有二:
+ *
+ * 1. 提前触发解析,把潜在错误推到中间件链的早期被错误处理捕获;
+ * 2. 注入配额与过滤选项——单文件大小、文件数、字段数上限,以及 `fileFilter` 白名单。
+ *
+ * **配额生效的前提**:本中间件必须先于任何会触发 `req.ensureBody` 的代码注册。否则
+ * 解析早已发生,后塞入的选项不再生效(`ensureBody` 是一次性闸门)。
+ *
+ * 超额一律抛 [[PayloadTooLargeException]],默认错误回 413 Payload Too Large。
+ */
 public func multipart(
     maxFileSize!: Int64 = -1,
     maxFiles!: Int64 = -1,
@@ -99,12 +113,14 @@ public func multipart(
 ): Middleware {
     return {
         req: HttpRequest, _: HttpResponse, next: Next =>
-            req.multipartOptions = Some(MultipartOptions(
-                maxFileSize: maxFileSize,
-                maxFiles: maxFiles,
-                maxFields: maxFields,
-                fileFilter: fileFilter
-            ))
+            req.multipartOptions = Some(
+                MultipartOptions(
+                    maxFileSize: maxFileSize,
+                    maxFiles: maxFiles,
+                    maxFields: maxFields,
+                    fileFilter: fileFilter
+                )
+            )
             req.ensureBody()
             next()
     }
@@ -262,9 +278,10 @@ func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, s
                 }
                 // 文件过滤白名单:返回 false 静默丢弃,不算超额。
                 match (opts.fileFilter) {
-                    case Some(filter) => if (!filter(name, filename, ctype)) {
-                        return
-                    }
+                    case Some(filter) =>
+                        if (!filter(name, filename, ctype)) {
+                            return
+                        }
                     case None => ()
                 }
                 // 文件数 / 字段数上限:加入之前判定,即将加入则超 -> 413。

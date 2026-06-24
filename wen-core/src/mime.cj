@@ -31,8 +31,12 @@ func mimeKey(ext: String): String {
     return normalizeExt(ext).toAsciiLower()
 }
 
-// 注册(或覆盖)一个扩展名到 MIME 类型的映射。ext 可带或不带前导点、大小写不敏感。
-// 约定在 listen() 之前调用。app.mime(ext, type) 是它的实例级链式语法糖。
+/**
+ * 注册(或覆盖)一个扩展名到 MIME 类型的映射。
+ *
+ * `ext` 可带或不带前导点、大小写不敏感。约定在 `listen()` 之前调用,运行期注册会
+ * 引发数据竞争。`app.mime(ext, type)` 是它的实例级链式语法糖。
+ */
 public func registerMimeType(ext: String, mimeType: String): Unit {
     userMimeTypes[mimeKey(ext)] = mimeType
 }

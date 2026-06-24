@@ -24,31 +24,39 @@ func warnIfWeakCookieSecret(app: ?Application, secret: String): Unit {
             }
         case None => ()
     }
-    eprintln("[wen] 警告: cookieSecret 长度 ${secret.size} 不足 32 字节(256 位),易被暴力破解;生产环境请使用至少 32 字节的强随机密钥")
+    eprintln(
+        "[wen] 警告: cookieSecret 长度 ${secret.size} 不足 32 字节(256 位),易被暴力破解;生产环境请使用至少 32 字节的强随机密钥")
 }
 
-// 应用启动后再修改配置(setLocal / engine / bodyParser / set / enable / disable / mime)
-// 会抛此异常。多线程并发请求阶段对共享 HashMap 的写入会引发数据竞争,所以"配置阶段
-// 写入、运行阶段只读"被设为强约束。
+/**
+ * 应用启动后再修改配置(`setLocal` / `engine` / `bodyParser` / `set` / `enable` /
+ * `disable` / `mime`)时抛出的异常。
+ *
+ * 多线程并发请求阶段对共享 HashMap 的写入会引发数据竞争,所以"配置阶段写入、运
+ * 行阶段只读"被设为强约束。
+ */
 public class IllegalStateException <: Exception {
     public init(msg: String) {
         super(msg)
     }
 }
 
-/*
+/**
  * 应用对象——相当于 Express 里的 `const app = express()`。
  *
- * 它是整个框架对外的主入口，聚合了路由表、设置项和应用级共享数据，并提供注册
- * 路由 / 中间件以及启动服务器的全部方法。
+ * 整个框架对外的主入口,聚合了路由表、设置项和应用级共享数据,并提供注册路由 /
+ * 中间件以及启动服务器的全部方法。
  *
- * 两个一贯的设计约定：
- * 1. 链式调用：所有注册类方法都返回 `this`（Application 自身），因此可以
- *    app.use(...).get(...).post(...) 这样连写。
- * 2. 处理器双形式：每个动词方法既接受完整的 `Middleware`（(req, res, next)），
- *    也接受终结的 `Handler`（(req, res)，不带 next）。后者由框架自动用一个
- *    包装器补上被忽略的 next，从而统一成 Middleware 纳入调度——调用方无需关心
- *    这层转换。
+ * 两个一贯的设计约定:
+ *
+ * 1. **链式调用**:所有注册类方法都返回 `this`(Application 自身),因此可以
+ *    `app.use(...).get(...).post(...)` 这样连写。
+ * 2. **处理器双形式**:每个动词方法既接受完整的 [[Middleware]]
+ *    (`(req, res, next)`),也接受终结的 [[Handler]](`(req, res)`,不带 next)。
+ *    后者由框架自动用一个包装器补上被忽略的 next,从而统一成 Middleware 纳入调
+ *    度——调用方无需关心这层转换。
+ *
+ * 也可以通过 [[wen]] 工厂函数获取实例:`let app = wen()`。
  */
 public class Application {
     let router: Router = Router()
@@ -510,8 +518,12 @@ public class Application {
     }
 }
 
-// 应用工厂函数，对应 Express 的 `express()`。仅仅是 Application() 的简写，
-// 让使用方可以写 `let app = wen()` 这样贴近 Express 习惯的代码来获取应用实例。
+/**
+ * 应用工厂函数,对应 Express 的 `express()`。
+ *
+ * 仅仅是 [[Application]] 构造器的简写,让使用方可以写 `let app = wen()` 这样贴近
+ * Express 习惯的代码来获取应用实例。
+ */
 public func wen(): Application {
     return Application()
 }

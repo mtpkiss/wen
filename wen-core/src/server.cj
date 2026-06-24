@@ -4,35 +4,33 @@ import std.net.*
 import std.collection.*
 import std.sync.*
 
-// 当请求体的字节数超过服务器配置的上限（maxBodySize）时抛出此异常。
-// 服务器在 handleConnection 的 catch 中捕获它，并向客户端返回 413
-// Payload Too Large 响应。把"体积超限"建模成专门的异常，是为了和
-// 普通的解析错误（400）、未知错误（500）区分开，从而映射到正确的状态码。
+/**
+ * 当请求体的字节数超过服务器配置的上限(`maxBodySize`)时抛出此异常。
+ *
+ * 服务器在 `handleConnection` 的 catch 中捕获它,并向客户端返回 413 Payload Too
+ * Large 响应。把"体积超限"建模成专门的异常,是为了和普通的解析错误(400)、未知
+ * 错误(500)区分开,从而映射到正确的状态码。继承自 [[HttpException]]。
+ */
 public class PayloadTooLargeException <: HttpException {
     public init() {
         super(413, "Payload Too Large")
     }
 }
 
-// 当请求的消息分帧（framing）非法时抛出此异常，最典型的情形是同一请求里
-// 同时出现 Content-Length 和 Transfer-Encoding 两个互相冲突的报文头——这种
-// 二义性正是 HTTP 请求走私（request smuggling）攻击的经典手法：前后端代理
-// 对"以哪个头为准"理解不一致，攻击者就能把一个请求伪装成两个。服务器一律
-// 拒绝这类请求，捕获该异常后返回 400 Bad Request。
+/**
+ * 当请求的消息分帧(framing)非法时抛出此异常。
+ *
+ * 最典型的情形是同一请求里同时出现 `Content-Length` 和 `Transfer-Encoding` 两个互
+ * 相冲突的报文头——这种二义性正是 HTTP 请求走私(request smuggling)攻击的经典手
+ * 法:前后端代理对"以哪个头为准"理解不一致,攻击者就能把一个请求伪装成两个。服务
+ * 器一律拒绝这类请求,捕获该异常后返回 400 Bad Request。继承自 [[HttpException]]。
+ */
 public class BadRequestException <: HttpException {
     public init() {
         super(400, "Bad Request")
     }
 }
 
-/*
- * 一个直接构建在 TCP 套接字之上的极简 HTTP/1.1 服务器。它的工作流程是：
- * 从套接字读取原始请求字节并解析出 HttpRequest，再配一个空白的
- * HttpResponse，把这对 (HttpRequest, HttpResponse) 交给应用的中间件链
- * 处理，最后把处理完成的响应序列化成字节写回套接字。
- *
- * 每条连接都通过 `spawn` 在各自独立的轻量线程上处理，互不阻塞。
- */
 // SocketConnection 把底层的 TcpSocket 适配成 ResponseConnection 接口。
 // 这样流式处理器（streaming handler）可以脱离常规的"先攒响应再一次性序列化"
 // 流程，直接往这条活动连接上写字节（例如分块推送、Server-Sent Events），
@@ -53,6 +51,19 @@ class SocketConnection <: ResponseConnection {
     }
 }
 
+/**
+ * 一个直接构建在 TCP 套接字之上的极简 HTTP/1.1 服务器。
+ *
+ * 工作流程:从套接字读取原始请求字节并解析出 [[HttpRequest]],再配一个空白的
+ * [[HttpResponse]],把这对 `(req, res)` 交给 [[Application]] 的中间件链处理,最
+ * 后把处理完成的响应序列化成字节写回套接字。
+ *
+ * 每条连接都通过 `spawn` 在各自独立的轻量线程上处理,互不阻塞。
+ *
+ * **不建议直接构造**:应用代码通过 [[Application]].listen 间接启动 HttpServer。可
+ * 调参数(maxBodySize / readTimeoutMs / maxConnections / maxHeaderBytes)统一在
+ * Application 上设置,Application 启动前会一次性同步过来。
+ */
 public class HttpServer {
     let app: Application
 
@@ -116,17 +127,16 @@ public class HttpServer {
         // bind 已成功,端口对外可见;先触发 onReady。若 onReady 抛异常,将 socket 关掉
         // 再向上冒,避免泄漏。
         match (onReady) {
-            case Some(cb) =>
+            case Some(cb) => try {
+                cb()
+            } catch (e: Exception) {
                 try {
-                    cb()
-                } catch (e: Exception) {
-                    try {
-                        server.close()
-                    } catch (_: Exception) {
-                        ()
-                    }
-                    throw e
+                    server.close()
+                } catch (_: Exception) {
+                    ()
                 }
+                throw e
+            }
             case None => ()
         }
         // 若 shutdown() 在 listen() 之前或 onReady 期间被调用,这里立即退出。
@@ -1204,11 +1214,15 @@ func parseInt(s: String): Int64 {
     return 0
 }
 
-// 对 URL 组件做解码：还原百分号编码（%XX）以及把 '+' 还原成空格。关键点在于
-// 解码出的字节先统统累积到一个字节缓冲里，直到最后才整体按 UTF-8 解释成字符串。
-// 这样一来，一个跨多字节的 UTF-8 序列（例如 "%E4%B8%AD" 对应汉字 "中"）能被
-// 完整地重新拼接，而不会因为"每解出一个字节就单独转成字符"而被拆坏、产生乱码。
-// **可见性 (P0-J)**:benchmark 子项目用它做 URL 解码基准测试。
+/**
+ * 对 URL 组件做解码:还原百分号编码(`%XX`)以及把 `+` 还原成空格。
+ *
+ * 关键点在于解码出的字节先统统累积到一个字节缓冲里,直到最后才整体按 UTF-8 解释成
+ * 字符串。这样一来,一个跨多字节的 UTF-8 序列(例如 `%E4%B8%AD` 对应汉字"中")能
+ * 被完整地重新拼接,而不会因为"每解出一个字节就单独转成字符"而被拆坏、产生乱码。
+ *
+ * **可见性(P0-J)**:benchmark 子项目用它做 URL 解码基准测试。
+ */
 public func urlDecode(s: String): String {
     let bytes = s.toArray()
     let out = ArrayList<UInt8>()

@@ -49,6 +49,15 @@ class Segment {
     }
 }
 
+/**
+ * 已编译的路由路径模式。
+ *
+ * 把字符串路径(如 `/users/:id`、`/posts/:slug?`、或带尾部通配的 `/files/` + 星号)
+ * 编译成段序列,支持参数捕获(`:name`)、可选段(`:name?`)、参数约束(`:id(\d+)`)、
+ * 尾部通配。匹配成功时把捕获到的参数填入 `req.params`,失败则返回 false。
+ *
+ * 内部由 [[Router]] 使用,通常应用代码不直接构造。
+ */
 public class PathPattern {
     let segments: ArrayList<Segment>
     let hasWildcard: Bool
@@ -254,6 +263,22 @@ class Layer {
     }
 }
 
+/**
+ * 路由表与中间件链的核心调度器,对应 Express 的 `express.Router()`。
+ *
+ * Router 既是 [[Application]] 的底层实现,也可以独立实例化并通过 `app.use(path, router)`
+ * 挂载到任意前缀下,从而把功能拆分到独立的子模块。提供与 Application 同名 / 同形参
+ * 的注册入口:`use` / `get` / `post` / `put` / `delete` / `patch` / `head` /
+ * `options` / `all` / `param` / `useError`,以及 `route(path)` 取得绑定到该路径的
+ * [[Route]] 用于多动词链式注册。
+ *
+ * 链式调用:所有注册方法都返回 `this`。所有处理器接受 [[Middleware]] 或 [[Handler]]
+ * 两种形式(后者由框架自动包装成 Middleware)。
+ *
+ * **冻结约束**:[[Application]].listen 启动后整张路由表会被冻结,此后再注册路由会
+ * 抛 [[IllegalStateException]]——请求处理线程会并发遍历路由表,运行时再写就是数
+ * 据竞争。
+ */
 public class Router {
     let layers: ArrayList<Layer> = ArrayList<Layer>()
     // 路由表是否已"冻结":Application.listen 启动后设为 true,此后所有写操作
@@ -525,8 +550,16 @@ public class Router {
         // 注:hasMethodForPath 是纯查表函数,但 cjlint 的 G.EXP.03 不允许在 && 短路右操作数
         // 里调函数(怕副作用),故把两次查表抽到局部变量再判断。
         let isHead = req.method == HttpMethod.HEAD
-        let noHeadRoute = if (isHead) { !hasMethodForPath(HttpMethod.HEAD, req.path) } else { false }
-        let hasGetRoute = if (noHeadRoute) { hasMethodForPath(HttpMethod.GET, req.path) } else { false }
+        let noHeadRoute = if (isHead) {
+            !hasMethodForPath(HttpMethod.HEAD, req.path)
+        } else {
+            false
+        }
+        let hasGetRoute = if (noHeadRoute) {
+            hasMethodForPath(HttpMethod.GET, req.path)
+        } else {
+            false
+        }
         if (hasGetRoute) {
             req.method = HttpMethod.GET
             dispatchTop(req, res)
@@ -887,12 +920,11 @@ public class Router {
             req.path = stripMountPath(req.path, layer.pattern.segments.size)
             req.baseUrl = savedBaseUrl + mountPrefix
             let next: Next = {
-                =>
-                    if (nextCalled.compareAndSwap(false, true)) {
-                        req.path = savedPath
-                        req.baseUrl = savedBaseUrl
-                        dispatch(matched, index + 1, req, res, onExhausted, onError, None)
-                    }
+                => if (nextCalled.compareAndSwap(false, true)) {
+                    req.path = savedPath
+                    req.baseUrl = savedBaseUrl
+                    dispatch(matched, index + 1, req, res, onExhausted, onError, None)
+                }
             }
             try {
                 layer.handler(req, res, next)
@@ -914,10 +946,9 @@ public class Router {
             }
         } else {
             let next: Next = {
-                =>
-                    if (nextCalled.compareAndSwap(false, true)) {
-                        dispatch(matched, index + 1, req, res, onExhausted, onError, None)
-                    }
+                => if (nextCalled.compareAndSwap(false, true)) {
+                    dispatch(matched, index + 1, req, res, onExhausted, onError, None)
+                }
             }
             try {
                 layer.handler(req, res, next)

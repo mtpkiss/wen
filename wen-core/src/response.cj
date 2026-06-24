@@ -3,11 +3,12 @@ package wen
 import std.collection.*
 import std.fs.*
 
-/*
+/**
  * 一个待发出的 HTTP 响应对象。
- * 工作方式:各方法只是不断在对象上累积状态(状态码、响应头、响应体等),
- * 真正把一个"已完成"的响应序列化并写入 socket 的工作由服务端统一完成。
- * 大量设置类方法都返回 this,从而支持链式调用,风格对应 Express 的
+ *
+ * 工作方式:各方法只是不断在对象上累积状态(状态码、响应头、响应体等),真正把一个
+ * "已完成"的响应序列化并写入 socket 的工作由服务端统一完成。大量设置类方法都返回
+ * `this`,从而支持链式调用,风格对应 Express 的
  * `res.status(201).set(...).send(...)`。
  */
 public class HttpResponse {
@@ -581,7 +582,8 @@ func rejectDotDotPath(p: String): Unit {
     let normalized = p.replace("\\", "/")
     for (seg in normalized.split("/")) {
         if (seg == "..") {
-            throw Exception("sendFile: 路径含 '..' 段被拒绝;若需读取上级目录文件,请显式传 root 参数:sendFile(path, root: ...)")
+            throw Exception(
+                "sendFile: 路径含 '..' 段被拒绝;若需读取上级目录文件,请显式传 root 参数:sendFile(path, root: ...)")
         }
     }
 }
@@ -604,7 +606,8 @@ func asciiFallbackFilename(s: String): String {
     let bytes = s.toArray()
     let out = ArrayList<UInt8>()
     for (b in bytes) {
-        if (b < UInt8(0x20) || b == UInt8(0x7f) || b > UInt8(0x7e) || b == UInt8(34) || b == UInt8(92) || b == UInt8(13) || b == UInt8(10) || b == UInt8(0) || b == UInt8(59)) {
+        if (b < UInt8(0x20) || b == UInt8(0x7f) || b > UInt8(0x7e) || b == UInt8(34) || b == UInt8(92) || b == UInt8(13) ||
+            b == UInt8(10) || b == UInt8(0) || b == UInt8(59)) {
             // 不可打印 ASCII / 高位字节 / 双引号 / 反斜杠 / CR / LF / NUL / 分号
             out.add(UInt8(95)) // '_'
         } else {
@@ -621,11 +624,11 @@ func percentEncodeFilename(s: String): String {
     let bytes = s.toArray()
     var out = ""
     for (b in bytes) {
-        let unreserved =
-            (b >= UInt8(0x41) && b <= UInt8(0x5a)) ||  // A-Z
-            (b >= UInt8(0x61) && b <= UInt8(0x7a)) ||  // a-z
-            (b >= UInt8(0x30) && b <= UInt8(0x39)) ||  // 0-9
-            b == UInt8(0x2d) || b == UInt8(0x5f) || b == UInt8(0x2e) || b == UInt8(0x7e) // - _ . ~
+        let unreserved = (b >= UInt8(0x41) && b <= UInt8(0x5a)) || // A-Z
+            (b >= UInt8(0x61) && b <= UInt8(0x7a)) || // a-z
+            (b >= UInt8(0x30) &&
+            b <= UInt8(0x39)) || // 0-9
+                b == UInt8(0x2d) || b == UInt8(0x5f) || b == UInt8(0x2e) || b == UInt8(0x7e) // - _ . ~
         if (unreserved) {
             let arr = Array<UInt8>(1, repeat: b)
             out += String.fromUtf8(arr)
@@ -653,12 +656,18 @@ func checkHeaderSafe(v: String): Unit {
     }
 }
 
-// 把内容类型的简写(如 "json"、"html"、"text" 等)展开为完整的 MIME 类型。
-// 规则:
-//   - 若传入值本身已含 "/"(已是完整 MIME),原样返回,不做转换。
-//   - 否则按小写匹配已知简写,返回对应的完整类型(文本类还带 charset=utf-8)。
-//   - 无法识别的简写一律回退为 application/octet-stream(通用二进制流)。
-// 该函数同时被请求侧(isType/accepts 的类型比较)和响应侧(mimeType 设头)复用。
+/**
+ * 把内容类型的简写(如 "json"、"html"、"text" 等)展开为完整的 MIME 类型。
+ *
+ * 规则:
+ *
+ * - 若传入值本身已含 "/"(已是完整 MIME),原样返回,不做转换。
+ * - 否则按小写匹配已知简写,返回对应的完整类型(文本类还带 `charset=utf-8`)。
+ * - 无法识别的简写一律回退为 `application/octet-stream`(通用二进制流)。
+ *
+ * 该函数同时被请求侧(`isType` / `accepts` 的类型比较)和响应侧(`mimeType` 设头)
+ * 复用。
+ */
 public func contentTypeFor(value: String): String {
     if (value.contains("/")) {
         return value

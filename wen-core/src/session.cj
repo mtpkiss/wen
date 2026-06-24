@@ -21,7 +21,12 @@ import std.time.*
  * 因为服务器是多线程处理连接的,会话表会被并发读写。
  */
 
-// 一次请求对应的会话对象:带一个 id 和一组字符串键值数据。
+/**
+ * 一次请求对应的会话对象,带一个 id 和一组字符串键值数据。
+ *
+ * 由 [[session]] 中间件加载/创建,挂在 `req.session`。通过 [[get]] / [[set]] /
+ * [[remove]] 读写键值;[[regenerate]] 用于认证边界换发新 sid 防止会话固定攻击。
+ */
 public class Session {
     // id / isNew 在请求处理过程中可能因 regenerate() 而变化,因此是 var:
     //   - regenerate() 会把 id 切换到新值、isNew 置 true,从而触发 sid Cookie 重新下发。
@@ -72,7 +77,13 @@ public class Session {
     }
 }
 
-// 会话存储后端的抽象接口。自定义存储(Redis/DB 等)实现此接口即可接入 session()。
+/**
+ * 会话存储后端的抽象接口。
+ *
+ * 自定义存储(Redis / DB 等)实现此接口即可接入 [[session]] 中间件。框架内置
+ * [[MemorySessionStore]] 作为进程内默认实现。`touch` 有默认实现(转调 `save`),自
+ * 定义存储可选择重写以优化"只刷新最近访问时间"的路径。
+ */
 public interface SessionStore {
     // 按 id 载入会话数据;不存在返回 None。
     func load(id: String): ?HashMap<String, String>
@@ -107,15 +118,22 @@ class SessionEntry {
     }
 }
 
-// 进程内存实现的会话存储(线程安全,用 Mutex 保护)。
-//
-// 配额(默认全关、向后兼容):
-//   - ttlSeconds:**滑动**过期窗口,>0 时,任何「上次访问后超过 N 秒」的会话被视为不存在
-//     并在 load/save 时惰性清理。-1/0 表示永不过期。
-//   - maxSessions:容量上限,>0 时,save 引入新会话且容量超额时,FIFO 淘汰最旧。
-//
-// 「满了怎么办」选 evict 而非 reject:save 发生在响应处理之后,reject 只能让会话「静默
-// 失效」(下个请求又是新会话);evict 在 save 里淘汰最旧,零中间件改动、对正常用户无感。
+/**
+ * 进程内存实现的会话存储(线程安全,用 Mutex 保护)。
+ *
+ * 仅适合单实例 / 开发场景——重启即失。生产环境请自行实现 [[SessionStore]] 接入
+ * Redis 等持久化后端。
+ *
+ * 配额(默认全关、向后兼容):
+ *
+ * - `ttlSeconds`:**滑动**过期窗口,`>0` 时任何「上次访问后超过 N 秒」的会话被视为
+ *   不存在,并在 `load` / `save` 时惰性清理。`-1` / `0` 表示永不过期。
+ * - `maxSessions`:容量上限,`>0` 时 `save` 引入新会话且容量超额时,FIFO 淘汰最旧。
+ *
+ * 「满了怎么办」选 evict 而非 reject:`save` 发生在响应处理之后,reject 只能让会话
+ * 「静默失效」(下个请求又是新会话);evict 在 `save` 里淘汰最旧,零中间件改动、对
+ * 正常用户无感。
+ */
 public class MemorySessionStore <: SessionStore {
     let data = HashMap<String, SessionEntry>()
     let order = ArrayList<String>() // 按首次写入顺序;FIFO 淘汰从头部取
@@ -230,12 +248,13 @@ public class MemorySessionStore <: SessionStore {
         while (order.size > 0) {
             let oldId = order[0]
             match (data.get(oldId)) {
-                case Some(e) => if (n - e.lastAccess >= ttlSeconds) {
-                    order.remove(0..1)
-                    data.remove(oldId)
-                } else {
-                    return
-                }
+                case Some(e) =>
+                    if (n - e.lastAccess >= ttlSeconds) {
+                        order.remove(0..1)
+                        data.remove(oldId)
+                    } else {
+                        return
+                    }
                 case None => order.remove(0..1)
             }
         }
@@ -253,14 +272,20 @@ public class MemorySessionStore <: SessionStore {
     }
 }
 
-// 构造 session 中间件,使用指定的存储后端。可选具名参数定制 sid Cookie:
-//   cookieName  Cookie 名(默认 "sid")
-//   path        Path 属性(默认 "/")
-//   maxAge      Max-Age 秒数;默认 -1 表示不设(会话 Cookie,关闭浏览器即失)
-//   secure      是否仅 HTTPS 回传(默认 false;生产 HTTPS 站点应设 true)
-//   sameSite    SameSite 策略(默认空,不输出;可设 "Lax"/"Strict"/"None")
-//   httpOnly    是否禁止脚本读取(默认 true)
-// sid Cookie 始终 HMAC 签名,故仍需先设 app.cookieSecret。
+/**
+ * 构造 session 中间件,使用指定的存储后端。
+ *
+ * 可选具名参数定制 sid Cookie:
+ *
+ * - `cookieName`:Cookie 名(默认 `"sid"`)
+ * - `path`:Path 属性(默认 `"/"`)
+ * - `maxAge`:Max-Age 秒数;默认 `-1` 表示不设(会话 Cookie,关闭浏览器即失)
+ * - `secure`:是否仅 HTTPS 回传(默认 false;生产 HTTPS 站点应设 true)
+ * - `sameSite`:SameSite 策略(默认空,不输出;可设 `"Lax"` / `"Strict"` / `"None"`)
+ * - `httpOnly`:是否禁止脚本读取(默认 true)
+ *
+ * sid Cookie 始终 HMAC 签名,故仍需先设 [[Application]].cookieSecret。
+ */
 public func session(store: SessionStore, cookieName!: String = "sid", path!: String = "/", maxAge!: Int64 = -1,
     secure!: Bool = false, sameSite!: String = "", httpOnly!: Bool = true): Middleware {
     return {
@@ -278,8 +303,8 @@ public func session(store: SessionStore, cookieName!: String = "sid", path!: Str
             // 形成会话固定攻击的回归窗口。改成"先 newId、成功后再 destroy"是原子的:
             // newId 抛则保留旧会话不变,异常自然向上传播。
             if (sess.regenerateRequested) {
-                let newId = store.newId()  // 先暂存:newId 抛即原子失败,sess 完全不变
-                store.destroy(sess.id)     // sess.id 此刻仍是旧 id
+                let newId = store.newId() // 先暂存:newId 抛即原子失败,sess 完全不变
+                store.destroy(sess.id) // sess.id 此刻仍是旧 id
                 sess.id = newId
                 sess.isNew = true
                 sess.regenerateRequested = false
@@ -300,7 +325,10 @@ public func session(store: SessionStore, cookieName!: String = "sid", path!: Str
     }
 }
 
-// 构造 session 中间件,使用默认的进程内存存储。
+/**
+ * 构造 session 中间件,使用默认的进程内存存储([[MemorySessionStore]])。等价于
+ * `session(MemorySessionStore())`。
+ */
 public func session(): Middleware {
     return session(MemorySessionStore())
 }

@@ -14,22 +14,36 @@ import std.fs.*
  * 目录、去读取服务目录之外的文件。
  */
 
-// 构造一个从 `root` 目录提供文件服务的中间件。可选具名参数:
-//   index        —— 目录默认文件名(默认 "index.html");请求路径为空或以 "/" 结尾时,
-//                   自动在其后补上该文件名。
-//   maxAge       —— 缓存秒数;>=0 时为响应加上 Cache-Control: public, max-age=N。
-//   dotfiles     —— 隐藏文件(路径段以 "." 开头,如 .env/.git)的策略:"ignore"(默认,
-//                   当作不存在、放行)/"deny"(回 403)/"allow"(照常提供)。
-//   etag         —— 是否发送 ETag 并参与 If-None-Match 条件请求(默认 true)。
-//   lastModified —— 是否发送 Last-Modified 并参与 If-Modified-Since 条件请求(默认 true)。
-//   immutable    —— maxAge>0 且 immutable=true 时,Cache-Control 追加 ", immutable",
-//                   告诉客户端该资源在缓存期内永远不会变(适合带指纹的构建产物)。
-//   setHeaders   —— 在文件发送前调用的回调,可在其中对响应任意定制头部;入参为
-//                   (res, 该次请求映射到的真实文件路径)。默认为 None(不调用)。
-//   redirect     —— 目录请求且 URL 不以 "/" 结尾时是否 301 重定向到带斜杠版本(默认
-//                   true)。这能让目录内 HTML 的相对路径正确解析(比如 /dir 上的
-//                   <img src="a.png"> 应解析为 /dir/a.png 而非 /a.png)。关闭后目录
-//                   请求一律交给 next()。
+/**
+ * 构造一个从 `root` 目录提供文件服务的中间件。
+ *
+ * 针对 GET/HEAD 请求,从 `root` 目录下提供静态文件。当请求路径能映射到 root 下一个
+ * 真实存在的文件时,就把该文件发送出去(Content-Type 依据扩展名推断),并就此结束响
+ * 应;除此之外的所有情况(非 GET/HEAD、含路径穿越、文件不存在)都会调用 `next()`,
+ * 把控制权交还给正常的路由流程。
+ *
+ * **安全性**:包含 `..` 的路径会被拒绝,从而保证请求无论如何都无法跳出 `root` 目
+ * 录、去读取服务目录之外的文件。
+ *
+ * 可选具名参数:
+ *
+ * - `index`:目录默认文件名(默认 `"index.html"`);请求路径为空或以 `/` 结尾时,自
+ *   动在其后补上该文件名。
+ * - `maxAge`:缓存秒数;`>=0` 时为响应加上 `Cache-Control: public, max-age=N`。
+ * - `dotfiles`:隐藏文件(路径段以 `.` 开头,如 .env/.git)的策略:`"ignore"`(默
+ *   认,当作不存在、放行)/ `"deny"`(回 403)/ `"allow"`(照常提供)。
+ * - `etag`:是否发送 ETag 并参与 `If-None-Match` 条件请求(默认 true)。
+ * - `lastModified`:是否发送 `Last-Modified` 并参与 `If-Modified-Since` 条件请求(默
+ *   认 true)。
+ * - `immutable`:`maxAge>0` 且 `immutable=true` 时,Cache-Control 追加 `, immutable`,
+ *   告诉客户端该资源在缓存期内永远不会变(适合带指纹的构建产物)。
+ * - `setHeaders`:在文件发送前调用的回调,可在其中对响应任意定制头部;入参为
+ *   `(res, 该次请求映射到的真实文件路径)`。默认为 None(不调用)。
+ * - `redirect`:目录请求且 URL 不以 `/` 结尾时是否 301 重定向到带斜杠版本(默认
+ *   true)。这能让目录内 HTML 的相对路径正确解析(比如 `/dir` 上的
+ *   `<img src="a.png">` 应解析为 `/dir/a.png` 而非 `/a.png`)。关闭后目录请求一律
+ *   交给 `next()`。
+ */
 public func staticFiles(root: String, index!: String = "index.html", maxAge!: Int64 = -1, dotfiles!: String = "ignore",
     etag!: Bool = true, lastModified!: Bool = true, immutable!: Bool = false,
     setHeaders!: ?(HttpResponse, String) -> Unit = None, redirect!: Bool = true): Middleware {
@@ -141,8 +155,8 @@ public func staticFiles(root: String, index!: String = "index.html", maxAge!: In
             } else {
                 None
             }
-            applyFileResponse(res, File.readFrom(path), mimeFor(rel), lm, etag: etag,
-                sendLastModified: lastModified, precomputedETag: weak)
+            applyFileResponse(res, File.readFrom(path), mimeFor(rel), lm, etag: etag, sendLastModified: lastModified,
+                precomputedETag: weak)
     }
 }
 

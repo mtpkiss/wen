@@ -27,7 +27,6 @@ import std.time.*
  *   - 等仓颉 stdx.crypto 提供 OS CSPRNG 后,**应替换本文件的种子源(`collectSeed`)
  *     直接调用 OS 入口**,API 外形保持 `secureRandomHex(n) / secureRandomBytes(n)` 不变。
  */
-
 class SecureRandom {
     let lock = Mutex()
     var key: Array<UInt8> // 当前 HMAC key(32 字节)

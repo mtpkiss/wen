@@ -54,11 +54,8 @@ class ReviewFixTest {
     // ============================================================
     @TestCase
     func testP0_2_FilenameStripsForwardSlash(): Unit {
-        let body = "--BOUNDARY\r\n" +
-            "Content-Disposition: form-data; name=\"f\"; filename=\"../../../etc/passwd\"\r\n" +
-            "Content-Type: text/plain\r\n\r\n" +
-            "evil\r\n" +
-            "--BOUNDARY--\r\n"
+        let body = "--BOUNDARY\r\n" + "Content-Disposition: form-data; name=\"f\"; filename=\"../../../etc/passwd\"\r\n" +
+            "Content-Type: text/plain\r\n\r\n" + "evil\r\n" + "--BOUNDARY--\r\n"
         let req = HttpRequest("POST", "/upload")
         req.headers["content-type"] = "multipart/form-data; boundary=BOUNDARY"
         req.bodyBytes = body.toArray()
@@ -70,11 +67,8 @@ class ReviewFixTest {
 
     @TestCase
     func testP0_2_FilenameStripsBackslash(): Unit {
-        let body = "--BOUNDARY\r\n" +
-            "Content-Disposition: form-data; name=\"f\"; filename=\"..\\..\\evil.txt\"\r\n" +
-            "Content-Type: text/plain\r\n\r\n" +
-            "x\r\n" +
-            "--BOUNDARY--\r\n"
+        let body = "--BOUNDARY\r\n" + "Content-Disposition: form-data; name=\"f\"; filename=\"..\\..\\evil.txt\"\r\n" +
+            "Content-Type: text/plain\r\n\r\n" + "x\r\n" + "--BOUNDARY--\r\n"
         let req = HttpRequest("POST", "/upload")
         req.headers["content-type"] = "multipart/form-data; boundary=BOUNDARY"
         req.bodyBytes = body.toArray()
@@ -90,7 +84,7 @@ class ReviewFixTest {
     @TestCase
     func testP0_3_HeadOn404SuppressesBody(): Unit {
         let app = wen()
-        app.get("/x", { req: HttpRequest, res: HttpResponse => res.send("x") })
+        app.get("/x", {req: HttpRequest, res: HttpResponse => res.send("x")})
         let req = HttpRequest("HEAD", "/no-such")
         req.path = "/no-such"
         let res = HttpResponse()
@@ -102,7 +96,7 @@ class ReviewFixTest {
     @TestCase
     func testP0_3_HeadOn405SuppressesBody(): Unit {
         let app = wen()
-        app.post("/only-post", { req: HttpRequest, res: HttpResponse => res.send("x") })
+        app.post("/only-post", {req: HttpRequest, res: HttpResponse => res.send("x")})
         let req = HttpRequest("HEAD", "/only-post")
         req.path = "/only-post"
         let res = HttpResponse()
@@ -177,7 +171,7 @@ class ReviewFixTest {
     func testP1_5_MountWithOptionalParamRejected(): Unit {
         let app = wen()
         let sub = Router()
-        sub.get("/", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        sub.get("/", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         var caught = false
         try {
             app.use("/api/:ver?", sub)
@@ -195,17 +189,24 @@ class ReviewFixTest {
         let app = wen()
         let errSeen = ArrayList<String>()
         // mw1:先 next(),再抛异常 — 旧实现:CAS 失败 → 异常静默丢。
-        app.use("/api", { _: HttpRequest, _: HttpResponse, next: Next =>
-            next()
-            throw Exception("boom")
-        })
+        app.use(
+            "/api",
+            {
+                _: HttpRequest, _: HttpResponse, next: Next =>
+                    next()
+                    throw Exception("boom")
+            }
+        )
         // mw2:不调 next 不写响应,使 res 未 finished;这样 mw1 抛出的异常进流水线后,
         // error layer 还能被实际触发。
-        app.use("/api", { _: HttpRequest, _: HttpResponse, _: Next => () })
-        app.use({ e: Exception, _: HttpRequest, res: HttpResponse, _: Next =>
-            errSeen.add(e.message)
-            res.status(500).send("err")
-        })
+        app.use("/api", {_: HttpRequest, _: HttpResponse, _: Next => ()})
+        app.use(
+            {
+                e: Exception, _: HttpRequest, res: HttpResponse, _: Next =>
+                    errSeen.add(e.message)
+                    res.status(500).send("err")
+            }
+        )
         let req = HttpRequest("GET", "/api/x")
         req.path = "/api/x"
         let res = HttpResponse()
@@ -222,7 +223,7 @@ class ReviewFixTest {
         let app = wen()
         app.enable("strict routing")
         let sub = Router()
-        sub.get("/foo", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        sub.get("/foo", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         app.use("/api", sub)
         // strict 下,父级前缀 /api 后,sub 应该看到 "/foo/" 不匹配 "/foo"
         let req = HttpRequest("GET", "/api/foo/")
@@ -245,7 +246,9 @@ class ReviewFixTest {
         let dir = "./test_data_static"
         try {
             Directory.create(Path(dir), recursive: true)
-        } catch (_: Exception) { () }
+        } catch (_: Exception) {
+            ()
+        }
         let testFile = "${dir}/probe.txt"
         File.writeTo(testFile, "hi".toArray())
         let req = HttpRequest("GET", "/s/probe.txt")
@@ -264,9 +267,7 @@ class ReviewFixTest {
     // ============================================================
     @TestCase
     func testP1_12_MultipartFieldNameWithSemicolonInQuotes(): Unit {
-        let body = "--BOUNDARY\r\n" +
-            "Content-Disposition: form-data; name=\"a; b\"\r\n\r\n" +
-            "value\r\n" +
+        let body = "--BOUNDARY\r\n" + "Content-Disposition: form-data; name=\"a; b\"\r\n\r\n" + "value\r\n" +
             "--BOUNDARY--\r\n"
         let req = HttpRequest("POST", "/")
         req.headers["content-type"] = "multipart/form-data; boundary=BOUNDARY"
@@ -294,8 +295,7 @@ class ReviewFixTest {
         let ic = s.indexOf("X-C")
         let id = s.indexOf("X-D")
         match ((ia, ib, ic, id)) {
-            case (Some(a), Some(b), Some(c), Some(d)) =>
-                @Assert(a < b && b < c && c < d)
+            case (Some(a), Some(b), Some(c), Some(d)) => @Assert(a < b && b < c && c < d)
             case _ => @Assert(false)
         }
     }
@@ -346,9 +346,9 @@ class ReviewFixTest {
     func testP2_G_MultipleParamHandlersForSameName(): Unit {
         let app = wen()
         let log = ArrayList<String>()
-        app.param("id", { _: HttpRequest, _: HttpResponse, v: String => log.add("h1:${v}") })
-        app.param("id", { _: HttpRequest, _: HttpResponse, v: String => log.add("h2:${v}") })
-        app.get("/x/:id", { _: HttpRequest, res: HttpResponse => res.send("ok") })
+        app.param("id", {_: HttpRequest, _: HttpResponse, v: String => log.add("h1:${v}")})
+        app.param("id", {_: HttpRequest, _: HttpResponse, v: String => log.add("h2:${v}")})
+        app.get("/x/:id", {_: HttpRequest, res: HttpResponse => res.send("ok")})
         let req = HttpRequest("GET", "/x/42")
         req.path = "/x/42"
         let res = HttpResponse()
@@ -365,13 +365,17 @@ class ReviewFixTest {
     func testP2_H_MergeParamsKeepsBothNames(): Unit {
         let app = wen()
         let seen = ArrayList<String>()
-        app.use("/x/:userId", { _: HttpRequest, _: HttpResponse, next: Next => next() })
-        app.get("/x/:account", { req: HttpRequest, res: HttpResponse =>
-            for ((k, _) in req.params) {
-                seen.add(k)
+        app.use("/x/:userId", {_: HttpRequest, _: HttpResponse, next: Next => next()})
+        app.get(
+            "/x/:account",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    for ((k, _) in req.params) {
+                        seen.add(k)
+                    }
+                    res.send("ok")
             }
-            res.send("ok")
-        })
+        )
         let req = HttpRequest("GET", "/x/100")
         req.path = "/x/100"
         let res = HttpResponse()
@@ -394,7 +398,7 @@ class ReviewFixTest {
     @TestCase
     func testP2_I_AllRouteWithNextReturns405(): Unit {
         let app = wen()
-        app.all("/x", { _: HttpRequest, _: HttpResponse, next: Next => next() })
+        app.all("/x", {_: HttpRequest, _: HttpResponse, next: Next => next()})
         let req = HttpRequest("GET", "/x")
         req.path = "/x"
         let res = HttpResponse()

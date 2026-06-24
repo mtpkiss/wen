@@ -59,15 +59,18 @@ class BodyParserTest {
         app.bodyParser("application/json", {
             req: HttpRequest => req.setAttribute("custom", "overridden")
         })
-        app.post("/j", {
-            req: HttpRequest, res: HttpResponse =>
-                let marker = req.attribute("custom") ?? "builtin"
-                let jsonSeen = match (req.json()) {
-                    case Some(_) => "json"
-                    case None => "nojson"
-                }
-                res.send("${marker}/${jsonSeen}")
-        })
+        app.post(
+            "/j",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    let marker = req.attribute("custom") ?? "builtin"
+                    let jsonSeen = match (req.json()) {
+                        case Some(_) => "json"
+                        case None => "nojson"
+                    }
+                    res.send("${marker}/${jsonSeen}")
+            }
+        )
         let req = HttpRequest("POST", "/j")
         req.path = "/j"
         req.headers["content-type"] = "application/json"
