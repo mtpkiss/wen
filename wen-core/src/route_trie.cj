@@ -103,7 +103,9 @@ func walkTrie(node: RouteNode, parts: Array<String>, pi: Int64, out: ArrayList<I
         }
         return
     }
-    // literal 子节点(始终 lowercase 比较;caseSensitive 由 matchExact 二次保证)。
+    // P1-15:字面量优先于参数段 — literal 子节点先处理,param slots 后处理。
+    // 这样 out 里字面量路由的 layerIdx 会排在前面,二次 matchExact 过滤时能更快
+    // 匹配(虽然 matchExact 会准确过滤,但候选集越大,遍历成本越高)。
     let key = parts[pi].toAsciiLower()
     match (node.literal.get(key)) {
         case Some(child) => walkTrie(child, parts, pi + 1, out, seen)
