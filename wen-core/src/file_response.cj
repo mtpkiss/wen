@@ -99,7 +99,18 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
         }
     }
 
+    // If-Range:RFC 7233 §3.2 的条件性 Range 请求 —— 客户端意思是"我手里有旧
+    // 资源,如果服务端仍是同一版本,把指定 byte-range 给我;否则把整个新资源给
+    // 我"。若不实现而沿用 Range 路径,旧资源 + 新版本 byte-slice 会被客户端拼成
+    // 错位字节(响应方向的缓存击穿),且越是激进缓存的客户端越容易踩。
+    // 校验后不匹配时:忽略 Range,走 200 全文(由下面的兜底完成)。
+    let allowRange = match (req.header("if-range")) {
+        case Some(ir) => ifRangeMatches(ir, etagValue, effectiveLastModified)
+        case None => true
+    }
+
     // Range 分片请求。
+    if (allowRange) {
     match (req.header("range")) {
         case Some(rangeHeader) => match (parseRange(rangeHeader, data.size)) {
             case RangeOk(start, end) =>
@@ -118,10 +129,36 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
         }
         case None => ()
     }
+    }
 
     // 无条件命中、无可用 Range:发送完整内容(200)。
     res.bodyBytes = Some(data)
     res.finished = true
+}
+
+// RFC 7233 §3.2 — If-Range 命中判定。If-Range 的值要么是 entity-tag,要么是 HTTP-date。
+//   - entity-tag 路径(以 `"` 开头):与当前响应的 ETag 做 strict 比较(字面相等)。
+//     W/ 开头(无论 Header 还是当前 ETag)一律算不匹配 —— 弱 ETag 允许语义等价但
+//     字节不同,无法保证 byte-range 一致性。
+//   - HTTP-date 路径(不以 `"` 或 `W/` 开头):与当前 Last-Modified 字面相等比较。
+//     与 If-Modified-Since 同样使用 strict 字符串比较(见 applyFileResponse 的
+//     P2-Q 已知约束):框架不内置 HTTP-date 解析,如需放宽请走反代缓存层。
+// 返回 true 表示"命中、可以走 Range";false 表示"不匹配,忽略 Range 改发 200 全文"。
+func ifRangeMatches(headerValue: String, currentETag: String, currentLastModified: ?String): Bool {
+    let v = headerValue.trimAscii()
+    if (v.startsWith("W/")) {
+        return false
+    }
+    if (v.startsWith("\"")) {
+        if (currentETag.isEmpty() || currentETag.startsWith("W/")) {
+            return false
+        }
+        return v == currentETag
+    }
+    return match (currentLastModified) {
+        case Some(lm) => v == lm
+        case None => false
+    }
 }
 
 // 回 304 Not Modified(空体)。

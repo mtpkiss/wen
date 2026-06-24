@@ -116,6 +116,141 @@ class FileResponseTest {
         remove(path)
     }
 
+    // RFC 7233 §3.2 — If-Range 让客户端做"我手里有旧资源,如果服务端还是这个版本
+    // 就发 Range,否则把整个资源发我"的条件性范围请求。命中(强 ETag 精确相等或
+    // Last-Modified 一致)→ 走原 Range 路径回 206;不匹配 → 必须忽略 Range,回 200
+    // 全文 —— 因为客户端持有的旧资源已经过时,把新版本的 byte-slice 拼到旧资源上
+    // 是"缓存击穿"(收到错位字节)。If-Range 之前完全未实现,任意 If-Range 都会
+    // 被无视,Range 照常处理 → 错位 byte-slice 直接发出。
+    // sendFile 默认走 computeETag 算"强 ETag"(无 W/ 前缀),正向用例可直接拿
+    // res.get("ETag") 回传。
+    @TestCase
+    func testIfRangeETagMatchSends206(): Unit {
+        let path = writeTemp("._cjx_fr_ifrange_match.txt")
+        let app = wen()
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
+
+        // 先取当前 ETag。
+        let r0 = HttpRequest("GET", "/f")
+        r0.path = "/f"
+        let s0 = HttpResponse()
+        app.handle(r0, s0)
+        let etag = match (s0.get("ETag")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(!etag.isEmpty())
+
+        // If-Range 携带当前 ETag + Range → 206,与不带 If-Range 一致。
+        let req = HttpRequest("GET", "/f")
+        req.path = "/f"
+        req.headers["range"] = "bytes=2-5"
+        req.headers["if-range"] = etag
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 206)
+        @Assert(bytesOf(res) == "2345")
+        remove(path)
+    }
+
+    // If-Range 的 ETag 不匹配 → MUST 忽略 Range,回 200 全文。
+    @TestCase
+    func testIfRangeETagMismatchSends200Full(): Unit {
+        let path = writeTemp("._cjx_fr_ifrange_mismatch.txt")
+        let app = wen()
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
+
+        let req = HttpRequest("GET", "/f")
+        req.path = "/f"
+        req.headers["range"] = "bytes=2-5"
+        req.headers["if-range"] = "\"stale-etag-from-an-older-version\""
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(bytesOf(res) == "0123456789")
+        remove(path)
+    }
+
+    // RFC 7233 §3.2 第二段:客户端 MUST NOT 在 If-Range 里发"弱 ETag"。服务端收到
+    // weak entity-tag 时按"不匹配"处理 — 弱 ETag 允许语义等价但字节不同,无法保
+    // 证 byte-range 一致性。即便 W/ 后的内容与当前 ETag 字面相等,也按不匹配走 200。
+    @TestCase
+    func testIfRangeWeakETagAlwaysSends200Full(): Unit {
+        let path = writeTemp("._cjx_fr_ifrange_weak.txt")
+        let app = wen()
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
+
+        let r0 = HttpRequest("GET", "/f")
+        r0.path = "/f"
+        let s0 = HttpResponse()
+        app.handle(r0, s0)
+        let strongEtag = match (s0.get("ETag")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(!strongEtag.isEmpty())
+
+        let req = HttpRequest("GET", "/f")
+        req.path = "/f"
+        req.headers["range"] = "bytes=2-5"
+        // 故意把 strong ETag 包成 weak 形式 —— 即便引号里的内容字面一致,服务端
+        // 也必须拒绝把它当作 If-Range 命中。
+        req.headers["if-range"] = "W/${strongEtag}"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(bytesOf(res) == "0123456789")
+        remove(path)
+    }
+
+    // If-Range 携带 Last-Modified 值 → 与当前文件 Last-Modified 精确相等才命中,
+    // 走 Range 回 206;不等则忽略 Range,回 200 全文。日期分支与 ETag 分支互斥,
+    // 但有的客户端只能拿到 Last-Modified(响应不带 ETag),所以两条路径都需支持。
+    @TestCase
+    func testIfRangeDateMatchSends206(): Unit {
+        let path = writeTemp("._cjx_fr_ifrange_date.txt")
+        let app = wen()
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
+
+        let r0 = HttpRequest("GET", "/f")
+        r0.path = "/f"
+        let s0 = HttpResponse()
+        app.handle(r0, s0)
+        let lm = match (s0.get("Last-Modified")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(!lm.isEmpty())
+
+        let req = HttpRequest("GET", "/f")
+        req.path = "/f"
+        req.headers["range"] = "bytes=2-5"
+        req.headers["if-range"] = lm
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 206)
+        @Assert(bytesOf(res) == "2345")
+        remove(path)
+    }
+
+    // If-Range 携带的日期与当前 Last-Modified 不一致 → 200 全文。
+    @TestCase
+    func testIfRangeDateMismatchSends200Full(): Unit {
+        let path = writeTemp("._cjx_fr_ifrange_date_mismatch.txt")
+        let app = wen()
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
+
+        let req = HttpRequest("GET", "/f")
+        req.path = "/f"
+        req.headers["range"] = "bytes=2-5"
+        req.headers["if-range"] = "Wed, 21 Oct 2015 07:28:00 GMT"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(bytesOf(res) == "0123456789")
+        remove(path)
+    }
+
     // res.attachment(filename) 设置 Content-Disposition 与按扩展名推断的 Content-Type。
     @TestCase
     func testAttachmentHeader(): Unit {
