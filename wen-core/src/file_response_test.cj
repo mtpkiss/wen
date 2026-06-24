@@ -348,4 +348,52 @@ class FileResponseTest {
         // 期望:抛异常前已把 Content-Type / Cache-Control 清掉。
         @Assert(res.get("Cache-Control").isNone())
     }
+
+    // 304 响应应与 200 响应有相同的 Vary 头 — RFC 7232 §4.1 要求 304 时服务端应
+    // 发送"与 200 响应相同的" cache-control/vary 等,以更新缓存元数据。
+    // 早前 send304 只设置状态码并清空 body,不补 Vary: Accept(而 200 路径上
+    // format() 会自动加),导致 304 响应缺少 Vary 头,缓存层无法正确更新。
+    // 修法:send304 加上 Vary: Accept,与 format 行为一致。
+    @TestCase
+    func test304IncludesVaryAccept(): Unit {
+        let path = writeTemp("._cjx_304_vary.txt")
+        let app = wen()
+        // 中间件里预先加 Vary: Accept,模拟 format 行为。
+        app.use({_: HttpRequest, res: HttpResponse, next: Next =>
+            res.vary("Accept")
+            next()
+        })
+        app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
+
+        // 首次请求:拿 200 + Vary: Accept + ETag。
+        let r1 = HttpRequest("GET", "/f")
+        r1.path = "/f"
+        let s1 = HttpResponse()
+        app.handle(r1, s1)
+        @Assert(s1.statusCode == 200)
+        let etag = match (s1.get("ETag")) {
+            case Some(v) => v
+            case None => ""
+        }
+        let vary200 = match (s1.get("Vary")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(!etag.isEmpty())
+        @Assert(vary200 == "Accept")
+
+        // 带 If-None-Match 再请求:应回 304 且同样带 Vary: Accept。
+        let r2 = HttpRequest("GET", "/f")
+        r2.path = "/f"
+        r2.headers["if-none-match"] = etag
+        let s2 = HttpResponse()
+        app.handle(r2, s2)
+        @Assert(s2.statusCode == 304)
+        let vary304 = match (s2.get("Vary")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(vary304 == "Accept")
+        remove(path)
+    }
 }

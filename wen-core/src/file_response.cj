@@ -164,11 +164,30 @@ func ifRangeMatches(headerValue: String, currentETag: String, currentLastModifie
 // 回 304 Not Modified(空体)。
 // 注意:framework 内部调用,直接写字段绕过 res.status() 的 finished-warn — etag 中间件
 // 在 next() 之后(此时 res 已 finished)会改成 304 是合法的"晚改",而非用户错误。
+// RFC 7232 §4.1 要求 304 时服务端应发送"与 200 响应相同的" cache-control/vary 等,
+// 以更新缓存元数据。早前实现只设置状态码并清空 body,不补 Vary: Accept(而 200
+// 路径上 format() 会自动加),导致 304 响应缺少 Vary 头,缓存层无法正确更新。
+// 修法:send304 自动加上 Vary: Accept(若未存在),与 format 行为一致。
 func send304(res: HttpResponse): Unit {
     res.statusCode = 304
     res.statusMessage = reasonPhrase(304)
     res.body = ""
     res.bodyBytes = None
+    match (res.get("Vary")) {
+        case Some(v) =>
+            // 大小写不敏感检查是否已含 Accept,没有则规范化追加。
+            var hasAccept = false
+            for (part in v.split(",")) {
+                if (part.trimAscii().toAsciiLower() == "accept") {
+                    hasAccept = true
+                    break
+                }
+            }
+            if (!hasAccept) {
+                res.set("Vary", "${v.trimAscii()}, Accept")
+            }
+        case None => res.set("Vary", "Accept")
+    }
     res.finished = true
 }
 
