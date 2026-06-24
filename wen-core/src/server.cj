@@ -644,13 +644,19 @@ public class HttpServer {
         // 补上 Date 响应头(HTTP/1.1 建议服务器发送当前时间)。
         ensureDateHeader(res)
         applyCharsetIfSet(res)
-        // 按 RFC 7230 规定:
+        // 按 RFC 7230 / 7231 规定:
         //   - 1xx(100 Continue / 101 Switching Protocols / 102 / 103):MUST NOT
         //     含 Content-Length,且必须无 body。
         //   - 204 No Content / 304 Not Modified:同 1xx,既不带 body 也不带 CL。
-        // 所以下面对这几个状态码统一做 bodyless 抑制:清掉 body 与 CL。
-        let bodyless = res.statusCode == 204 || res.statusCode == 304
-            || (res.statusCode >= 100 && res.statusCode < 200)
+        //   - 205 Reset Content:必须无 body,但 RFC 7231 §6.3.6 要求显式带
+        //     "Content-Length: 0"(或 chunked 空块) —— 它不在 §3.3.2 的 MUST NOT
+        //     列表里,反而需要明确 framing,否则 keep-alive 连接上的下一个响应
+        //     头会被客户端当成上一个响应的 body 读。
+        // 所以下面把 1xx/204/205/304 都纳入 bodyless,然后用 mustZeroCL 把 205
+        // 单独拎出来强制写 CL: 0;其余仍走"删 CL"路径。
+        let bodyless = res.statusCode == 204 || res.statusCode == 205
+            || res.statusCode == 304 || (res.statusCode >= 100 && res.statusCode < 200)
+        let mustZeroCL = res.statusCode == 205
         // 用户若显式写过 Transfer-Encoding(典型场景:自己实现 chunked / SSE),
         // 框架不能再自动写 Content-Length — 同时声明 TE + CL 违反 RFC 7230
         // §3.3.3,接收方按 chunked 解析 4 字节裸 body 会失败,与上游反代对响应边
@@ -664,7 +670,11 @@ public class HttpServer {
         let bodyBytes = if (res.suppressBody) {
             Array<UInt8>()
         } else if (bodyless) {
-            res.remove("Content-Length")
+            if (mustZeroCL) {
+                res.set("Content-Length", "0")
+            } else {
+                res.remove("Content-Length")
+            }
             Array<UInt8>()
         } else if (userSetTE) {
             let real = match (res.bodyBytes) {

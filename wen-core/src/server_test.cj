@@ -161,6 +161,26 @@ class ServerTest {
         @Assert(!text.contains("Content-Length"))
     }
 
+    // 205 Reset Content 与 204 在协议层有关键差异:
+    //   - RFC 7230 §3.3.2 把 MUST NOT 发 Content-Length 的范围限定到 1xx 与 204;
+    //     205 不在该列表里。
+    //   - RFC 7231 §6.3.6 反过来要求 205 用 "Content-Length: 0"(或 chunked 空块)
+    //     显式标记无 body —— keep-alive 连接上客户端必须能定界,否则会把下一个响
+    //     应的头当成上一个的 body 读。
+    // 当前 serializeResponse 的 bodyless 集合只含 204 / 304 / 1xx,205 走普通分支
+    // 会把 body 原样发出去并自动写 Content-Length=18(对应 "should-not-appear"),
+    // 同时违反"必须无 body"与"必须明确定界"两条。修法:把 205 纳入 bodyless,
+    // 但 CL 处理与 204 分开,强制写 Content-Length: 0。
+    @TestCase
+    func test205ResetContentHasNoBodyAndExplicitZeroContentLength(): Unit {
+        let server = HttpServer(wen())
+        let res = HttpResponse()
+        res.status(205).send("should-not-appear")
+        let text = String.fromUtf8(server.serializeResponse(res))
+        @Assert(!text.contains("should-not-appear"))
+        @Assert(text.contains("Content-Length: 0"))
+    }
+
     // parseQuery 对 key 也 urlDecode 会让 "?admin=user&%61dmin=root" 解码后变成
     // 同名 key 合并(last-wins → admin=root);上游 WAF 或反代按字节相等去重时只
     // 看到两个独立 key("admin" 与 "%61dmin"),都放行 — 攻击者借这条分歧把
