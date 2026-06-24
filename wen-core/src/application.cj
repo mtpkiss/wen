@@ -503,7 +503,16 @@ public class Application {
     //   app.close(timeoutMs: 5000)
     public func close(timeoutMs!: Int64 = 5000): Unit {
         match (this.httpServer) {
-            case Some(s) => s.shutdown(timeoutMs: timeoutMs)
+            case Some(s) =>
+                s.shutdown(timeoutMs: timeoutMs)
+                // shutdown 返回后所有 accept/worker 线程都已退出,不存在并发可见性问题。
+                // 复位锁定状态以支持同实例的"启 → 停 → 再启":清掉 httpServer 引用、
+                // 把 frozen 复位、router 联动 unfreeze(递归到子 router),让后续
+                // 路由/中间件注册重新可用。这与 Express 的 server.close 后可继续
+                // app.use 的行为一致,常用于测试集复用 app 实例与 SIGHUP 热重启场景。
+                this.httpServer = None
+                router.unfreeze()
+                frozen.store(false)
             case None => ()
         }
     }

@@ -362,10 +362,21 @@ public class Router {
         return routeCounter
     }
 
-    // 由 Application.listen 联动设置,一次设置永远不再回退。子路由若被挂载,Application
-    // 启动前已注册完毕,运行阶段不再需要写它们;冻结同样适用。
+    // 由 Application.listen 联动设置;Application.close 完成后通过 unfreeze() 联动复位,
+    // 允许同实例的"启 → 停 → 再启"循环(Express 兼容)。子路由若被挂载,Application
+    // 启动前已注册完毕,运行阶段不再需要写它们;冻结同样适用,并随顶级 unfreeze 一同复位。
     func freeze(): Unit {
         frozen.store(true)
+    }
+
+    // 由 Application.close 在 HttpServer.shutdown 返回后联动调用。彼时所有 worker 已退出,
+    // 不存在并发请求线程读 router 字段;此时把 frozen 复位、递归下发到所有子 router,以让
+    // 后续的 use/get/... 等注册路径恢复可写。
+    func unfreeze(): Unit {
+        frozen.store(false)
+        for (sub in mountedSubRouters) {
+            sub.unfreeze()
+        }
     }
 
     func ensureNotFrozen(): Unit {

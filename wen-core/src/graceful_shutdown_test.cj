@@ -70,4 +70,59 @@ class GracefulShutdownTest {
         @Assert(listenDone.load())
         @Assert(!listenThrew.load())
     }
+
+    // listen → close → 再注册路由 → 再 listen 的完整循环必须可用。
+    // Express 允许同一 app 实例被 close 后重新启动(测试常用、SIGHUP 热重载常用),
+    // 但 wen 早先在 markFrozen 后永远不会复位 frozen,close 完成后再 app.get(...)
+    // 会被 ensureNotFrozen 拦截抛 IllegalStateException,从用户视角看 app 实例
+    // 被一次性消耗 — 不符合 Application 作为容器的语义,也容易在测试集里因为
+    // 重用实例而踩坑。
+    // 修法:Application.close 在 HttpServer.shutdown 返回后(此时所有 worker 已
+    // 退出,无并发可见性问题)把 frozen 复位、router 联动 unfreeze、清掉
+    // httpServer 引用,允许同实例再次 listen。
+    @TestCase
+    func testReRegisterAfterCloseDoesNotThrow(): Unit {
+        let app = wen()
+        app.get("/initial", {_: HttpRequest, res: HttpResponse => res.send("ok1")})
+        let port: Int64 = 47823
+        let listenDone = AtomicBool(false)
+        spawn {
+            try {
+                app.listen(port)
+            } catch (_: Exception) {
+                ()
+            }
+            listenDone.store(true)
+        }
+        sleep(Duration.millisecond * 300)
+        // 基线:运行期间确实拒绝注册(frozen=true)。如果这条断言不成立,说明
+        // freeze 自身已经坏了,后面的复位断言就无意义。
+        // app.get 在 frozen=true 时会抛 wen.IllegalStateException;但测试文件 import
+        // 了 std.unittest 后 IllegalStateException 与 std 同名歧义,catch 父类 Exception
+        // 即可 — app.get 的注册路径没有其他异常源。
+        var midThrew = false
+        try {
+            app.get("/midflight", {_: HttpRequest, res: HttpResponse => res.send("mid")})
+        } catch (_: Exception) {
+            midThrew = true
+        }
+        @Assert(midThrew)
+
+        app.close(timeoutMs: 1000)
+        var i = 0
+        while (i < 50 && !listenDone.load()) {
+            sleep(Duration.millisecond * 20)
+            i += 1
+        }
+        @Assert(listenDone.load())
+
+        // P1-2 核心断言:close 完成后 frozen 必须被复位,允许追加路由。
+        var afterCloseThrew = false
+        try {
+            app.get("/after", {_: HttpRequest, res: HttpResponse => res.send("ok2")})
+        } catch (_: Exception) {
+            afterCloseThrew = true
+        }
+        @Assert(!afterCloseThrew)
+    }
 }
