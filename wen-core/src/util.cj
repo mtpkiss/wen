@@ -178,8 +178,21 @@ func isHexByte(b: UInt8): Bool {
         || (b >= UInt8(97) && b <= UInt8(102)))
 }
 
-// 返回字符串中最后一个 "." 的下标;不存在则返回 -1。用于在 "<value>.<sig>" 形式
-// 的签名 Cookie 中,从右侧切出签名部分(value 自身可以包含 ".")。
+/**
+ * 返回字符串中最后一个 "." 的下标;不存在则返回 -1。
+ *
+ * **专为签名 Cookie 设计的反向扫描**。签名 Cookie 的格式是 `<value>.<sig>`,签名段
+ * 永远是 **最右侧** 一段;`value` 自身可以含 "."(如 base64url 含填充、JSON
+ * 数字 "1.5"、IP "10.0.0.1" 等)。所以切分必须从右数最后一个 "." 出发,而不
+ * 是首个 "."。
+ *
+ * **维护警告 — 不要"优化"成正向 split 或 String.split(".", limit: 2)**:
+ *   - 正向 split 会把 `value` 内的第一个 "." 当成分隔符,导致后段不是真正的
+ *     签名,验签必然失败 — 所有含 "." 的 cookie 值都会被静默视为无效签名;
+ *   - 反向扫描是签名 Cookie 验签链路上的 **正确性前提**,不是性能选项;
+ *   - 测试覆盖在 `signed_cookies_test.cj` 的 testValueContainingDot / WithPlusChar /
+ *     WithPercentLiteral 三条,改成正向 split 会直接打挂这些用例。
+ */
 func lastIndexOfDot(s: String): Int64 {
     let bytes = s.toArray()
     var i = bytes.size - 1

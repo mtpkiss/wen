@@ -718,7 +718,9 @@ public class HttpRequest {
         if (app.cookieSecret.isEmpty()) {
             return (None, false)
         }
-        // 以最后一个 "." 分隔出 value 与签名(value 自身可包含 ".")。
+        // 以 **最后一个** "." 分隔出 value 与签名 — value 自身可含 "."(base64url
+        // 填充、JSON 数字、IP 等),签名永远在最右。lastIndexOfDot 反向扫描的语义
+        // 是验签链路的正确性前提,见 util.cj 上的维护警告,不要改成正向 split。
         let idx = lastIndexOfDot(raw)
         if (idx < 0) {
             return (None, false)

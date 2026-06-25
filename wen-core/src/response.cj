@@ -68,9 +68,21 @@ public class HttpResponse {
     // 相同的头部、却不带正文。
     public var suppressBody: Bool = false
 
-    // 响应级别的、带类型的数据存储区,作用域限定在单次响应内,用于在同一响应的
-    // 各中间件 / 处理器之间传递数据。它对应 Express 的 res.locals。值类型为 Any,
-    // 可存任意对象。
+    /**
+     * 响应级别的、带类型的数据存储区,作用域限定在单次响应内,用于在同一响应的
+     * 各中间件 / 处理器之间传递数据。它对应 Express 的 `res.locals`。值类型为
+     * Any,可存任意对象。
+     *
+     * **并发模型 — 与 [Application.locals] 同名但语义完全不同**:
+     *   - `res.locals`(本字段):**按请求隔离**,与 `HttpResponse` 实例同生命周期,
+     *     仅被当前请求的中间件链上下文访问。不会被多个协程同时操作,因此 **无需
+     *     加锁**;
+     *   - [Application.locals]:**跨请求共享**,所有 worker 协程并发读写,任何
+     *     写入都需要调用方自行加锁。
+     *
+     * 请求间临时上下文(认证后的用户对象、解析出的资源句柄等)应该放这里,而不
+     * 是 `app.locals` — 后者会跨请求泄漏并触发数据竞争。
+     */
     public let locals: HashMap<String, Any> = HashMap<String, Any>()
 
     public init() {

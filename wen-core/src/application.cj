@@ -71,11 +71,26 @@ public class Application {
     // 线程安全),启动后再写就是数据竞争。
     let frozen: AtomicBool = AtomicBool(false)
 
-    // 应用级的共享存储（对应 Express 的 app.locals）：一张键值表，生命周期
-    // 与应用相同、被所有请求共享。适合放配置对象、共享的服务实例、全局可复用
-    // 的资源等。值类型为 Any，因此可以存放任意类型；取用时需要由调用方自行
-    // 断言 / 转换回具体类型。与「按请求」隔离的数据不同，这里写入的内容对后续
-    // 所有请求都可见。
+    /**
+     * 应用级的共享存储（对应 Express 的 `app.locals`):一张键值表,生命周期与应
+     * 用相同,**被所有请求共享**。适合放配置对象、共享的服务实例、全局可复用的
+     * 资源等。值类型为 Any,因此可以存放任意类型;取用时需要由调用方自行断言 /
+     * 转换回具体类型。与「按请求」隔离的数据不同,这里写入的内容对后续所有请
+     * 求都可见。
+     *
+     * **并发模型 — 与 [HttpResponse.locals] 同名但语义完全不同**:
+     *   - `app.locals`(本字段):**跨请求共享**,所有 worker 协程并发读写。
+     *     `HashMap` 自身不是线程安全的,因此 `app.locals` 上的任何 **写入** 与
+     *     **遍历** 必须由调用方自行加锁(典型做法是包一层带 `Mutex` 的 wrapper),
+     *     否则在并发请求中会出现读-写竞态。推荐 listen 之前在启动期一次性写入
+     *     配置/服务实例,运行期 **只读**;
+     *   - [HttpResponse.locals]:**按请求隔离**,生命周期仅在单次响应内,同一
+     *     `res` 实例不会被多个协程同时访问,因此 **无需加锁**。请求间数据传递
+     *     的正确容器是 `res.locals` 而非 `app.locals`。
+     *
+     * 把要按请求隔离的数据塞进 `app.locals` 是典型误用,会立即引发跨请求覆盖
+     * 与数据竞争。需要 worker 间共享可变状态时,务必在外面再包一层并发原语。
+     */
     public let locals: HashMap<String, Any> = HashMap<String, Any>()
 
     // 是否信任反向代理设置的 X-Forwarded-* 头(对应 Express 的 'trust proxy')。
@@ -462,16 +477,65 @@ public class Application {
         router.handle(req, res)
     }
 
-    // 服务器可调参数：在 listen() 构建 HttpServer 时被读取并套用到服务器上。
-    // 分别为——单次请求体的最大字节数（默认 1 MiB，超出可用于防止过大请求）、
-    // 读取请求的超时毫秒数（默认 15 秒）、以及最大并发连接数（默认 1024）。
-    // 这些字段为 var，可在调用 listen() 之前按需修改；listen() 之后再改不会
-    // 影响已经构建好的服务器。
+    // 服务器可调参数:在 listen() 构建 HttpServer 时被读取并套用到服务器上。
+    // 字段为 var,可在 listen() 之前按需修改;listen() 之后再改不会影响已经构建
+    // 好的服务器。默认值的依据 / 调整方向见各字段独立 cjdoc。
+
+    /**
+     * 单次请求体的最大字节数,默认 1 MiB (1048576)。
+     *
+     * **默认值依据**:与主流 reverse proxy / 框架对齐(Nginx `client_max_body_size`
+     * 默认 1 MiB、Express + body-parser 默认 100 KiB-1 MiB),对纯 JSON / form
+     * API 场景是宽松上限,既能挡住意外 / 恶意的超大 POST,又不至于把常见 JSON
+     * 负载误拒。
+     *
+     * **调整方向**:文件上传 / 富文本 / 大批量数据接收等场景按需上调(通常单位
+     * MiB 起跳),但 **越大越要在前置 reverse proxy 也同步调高**,否则会先被代理
+     * 截断。需要无上限时可设 `Int64.Max`,但请同时关注 [maxHeaderBytes] 与连接级
+     * 超时,避免成为内存放大攻击面。
+     */
     public var maxBodySize: Int64 = 1048576
+
+    /**
+     * 读取整个请求(headers + body)的总超时毫秒数,默认 15 秒 (15000)。
+     *
+     * **默认值依据**:覆盖正常移动网络 / 反代之后的 LB 慢路径;15s 足以让大部分
+     * `POST` 配合 `Expect: 100-continue`、慢速 mobile uplink 完成,同时也短到能在
+     * Slowloris-class 攻击下及时回收 socket。比 Apache 默认 60s 更激进,比 Nginx
+     * `client_body_timeout` 默认 60s 更激进 — 我们假定 wen 在 reverse proxy 之
+     * 后,直接面对客户端时长链路本就不该走这条路径。
+     *
+     * **调整方向**:面向极差网络(IoT、卫星)的服务可上调到 30-60s;面向严格的
+     * latency-sensitive 内网 RPC 可下调到 5s。设为 0 / 负数表示禁用超时(慎用,
+     * 等同对 Slowloris 不设防)。
+     */
     public var readTimeoutMs: Int64 = 15000
+
+    /**
+     * 最大并发连接数,默认 1024。
+     *
+     * **默认值依据**:对齐 Linux 默认每进程 fd 软限制 1024。再高需要先调
+     * `ulimit -n` 与系统 socket buffer,否则会在 accept 阶段直接报错而非优雅拒绝。
+     *
+     * **调整方向**:已知 fd 上限充足的服务可上调到 4096 / 65536(配合 ulimit
+     * 调整)。短连接 + 高 RPS 场景下,这个上限实际是"瞬时并发"而非"QPS"上限,
+     * 不应据此线性估算容量。
+     */
     public var maxConnections: Int64 = 1024
-    // 请求头部块(状态行+全部头)字节上限,默认 64 KiB。独立于 maxBodySize,防止
-    // 超大 Cookie 等头部把内存撑爆。
+
+    /**
+     * 请求头部块(状态行 + 全部 header 行)字节上限,默认 64 KiB (65536)。**独立**
+     * 于 [maxBodySize],单独限制头部以防止超大 Cookie / 重复 header 把内存撑爆。
+     *
+     * **默认值依据**:对齐 Nginx `large_client_header_buffers` 默认 8 * 8 KiB = 64
+     * KiB、Node.js `http.maxHeaderSize` 默认 16 KiB 的 4 倍。足以容纳"含若干签名
+     * Cookie + Authorization Bearer + 反代追加的 X-Forwarded-* 链路"这种常见场景,
+     * 且不需要为头部预留 MiB 量级内存。
+     *
+     * **调整方向**:有跨多反代 / 复杂 SSO header 的内网服务可上调到 128 KiB;
+     * 暴露在公网且不需要复杂 Cookie 链路时,可下调到 16-32 KiB 收紧攻击面。下调
+     * 时要预估 Cookie 域累计大小,避免合法请求被 431 拒掉。
+     */
     public var maxHeaderBytes: Int64 = 65536
 
     // 当前进程内最近一次 listen() 所构建并启动的 HttpServer 引用;close() 据此触发
