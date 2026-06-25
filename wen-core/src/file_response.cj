@@ -111,24 +111,24 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
 
     // Range 分片请求。
     if (allowRange) {
-    match (req.header("range")) {
-        case Some(rangeHeader) => match (parseRange(rangeHeader, data.size)) {
-            case RangeOk(start, end) =>
-                res.status(206)
-                res.set("Content-Range", "bytes ${start}-${end}/${data.size}")
-                res.bodyBytes = Some(sliceBytes(data, start, end + 1))
-                res.finished = true
-                return
-            case RangeUnsatisfiable =>
-                res.status(416)
-                res.set("Content-Range", "bytes */${data.size}")
-                res.bodyBytes = Some(Array<UInt8>())
-                res.finished = true
-                return
-            case RangeIgnore => ()
+        match (req.header("range")) {
+            case Some(rangeHeader) => match (parseRange(rangeHeader, data.size)) {
+                case RangeOk(start, end) =>
+                    res.status(206)
+                    res.set("Content-Range", "bytes ${start}-${end}/${data.size}")
+                    res.bodyBytes = Some(sliceBytes(data, start, end + 1))
+                    res.finished = true
+                    return
+                case RangeUnsatisfiable =>
+                    res.status(416)
+                    res.set("Content-Range", "bytes */${data.size}")
+                    res.bodyBytes = Some(Array<UInt8>())
+                    res.finished = true
+                    return
+                case RangeIgnore => ()
+            }
+            case None => ()
         }
-        case None => ()
-    }
     }
 
     // 无条件命中、无可用 Range:发送完整内容(200)。
@@ -328,6 +328,10 @@ func applyCharsetIfSet(res: HttpResponse): Unit {
 // 依据内容算出一个强 ETag(形如 "<size>-<h1>-<h2>")。这里用两个不同质数/模数的
 // 多项式滚动哈希拼接以降低碰撞;中间量始终落在 Int64 安全范围内,不会溢出。
 // 不是加密级强度,但作为缓存校验「内容是否变化」足够。
+//
+// P1-13:旧实现 `"\"" + toHexLower(...) + "-" + ... + "\""` 多次中间字符串拷贝,
+// 与 toHexLower 自身的头插 O(n²) 叠加成本可观。改为单一 ArrayList<UInt8>,3 段
+// hex 直接写入同一 buffer,最后 String.fromUtf8 一次成串。
 func computeETag(data: Array<UInt8>): String {
     var h1: Int64 = 0
     var h2: Int64 = 0
@@ -335,7 +339,15 @@ func computeETag(data: Array<UInt8>): String {
         h1 = (h1 * 31 + Int64(b)) % 1000000007
         h2 = (h2 * 131 + Int64(b)) % 998244353
     }
-    return "\"" + toHexLower(data.size) + "-" + toHexLower(h1) + "-" + toHexLower(h2) + "\""
+    let out = ArrayList<UInt8>()
+    out.add(UInt8(34)) // '"'
+    appendHexLower(out, data.size)
+    out.add(UInt8(45)) // '-'
+    appendHexLower(out, h1)
+    out.add(UInt8(45)) // '-'
+    appendHexLower(out, h2)
+    out.add(UInt8(34)) // '"'
+    return String.fromUtf8(out.toArray())
 }
 
 // If-None-Match 头与给定 ETag 是否匹配:支持通配 "*" 与逗号分隔的多个候选;
@@ -436,19 +448,38 @@ func parseRange(header: String, total: Int64): RangeResult {
 }
 
 // 把一个非负整数转为小写十六进制字符串(0 返回 "0")。
+//
+// P1-13:旧实现 `s = digits[d..] + s` 每次都重建整段字符串(头插 O(n²))。改为
+// 走 appendHexLower:固定 16 字节栈临时 buf(Int64 hex 最多 16 位)倒序填,再
+// 顺序追加 — 整体 O(n) 且无中间字符串拷贝。
 func toHexLower(value: Int64): String {
+    let buf = ArrayList<UInt8>()
+    appendHexLower(buf, value)
+    return String.fromUtf8(buf.toArray())
+}
+
+// 把一个非负整数的小写十六进制表示追加到 out(0/负数追加 "0")。供 computeETag /
+// toHexLower 共用,避免每段 hex 各自分配中间字符串。
+func appendHexLower(out: ArrayList<UInt8>, value: Int64): Unit {
     if (value <= 0) {
-        return "0"
+        out.add(UInt8(48)) // '0'
+        return
     }
-    let digits = "0123456789abcdef"
+    let digits = "0123456789abcdef".toArray()
+    // Int64.Max < 2^63 → 至多 16 位 hex。栈临时 buf 倒序填,再把有效段顺序追加。
+    let buf = Array<UInt8>(16, repeat: UInt8(0))
     var n = value
-    var s = ""
+    var pos = 16
     while (n > 0) {
-        let d = n % 16
-        s = digits[d..(d + 1)] + s
+        pos -= 1
+        buf[pos] = digits[n % 16]
         n = n / 16
     }
-    return s
+    var i = pos
+    while (i < 16) {
+        out.add(buf[i])
+        i += 1
+    }
 }
 
 // 从文件路径中取出文件名部分(同时兼容 "/" 与 "\\" 两种分隔符)。

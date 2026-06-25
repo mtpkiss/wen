@@ -48,6 +48,52 @@ class CryptoHmacTest {
         @Assert(s == "000f10ffaa")
     }
 
+    // 32 字节摘要(SHA-256 长度)场景:覆盖 bytesToHex 改为预分配 + 索引写入后的
+    // 正确性 — 早先实现 `s += digits[...]` 每次都重建整个字符串(O(n²)),改成
+    // Array<UInt8>(2n) 索引写入后,任何一位 nibble 写错位、高低 nibble 写反、索引
+    // 漏算或越界,整段 64 字符都对不上。字节序列跨越 0x00..0xff 的若干代表:含
+    // 全 0、低 nibble 进位(0x0f→0x10)、高 nibble 全 1(0xfa)、首/末 0x00。
+    @TestCase
+    func testBytesToHex32ByteDigestStableFormat(): Unit {
+        let bytes: Array<UInt8> = [
+            UInt8(0x00),
+            UInt8(0x0f),
+            UInt8(0x10),
+            UInt8(0x7f),
+            UInt8(0x80),
+            UInt8(0xab),
+            UInt8(0xfa),
+            UInt8(0xff),
+            UInt8(0x12),
+            UInt8(0x34),
+            UInt8(0x56),
+            UInt8(0x78),
+            UInt8(0x9a),
+            UInt8(0xbc),
+            UInt8(0xde),
+            UInt8(0xf0),
+            UInt8(0x01),
+            UInt8(0x23),
+            UInt8(0x45),
+            UInt8(0x67),
+            UInt8(0x89),
+            UInt8(0xab),
+            UInt8(0xcd),
+            UInt8(0xef),
+            UInt8(0xfe),
+            UInt8(0xdc),
+            UInt8(0xba),
+            UInt8(0x98),
+            UInt8(0x76),
+            UInt8(0x54),
+            UInt8(0x32),
+            UInt8(0x00)
+        ]
+        let s = bytesToHex(bytes)
+        @Assert(s.size == 64)
+        @Assert(s == "000f107f80abfaff123456789abcdef00123456789abcdeffedcba9876543200")
+    }
+
     // secure_random 的种子收集会把当前时间等 Int64 值喂进 appendInt64。若时间回
     // 拨到 1970 年前(测试环境时钟错乱、容器迁移),Int64 会成负数 — 实现不能
     // 用 "UInt64(Int64)" 这种会在负值上抛异常的转换,否则全局 SecureRandom 单例

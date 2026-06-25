@@ -786,6 +786,9 @@ public class Router {
 
     // 构造 Allow 头的值:在已注册的方法基础上，补上隐式支持的 OPTIONS;若注册了
     // GET 但没显式注册 HEAD，也补上 HEAD(因为 HEAD 会回退到 GET)。最后用 ", " 拼接。
+    //
+    // P1-11:旧实现 `s += ", " + m` 每加一个方法都重建整段(O(n²))。改 ArrayList
+    // 流式追加,与 stripMountPath / buildMountPrefix 同源。
     func allowHeader(path: String): String {
         let methods = methodsForPath(path)
         if (!listContains(methods, HttpMethod.OPTIONS)) {
@@ -794,17 +797,17 @@ public class Router {
         if (listContains(methods, HttpMethod.GET) && !listContains(methods, HttpMethod.HEAD)) {
             methods.add(HttpMethod.HEAD)
         }
-        var s = ""
+        let out = ArrayList<UInt8>()
         var first = true
         for (m in methods) {
-            if (first) {
-                s += m
-                first = false
-            } else {
-                s += ", " + m
+            if (!first) {
+                out.add(UInt8(44)) // ','
+                out.add(UInt8(32)) // ' '
             }
+            appendAscii(out, m)
+            first = false
         }
-        return s
+        return String.fromUtf8(out.toArray())
     }
 
     // 把整个路由器当作一段挂载式中间件来运行(即所谓的「子应用 / mini-app」)。
@@ -1052,27 +1055,34 @@ public class Router {
     // 若剩余段不足(全被剥光)，则返回根路径 "/"。
     // P1-7:保留原路径的尾斜杠 — 否则 sub 永远看不到 `/foo/`,只能看到 `/foo`,
     // 子路由 strict routing 形同失效。
+    //
+    // P1-10:旧实现 `rebuilt += "/" + parts[i]` 每段都重建整个字符串(O(n²)),
+    // 是 prefix 中间件 / 子路由的每请求派发热路径。改为 ArrayList<UInt8> 流式追加,
+    // 最后 String.fromUtf8 一次成串。
     func stripMountPath(path: String, mountSegments: Int64): String {
         let parts = pathSegments(path)
         if (parts.size <= mountSegments) {
             return "/"
         }
-        var rebuilt = ""
+        let out = ArrayList<UInt8>()
         var i = mountSegments
         while (i < parts.size) {
-            rebuilt += "/" + parts[i]
+            out.add(UInt8(47)) // '/'
+            appendAscii(out, parts[i])
             i += 1
         }
-        if (path.endsWith("/") && !rebuilt.endsWith("/")) {
-            rebuilt += "/"
+        if (path.endsWith("/") && out[out.size - 1] != UInt8(47)) {
+            out.add(UInt8(47)) // '/'
         }
-        return rebuilt
+        return String.fromUtf8(out.toArray())
     }
 
     // 从路径中取出前 `mountSegments` 个段并重新拼成路径前缀字符串，用于构建 baseUrl。
     // 例如 buildMountPrefix("/api/users/1", 1) -> "/api"
     //        buildMountPrefix("/api/users/1", 2) -> "/api/users"
     // 若段数不足则返回路径本身。
+    //
+    // P1-10:同上,与 stripMountPath 同源的 O(n²) 串拼,改为 ArrayList<UInt8>。
     func buildMountPrefix(path: String, mountSegments: Int64): String {
         let parts = pathSegments(path)
         let take = if (mountSegments < parts.size) {
@@ -1080,12 +1090,13 @@ public class Router {
         } else {
             parts.size
         }
-        var prefix = ""
+        let out = ArrayList<UInt8>()
         var i = Int64(0)
         while (i < take) {
-            prefix += "/" + parts[i]
+            out.add(UInt8(47)) // '/'
+            appendAscii(out, parts[i])
             i += 1
         }
-        return prefix
+        return String.fromUtf8(out.toArray())
     }
 }

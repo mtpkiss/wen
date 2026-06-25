@@ -232,15 +232,21 @@ func hmacSha256(key: Array<UInt8>, msg: Array<UInt8>): Array<UInt8> {
 }
 
 // 把字节序列转成小写十六进制字符串。
+//
+// P1-12:旧实现 `s += digits[...]` 每次都重建整段字符串(O(n²)),32 字节 SHA-256
+// 摘要每个签名 cookie/session 请求都要 hex 化一次,对并发 RPS 直接有影响。改为
+// `Array<UInt8>(2n)` 预分配 + 索引写入,最后 String.fromUtf8 一次成串。
 func bytesToHex(data: Array<UInt8>): String {
-    let digits = "0123456789abcdef"
-    var s = ""
+    let digits = "0123456789abcdef".toArray()
+    let out = Array<UInt8>(data.size * 2, repeat: UInt8(0))
+    var i = 0
     for (b in data) {
         let v = Int64(b)
-        s += digits[(v / 16)..(v / 16 + 1)]
-        s += digits[(v % 16)..(v % 16 + 1)]
+        out[i] = digits[v / 16]
+        out[i + 1] = digits[v % 16]
+        i += 2
     }
-    return s
+    return String.fromUtf8(out)
 }
 
 // 对外入口:用 key 对 msg 计算 HMAC-SHA256,返回十六进制字符串。这是框架做签名

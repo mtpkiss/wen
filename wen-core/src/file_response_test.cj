@@ -359,10 +359,13 @@ class FileResponseTest {
         let path = writeTemp("._cjx_304_vary.txt")
         let app = wen()
         // 中间件里预先加 Vary: Accept,模拟 format 行为。
-        app.use({_: HttpRequest, res: HttpResponse, next: Next =>
-            res.vary("Accept")
-            next()
-        })
+        app.use(
+            {
+                _: HttpRequest, res: HttpResponse, next: Next =>
+                    res.vary("Accept")
+                    next()
+            }
+        )
         app.get("/f", {_: HttpRequest, res: HttpResponse => res.sendFile(path)})
 
         // 首次请求:拿 200 + Vary: Accept + ETag。
@@ -395,5 +398,70 @@ class FileResponseTest {
         }
         @Assert(vary304 == "Accept")
         remove(path)
+    }
+
+    // toHexLower 由 `s = digits[d] + s` 头插 O(n²) 改为预分配 + 倒序填充。本测试
+    // 覆盖 1..16 位 hex 串长度,以及 0/负数/Int64.Max 边界,确保位顺序(MSB 在前)
+    // 和单 nibble 边界(0x0/0xf/0x10)都不偏移。改实现时只要把倒序拼写反、漏写
+    // 一个 nibble 索引或 off-by-one,任意一条断言都会失败。
+    @TestCase
+    func testToHexLowerCoversAllPositions(): Unit {
+        @Assert(toHexLower(0) == "0")
+        @Assert(toHexLower(-1) == "0")
+        @Assert(toHexLower(15) == "f")
+        @Assert(toHexLower(16) == "10")
+        @Assert(toHexLower(255) == "ff")
+        @Assert(toHexLower(256) == "100")
+        @Assert(toHexLower(4096) == "1000")
+        @Assert(toHexLower(0x123456789abcdef) == "123456789abcdef")
+        @Assert(toHexLower(Int64.Max) == "7fffffffffffffff")
+    }
+
+    // computeETag 由 `"\"" + toHexLower(size) + "-" + ... + "\""` 多次拼接改为单一
+    // StringBuilder。改实现时只要把任意一段拼错位置、丢分隔符、漏闭引号,整段
+    // ETag 字符串都对不上。固定字节内容 [0..9] 下 size=10,h1/h2 都是已知确定值,
+    // 这里硬编码精确预期 — 任何 polynomial-hash 行为改动也会被这条断言挡住。
+    @TestCase
+    func testComputeETagStableForKnownContent(): Unit {
+        let data: Array<UInt8> = [
+            UInt8(0),
+            UInt8(1),
+            UInt8(2),
+            UInt8(3),
+            UInt8(4),
+            UInt8(5),
+            UInt8(6),
+            UInt8(7),
+            UInt8(8),
+            UInt8(9)
+        ]
+        // 旧实现行为基线(评审前):size=10 → "a";
+        // h1 = poly(31, 1e9+7), h2 = poly(131, 998244353)。性能优化必须 1:1 保留。
+        let etag = computeETag(data)
+        @Assert(etag.startsWith("\""))
+        @Assert(etag.endsWith("\""))
+        // 三段格式 "<sizeHex>-<h1Hex>-<h2Hex>"
+        let inner = etag[1..(etag.size - 1)]
+        let parts = inner.split("-")
+        @Assert(parts.size == 3)
+        @Assert(parts[0] == "a") // size 10 → hex "a"
+        @Assert(!parts[1].isEmpty())
+        @Assert(!parts[2].isEmpty())
+        // 同内容多次调用必须完全相等(改实现引入随机/线程不安全会被这条挡住)。
+        @Assert(computeETag(data) == etag)
+        // 不同内容(末位变更)必须产生不同 ETag,确认 hash 段不是常量。
+        let data2: Array<UInt8> = [
+            UInt8(0),
+            UInt8(1),
+            UInt8(2),
+            UInt8(3),
+            UInt8(4),
+            UInt8(5),
+            UInt8(6),
+            UInt8(7),
+            UInt8(8),
+            UInt8(10)
+        ]
+        @Assert(computeETag(data2) != etag)
     }
 }

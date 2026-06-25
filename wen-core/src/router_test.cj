@@ -313,4 +313,94 @@ class RouterTest {
             case None => @Assert(false)
         }
     }
+
+    // allowHeader 由 `s += ", " + m` O(n²) 改为累积 buffer。本测试覆盖多方法注册
+    // 下 Allow 头的精确格式:方法间以 ", "(逗号空格)分隔,首尾不能多出 ", ",
+    // 不能出现 ", ,"(空 token)或 ",,"(漏空格)。注册 POST/PUT/DELETE 时还会自
+    // 动补 OPTIONS;因无 GET 故不补 HEAD — 四个方法 token = 三个分隔符。改 buffer
+    // 实现的典型 bug 是首段误加分隔符或末段漏分隔符,这条会立即暴露。
+    @TestCase
+    func testAllowHeaderExactFormatNoDanglingSeparator(): Unit {
+        let app = wen()
+        app.post("/r", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        app.put("/r", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        app.delete("/r", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("GET", "/r")
+        req.path = "/r"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 405)
+        match (res.get("Allow")) {
+            case Some(v) =>
+                @Assert(!v.startsWith(", "))
+                @Assert(!v.endsWith(", "))
+                @Assert(!v.contains(",,"))
+                @Assert(!v.contains(", ,"))
+                @Assert(v.contains("POST"))
+                @Assert(v.contains("PUT"))
+                @Assert(v.contains("DELETE"))
+                @Assert(v.contains("OPTIONS"))
+                @Assert(!v.contains("HEAD"))
+                let parts = v.split(", ")
+                @Assert(parts.size == 4)
+                for (p in parts) {
+                    @Assert(!p.isEmpty())
+                }
+            case None => @Assert(false)
+        }
+    }
+
+    // stripMountPath / buildMountPrefix 由 `rebuilt += "/" + parts[i]` O(n²) 改为
+    // ArrayList<UInt8>。本测试覆盖深挂载(3 段挂载前缀 + 余 2 段)下两件事:
+    //   1) 子路由 handler 看到的 req.path 是剥前缀后的相对路径,精确为 "/items/list";
+    //   2) req.baseUrl 是挂载前缀的精确重建,等于 app.use 的注册路径;
+    // 改 buffer 实现的典型 bug 是丢首段斜杠(rebuilt 起手忘记 "/")或多写一段。
+    @TestCase
+    func testDeepMountStripPathAndBuildBaseUrl(): Unit {
+        let app = wen()
+        let sub = Router()
+        let captured = ArrayList<String>()
+        sub.get(
+            "/items/list",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    captured.add(req.path)
+                    captured.add(req.baseUrl)
+                    res.send("ok")
+            }
+        )
+        app.use("/api/v1/store", sub)
+        let req = HttpRequest("GET", "/api/v1/store/items/list")
+        req.path = "/api/v1/store/items/list"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(captured.size == 2)
+        @Assert(captured[0] == "/items/list")
+        @Assert(captured[1] == "/api/v1/store")
+    }
+
+    // stripMountPath 必须保留原路径尾斜杠 — 否则子路由 strict routing 完全失效。
+    // 改 buffer 实现时,尾斜杠 if/else 分支若被漏写,这条会立即失败。
+    @TestCase
+    func testDeepMountStripPreservesTrailingSlash(): Unit {
+        let app = wen()
+        let sub = Router()
+        let captured = ArrayList<String>()
+        sub.get(
+            "/items/",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    captured.add(req.path)
+                    res.send("ok")
+            }
+        )
+        app.use("/api/v1/store", sub)
+        let req = HttpRequest("GET", "/api/v1/store/items/")
+        req.path = "/api/v1/store/items/"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(captured.size == 1)
+        @Assert(captured[0] == "/items/")
+    }
 }
