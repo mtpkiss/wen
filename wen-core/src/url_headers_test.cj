@@ -372,10 +372,12 @@ class HeadersSentTest {
         let req = HttpRequest("GET", "/")
         req.headers["accept"] = "text/html"
         res.req = Some(req)
-        res.format([
-            ("html", { => res.send("<h1>ok</h1>") }),
-            ("default", { => res.status(406).send("not acceptable") })
-        ])
+        res.format(
+            [
+                ("html", {=> res.send("<h1>ok</h1>")}),
+                ("default", {=> res.status(406).send("not acceptable")})
+            ]
+        )
         let v = match (res.get("Vary")) {
             case Some(v) => v
             case None => ""

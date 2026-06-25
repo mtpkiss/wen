@@ -457,8 +457,8 @@ public class HttpResponse {
         match (this.get("Vary")) {
             case Some(v) =>
                 // 拆分已有值,trim 每部分,转为小写用于比较。
-                let existingParts = ArrayList<String>()  // 原始大小写
-                let normalized = ArrayList<String>()    // 小写,用于比较
+                let existingParts = ArrayList<String>() // 原始大小写
+                let normalized = ArrayList<String>() // 小写,用于比较
                 var seen = false
                 for (part in v.split(",")) {
                     let trimmed = part.trimAscii()
