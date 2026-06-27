@@ -128,6 +128,10 @@ class SessionEntry {
  *
  * - `ttlSeconds`:**滑动**过期窗口,`>0` 时任何「上次访问后超过 N 秒」的会话被视为
  *   不存在,并在 `load` / `save` 时惰性清理。`-1` / `0` 表示永不过期。
+ *   **精度(P1-3)**:过期判定走秒级时间戳(`toUnixTimeStamp().toSeconds()`,小数秒
+ *   直接截断),因此真实过期点相对 `lastAccess + ttlSeconds` 有最多 ±1 秒抖动 —— 例如
+ *   `lastAccess` 落在某秒的 .9、`now` 落在下一秒的 .0,真实只过了 0.1 秒却已跨秒。会话
+ *   过期可接受这点抖动;若需精确窗口(如限流计时),请勿复用本类 TTL,另接毫秒级时钟。
  * - `maxSessions`:容量上限,`>0` 时 `save` 引入新会话且容量超额时,FIFO 淘汰最旧。
  *
  * 「满了怎么办」选 evict 而非 reject:`save` 发生在响应处理之后,reject 只能让会话
@@ -228,6 +232,7 @@ public class MemorySessionStore <: SessionStore {
         }
     }
 
+    // P1-3:秒级粒度 —— 过期判定因此有最多 ±1 秒抖动,依据见类 cjdoc 中 `ttlSeconds` 的精度说明。
     private func nowSec(): Int64 {
         return DateTime.now().toUnixTimeStamp().toSeconds()
     }
