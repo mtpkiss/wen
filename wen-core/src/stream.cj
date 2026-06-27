@@ -35,6 +35,10 @@ public interface ResponseConnection {
 public class StreamWriter {
     let res: HttpResponse
     var started: Bool = false
+    // P1-14:无真实连接(单元测试)时,各次写入先攒进字节缓冲,待 stream 回调结束由
+    // flushSink 一次性落到 res.body —— 旧实现 `res.body += String.fromUtf8(data)` 每块都
+    // 重建整串,N 次写入退化成 O(n²),SSE 长流尤甚。有真实连接时 sink 恒空。
+    let sink = ArrayList<UInt8>()
 
     init(res: HttpResponse) {
         this.res = res
@@ -71,7 +75,18 @@ public class StreamWriter {
     func writeRaw(data: Array<UInt8>): Unit {
         match (res.conn) {
             case Some(c) => c.write(data)
-            case None => res.body += String.fromUtf8(data)
+            case None => for (b in data) {
+                sink.add(b)
+            }
+        }
+    }
+
+    // 把无连接路径攒下的字节一次性刷进 res.body。仅由 HttpResponse.stream 在回调结束后
+    // 调用一次(无论回调正常返回还是抛异常,已写出的块都应可见)。合并后再 String.fromUtf8,
+    // 顺带让跨 writeBytes 拆分的多字节 UTF-8 也能正确解码。有真实连接时 sink 为空,此处即空操作。
+    func flushSink(): Unit {
+        if (sink.size > 0) {
+            res.body += String.fromUtf8(sink.toArray())
         }
     }
 }

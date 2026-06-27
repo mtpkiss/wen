@@ -397,6 +397,9 @@ public class HttpResponse {
         } catch (e: Exception) {
             eprintln("[wen] stream/sse body 抛异常: ${e.message}")
         }
+        // P1-14:无连接路径(单元测试)下,把 writer 攒下的字节一次性刷进 res.body。
+        // 放在 try/catch 之后:即便回调中途抛异常,已写出的块也要落盘可见。
+        writer.flushSink()
     }
 
     // 建立一个 Server-Sent Events(SSE,服务器推送事件)流。先设置好 SSE 所需的
