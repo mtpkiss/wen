@@ -320,7 +320,9 @@ class FileResponseTest {
         req.headers["range"] = "bytes=99999999999999999999-99999999999999999999"
         let res = HttpResponse()
         app.handle(req, res)
-        @Assert(res.statusCode != 500)
+        // 不可解析的 Range:RFC 7233 要求忽略 → 回 200 全文(或显式 416),但绝不 500。
+        // 收紧为 `200 || 416`(而非仅 `!= 500`),锁住后续行为不被悄悄改写。
+        @Assert(res.statusCode == 200 || res.statusCode == 416)
         remove(path)
     }
 
@@ -335,7 +337,9 @@ class FileResponseTest {
         req.headers["range"] = "bytes=-99999999999999999999"
         let res = HttpResponse()
         app.handle(req, res)
-        @Assert(res.statusCode != 500)
+        // 不可解析的 Range:RFC 7233 要求忽略 → 回 200 全文(或显式 416),但绝不 500。
+        // 收紧为 `200 || 416`(而非仅 `!= 500`),锁住后续行为不被悄悄改写。
+        @Assert(res.statusCode == 200 || res.statusCode == 416)
         remove(path)
     }
 

@@ -35,7 +35,9 @@ class HelmetTest {
         @Assert(hv(res, "X-Content-Type-Options") == "nosniff")
         @Assert(hv(res, "X-Frame-Options") == "SAMEORIGIN")
         @Assert(hv(res, "Referrer-Policy") == "no-referrer")
-        @Expect(hv(res, "Strict-Transport-Security").contains("max-age="))
+        // 与本测试其余默认值断言统一为严格相等(不再用 @Expect + .contains());锁住默认 HSTS
+        // 的完整形态:max-age=15552000(180 天)+ includeSubDomains,preload 默认关。
+        @Assert(hv(res, "Strict-Transport-Security") == "max-age=15552000; includeSubDomains")
         // 默认关(易误伤,需显式传值)。
         @Assert(hv(res, "Content-Security-Policy") == "")
         @Assert(hv(res, "Cross-Origin-Opener-Policy") == "")

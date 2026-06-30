@@ -208,6 +208,34 @@ class SessionTest {
         @Assert(found)
     }
 
+    // 验签**失败**分支:cookie 签名既不匹配主密钥也不匹配任何 legacy 密钥(篡改 / 垃圾签名)
+    // → 验签失败,该 sid 不被采信;按"无有效会话"起一个全新会话并下发新 sid,而非复用攻击者
+    // 构造的 sid(防会话固定)。此前只测了 legacy 验签**成功**的轮换路径,失败分支无回归。
+    @TestCase
+    func testInvalidSignedSidCookieStartsFreshSession(): Unit {
+        let app = wen()
+        app.cookieSecret = "new-secret"
+        app.legacyCookieSecrets = ["old-secret"]
+        let store = MemorySessionStore()
+        let sid = store.newId()
+        store.save(sid, HashMap<String, String>())
+
+        app.use(session(store))
+        app.get("/", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+
+        // 用既非主密钥也非 legacy 的第三方密钥签名 → 两条验签都失败。
+        let bogus = "${sid}.${hmacSha256Hex("attacker-secret", sid)}"
+        let req = HttpRequest("GET", "/")
+        req.path = "/"
+        req.headers["cookie"] = "sid=${bogus}"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        // 起了新会话:恰好下发一条 sid,且其值不是攻击者构造的 sid(已重新随机生成)。
+        @Assert(res.setCookies.size == 1)
+        @Assert(!res.setCookies[0].contains(sid))
+    }
+
     // 反例:同款配置下,sid 已经是主密钥签的(不来自 legacy),无需重发 cookie。
     // 否则每次请求都白白下一条 Set-Cookie,放大响应字节 + 让客户端误以为会话刚换。
     @TestCase

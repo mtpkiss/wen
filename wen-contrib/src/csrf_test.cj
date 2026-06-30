@@ -190,6 +190,48 @@ class CsrfTest {
         @Assert(res.setCookies.size == 0) // 不重发
     }
 
+    // 跑一次带指定 _csrf cookie 的 GET /form 请求,返回响应(供 rotate 边界用例复用)。
+    func runCsrf(secret: String, window: Int64, cookie: String): HttpResponse {
+        let app = wen()
+        app.cookieSecret = secret
+        app.use(csrf(rotateAfterSeconds: window))
+        app.get(
+            "/form",
+            {req: HttpRequest, res: HttpResponse => res.send(req.attribute("csrfToken") ?? "none")}
+        )
+        let req = HttpRequest("GET", "/form")
+        req.path = "/form"
+        req.headers["cookie"] = "_csrf=${cookie}"
+        let res = HttpResponse()
+        app.handle(req, res)
+        return res
+    }
+
+    // rotate 的时间边界:此前只测 iat=0(极端过期)与 iat=now(全新),这里补"半超期(窗口
+    // 内但已过半)→ 复用"与"已越过窗口 → 重生"两点。判定为 now - iat <= window(见 mw_csrf
+    // 的不溢出推理注释),故窗口内复用、越界重生。用 now 倒推 iat,并避开 ±1 秒时钟抖动:
+    // 取窗口一半 / 窗口 + 余量,不卡精确秒边界(那点对实时钟天然 flaky)。
+    @TestCase
+    func testCsrfRotateTimeBoundaries(): Unit {
+        let secret = "csrf-secret"
+        let window = 100
+        let nowSec = DateTime.now().toUnixTimeStamp().toSeconds()
+
+        // 半超期:iat = now - 50,now - iat ≈ 50 < 100 → 复用,不重发。
+        let halfTok = "tok-half-aged-000001"
+        let halfVal = "${halfTok}@${nowSec - window / 2}"
+        let resHalf = runCsrf(secret, window, "${halfVal}.${hmacSha256Hex(secret, halfVal)}")
+        @Assert(resHalf.body == halfTok)
+        @Assert(resHalf.setCookies.size == 0)
+
+        // 已越窗:iat = now - 110,now - iat ≈ 110 > 100 → 过期,重生 + 重发。
+        let oldTok = "tok-over-window-0001"
+        let oldVal = "${oldTok}@${nowSec - window - 10}"
+        let resOld = runCsrf(secret, window, "${oldVal}.${hmacSha256Hex(secret, oldVal)}")
+        @Assert(resOld.body != oldTok)
+        @Assert(resOld.setCookies.size > 0)
+    }
+
     // csrf 中间件在未通过校验时必须立刻 403,不能先去把请求体当 multipart 解析。
     // 如果 csrf 校验依赖 req.attribute(formField) 之类会触发 body 解析的访问器,
     // 攻击者就能用 1 MiB 垃圾 multipart body POST 到任意被 csrf 守的端点,即便最

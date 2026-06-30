@@ -64,6 +64,34 @@ class MultipartTest {
         }
     }
 
+    // RFC 2046 §5.1.1:位于 body 起始处的首个 boundary 不要求前置 CRLF(它前面没有 part)。
+    // 构造首边界紧贴 body 起始(偏移 0、无前导 CRLF、无 preamble)的请求体,验证字段仍能
+    // 正确解析 —— 锁住解析器对"首边界省略前导 CRLF"这一合法形态的支持。
+    @TestCase
+    func testFirstBoundaryAtBodyStartNoLeadingCRLF(): Unit {
+        let boundary = "X"
+        let buf = ArrayList<UInt8>()
+        appendStr(buf, "--${boundary}\r\n") // 首边界在偏移 0,前面没有 CRLF
+        appendStr(buf, "Content-Disposition: form-data; name=\"k\"\r\n\r\n")
+        appendStr(buf, "v\r\n")
+        appendStr(buf, "--${boundary}--\r\n")
+
+        let app = wen()
+        app.use(multipart())
+        app.post("/u", {_: HttpRequest, res: HttpResponse => res.send("ok")})
+        let req = HttpRequest("POST", "/u")
+        req.path = "/u"
+        req.headers["content-type"] = "multipart/form-data; boundary=${boundary}"
+        req.bodyBytes = buf.toArray()
+        let res = HttpResponse()
+        app.handle(req, res)
+        let k = match (req.attribute("k")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(k == "v")
+    }
+
     // 多个文件 + 仅文本字段时 file() 返回 None。
     @TestCase
     func testMultipleAndMissing(): Unit {
