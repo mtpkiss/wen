@@ -227,15 +227,23 @@ public class HttpResponse {
         } else {
             value
         }
-        var c = "${name}=${actualValue}"
+        // P2-24:Set-Cookie 串用 StringBuilder 累积,免去逐属性 `+=` 的中间字符串拷贝
+        // (次热路径:每设一个 Cookie 调一次,属性最多七八段)。
+        let sb = StringBuilder()
+        sb.append(name)
+        sb.append("=")
+        sb.append(actualValue)
         if (!path.isEmpty()) {
-            c += "; Path=${path}"
+            sb.append("; Path=")
+            sb.append(path)
         }
         if (!domain.isEmpty()) {
-            c += "; Domain=${domain}"
+            sb.append("; Domain=")
+            sb.append(domain)
         }
         if (maxAge >= 0) {
-            c += "; Max-Age=${maxAge}"
+            sb.append("; Max-Age=")
+            sb.append(maxAge.toString())
         }
         // Expires:显式传入优先;否则若设了 maxAge,则据此自动推导。
         let exp = if (!expires.isEmpty()) {
@@ -246,22 +254,24 @@ public class HttpResponse {
             ""
         }
         if (!exp.isEmpty()) {
-            c += "; Expires=${exp}"
+            sb.append("; Expires=")
+            sb.append(exp)
         }
         if (httpOnly) {
-            c += "; HttpOnly"
+            sb.append("; HttpOnly")
         }
         // SameSite=None 必须配 Secure,否则现代浏览器(Chrome 80+ / Firefox / Safari)
         // 会直接拒绝该 Cookie。自动补 Secure 是防呆——与其让用户的跨站 Cookie 静默失效,
         // 不如代他补上。显式传 secure: true 时也只输出一次。
         let sameSiteNone = !sameSite.isEmpty() && sameSite.toAsciiLower() == "none"
         if (secure || sameSiteNone) {
-            c += "; Secure"
+            sb.append("; Secure")
         }
         if (!sameSite.isEmpty()) {
-            c += "; SameSite=${sameSite}"
+            sb.append("; SameSite=")
+            sb.append(sameSite)
         }
-        this.setCookies.add(c)
+        this.setCookies.add(sb.toString())
         return this
     }
 

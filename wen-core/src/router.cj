@@ -148,9 +148,12 @@ public class PathPattern {
     }
 
     private func doMatch(parts: Array<String>, prefix: Bool, caseSensitive: Bool): ?HashMap<String, String> {
-        let params = HashMap<String, String>()
+        // P2-25:参数表延迟分配。matchFrom 仅在真正捕获到 `:param` 时才让 LazyParams 建底层
+        // HashMap;纯字面量路由,以及 trie 二次过滤里所有匹配失败的候选(占大头),全程零
+        // 分配。无参数的成功匹配按 `?HashMap` 契约返回一个新建空表。
+        let params = LazyParams()
         if (matchFrom(0, parts, 0, prefix, params, caseSensitive)) {
-            return params
+            return Some(params.result())
         }
         return None
     }
@@ -159,7 +162,7 @@ public class PathPattern {
     // 并把沿途捕获的参数写入 params;失败返回 false。
     // 之所以用回溯而非简单的线性扫描，是为了正确处理可缺省参数(":name?"):碰到
     // 可缺省段时，先试「消费一段」，若后续匹配不下去再回退试「跳过该段」。
-    private func matchFrom(si: Int64, parts: Array<String>, pi: Int64, prefix: Bool, params: HashMap<String, String>,
+    private func matchFrom(si: Int64, parts: Array<String>, pi: Int64, prefix: Bool, params: LazyParams,
         caseSensitive: Bool): Bool {
         if (si >= segments.size) {
             // 模式已全部用完。前缀匹配:请求路径还剩多余段也算成功;精确匹配:
@@ -178,12 +181,12 @@ public class PathPattern {
                 if (seg.optional) {
                     // 先尝试消费当前这一段(需有可用段且满足正则约束)。
                     if (pi < parts.size && constraintOk(seg, parts[pi])) {
-                        params[seg.value] = urlDecode(parts[pi])
+                        params.capture(seg.value, urlDecode(parts[pi]))
                         if (matchFrom(si + 1, parts, pi + 1, prefix, params, caseSensitive)) {
                             return true
                         }
                         // 走不通则回退:撤销本段的捕获，改为「跳过该可缺省段」。
-                        params.remove(seg.value)
+                        params.uncapture(seg.value)
                     }
                     return matchFrom(si + 1, parts, pi, prefix, params, caseSensitive)
                 }
@@ -194,7 +197,7 @@ public class PathPattern {
                     return false
                 }
                 // 捕获到的参数值会做 URL 解码(例如 "john%20doe" -> "john doe")。
-                params[seg.value] = urlDecode(parts[pi])
+                params.capture(seg.value, urlDecode(parts[pi]))
                 return matchFrom(si + 1, parts, pi + 1, prefix, params, caseSensitive)
             case Literal =>
                 if (pi >= parts.size) {
@@ -217,6 +220,42 @@ public class PathPattern {
         match (seg.constraint) {
             case Some(rx) => return rx.matches(part)
             case None => return true
+        }
+    }
+}
+
+// P2-25:路由匹配期间的参数捕获表,延迟分配底层 HashMap。绝大多数注册路由是纯字面量
+// (无 `:param`),而 trie 候选二次校验、methodsForPath / hasMethodForPath 等每次匹配
+// 尝试都要走 doMatch —— 旧实现无条件 new 一个 HashMap,纯字面量路由与所有匹配失败的
+// 候选全在白交分配税。这里仅在 capture 到第一个参数时才建表;未捕获则底层始终为 None。
+class LazyParams {
+    private var map: ?HashMap<String, String> = None
+
+    // 捕获一个参数;首个参数触发底层表分配。
+    func capture(key: String, value: String): Unit {
+        match (map) {
+            case Some(m) => m[key] = value
+            case None =>
+                let m = HashMap<String, String>()
+                m[key] = value
+                map = Some(m)
+        }
+    }
+
+    // 回溯时撤销一次捕获;尚未分配则无操作。
+    func uncapture(key: String): Unit {
+        match (map) {
+            case Some(m) => m.remove(key)
+            case None => ()
+        }
+    }
+
+    // 匹配成功后取参数表:有捕获返回实表,无捕获返回新建空表(满足 `?HashMap` 契约,
+    // 且不共享可变状态,调用方可安全写入)。
+    func result(): HashMap<String, String> {
+        return match (map) {
+            case Some(m) => m
+            case None => HashMap<String, String>()
         }
     }
 }
