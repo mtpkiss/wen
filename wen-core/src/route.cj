@@ -17,6 +17,12 @@ package wen
  * 形式(带 next)和终结的 [[Handler]] 形式(不带 next),与 [[Application]] 上的同
  * 名方法保持一致,使用习惯完全统一。Route 本身不保存路由表,只是把调用转发给内部的
  * [[Router]],真正的注册仍由 Router 完成。
+ *
+ * 注意:Route 只提供各 HTTP 动词的注册,**没有 route 级的错误处理器**(无 `useError`)。
+ * 错误处理器是应用全局的——用 `app.useError(...)` 注册,按注册顺序对所有路由抛出的异常
+ * 生效(详见 [[ErrorHandler]])。这与 Express 一致(Express 的 router 同样不支持
+ * route 作用域的 error handler)。需要区分来源时,在全局错误处理器里依 `req.path` /
+ * 异常类型分流即可。
  */
 public class Route {
     let path: String

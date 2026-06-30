@@ -97,6 +97,9 @@ public class StreamWriter {
  * 在 [[StreamWriter]] 之上负责把数据格式化成符合 SSE 规范的帧
  * (`event` / `data` / `id` / `retry` / 注释等行),再交由底层写出。由 `res.sse` 取
  * 得。
+ *
+ * 退化行为同 [[StreamWriter]]:无真实连接时(单元测试直接 `app.handle` 驱动),格式化
+ * 后的 SSE 帧会累积到 `res.body` 而非写 socket,便于测试断言。
  */
 public class SseWriter {
     let w: StreamWriter

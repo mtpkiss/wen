@@ -239,6 +239,12 @@ public class Application {
     //
     // 安全:视图名经 normalizeRelPath 规范化,若试图跳出 views 目录(如含 "../")抛异常,
     // 防止模板路径穿越。
+    //
+    // 异常映射:渲染失败(引擎未注册、模板路径越界、引擎读取 / 渲染自身抛错)均以普通
+    // `Exception` 向上传播,而非 [[HttpException]] 子类 —— 因此默认错误处理器按 500 兜底。
+    // 若需自定义状态码 / 页面(如模板缺失回 404),在 [[ErrorHandler]] 里 `match` 该异常
+    // 自行映射即可。这里刻意不引入专门的 ViewRenderException:渲染错误属服务端故障,500
+    // 是合适默认,保持异常类型精简。
     func renderView(name: String, data: JsonValue): String {
         let viewsDir = match (this.setting("views")) {
             case Some(v) => v

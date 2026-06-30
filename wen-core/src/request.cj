@@ -262,13 +262,15 @@ public class HttpRequest {
         return actualSub.endsWith("+${wantSub}")
     }
 
-    // 判断客户端的 Accept 请求头是否接受类型 `t`(`t` 可为简写或完整 MIME 类型)。
+    // 判断客户端的 Accept 请求头是否接受类型 `mediaType`(可为简写如 "json",或完整 MIME
+    // 类型如 "application/json")。参数命名与下方多类型重载 accepts(types) 保持一致(单数
+    // mediaType / 复数 types;不用 `type` 是因其为 Cangjie 关键字)。
     // **缺少 Accept 头时视为接受任何类型 —— 等价于 `Accept: */*`,返回 true**;依据
     // RFC 7231 §5.3.2「a request without any Accept header field implies that the user
     // agent will accept any media type」。空 Accept 头(解析后无条目)同样按此默认。否则
-    // 按内容协商规则判断:把 `t` 展开成完整 MIME、剥掉参数部分,在 Accept 条目中查找匹配
-    // 并要求其质量值 q > 0(即某项写成 "application/json;q=0" 时,该类型被明确拒绝,返回 false)。
-    public func accepts(t: String): Bool {
+    // 按内容协商规则判断:把 `mediaType` 展开成完整 MIME、剥掉参数部分,在 Accept 条目中查找
+    // 匹配并要求其质量值 q > 0(即某项写成 "application/json;q=0" 时被明确拒绝,返回 false)。
+    public func accepts(mediaType: String): Bool {
         match (this.header("accept")) {
             case None => return true
             case Some(v) =>
@@ -276,7 +278,7 @@ public class HttpRequest {
                 if (items.isEmpty()) {
                     return true
                 }
-                let (full, _) = splitOnce(contentTypeFor(t).toAsciiLower(), ";")
+                let (full, _) = splitOnce(contentTypeFor(mediaType).toAsciiLower(), ";")
                 let (q, rank, _) = acceptMatch(full.trimAscii(), items)
                 return rank >= 0 && q > 0.0
         }
@@ -698,6 +700,8 @@ public class HttpRequest {
     // 而非主密钥。`session` / `csrf` 等中间件据此用主密钥重签 cookie 下发,完成密钥
     // 轮换的"续期到主密钥"步骤 — 否则活跃会话永远停留在 legacy 签名上,文档承诺的
     // 轮换流程不能真正完成,legacy 实际上不可回收。
+    // 反映的是本请求内对该名 cookie 最近一次 `signedCookie(name)` 验签的结果;下列情形
+    // 返回 false:该 cookie 本请求未被验签读取、验签失败、或命中的是主密钥(无需续期)。
     public func signedCookieFromLegacy(name: String): Bool {
         match (this.signedCookieLegacyHits.get(name)) {
             case Some(b) => return b

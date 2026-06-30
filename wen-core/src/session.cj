@@ -97,8 +97,12 @@ public interface SessionStore {
     // 后处理无脏 sess.values 的请求时,只需 touch 而不必 save(),避免:
     //   1. 后端把整张 hash 重写一次(对 Redis 是一条 HSET + EXPIRE 而非整体 SET);
     //   2. 与并发请求的 save 竞争覆盖。
-    // 默认实现转调 save(读出旧值再写回),内存实现可重写为「只更新 lastAccess」。
-    // 此处提供默认实现避免破坏现有 SessionStore 实现(无需补 touch 方法)。
+    // 默认实现转调 save(读出旧值再写回),仅为兼容老 SessionStore(无需补 touch 方法)。
+    // **强烈建议自定义存储重写 touch**,只刷新过期时间而不回写数据本体:
+    //   - 内存实现:只更新 lastAccess(见 [[MemorySessionStore.touch]]);
+    //   - Redis / 分布式存储:发一条 `EXPIRE key ttl`(或 `PEXPIRE`)续期,而非
+    //     `GET` 出整张 hash 再 `SET` 回去 —— 后者多一次往返、且与并发 save 竞争覆盖。
+    // 不重写也能正确工作(默认 save 路径),只是多付一次读改写成本。
     func touch(id: String): Unit {
         match (load(id)) {
             case Some(v) => save(id, v)

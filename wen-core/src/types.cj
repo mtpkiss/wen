@@ -49,6 +49,18 @@ public type Handler = (HttpRequest, HttpResponse) -> Unit
  * 在错误处理器内部调用 [[Next]] 并不会前进到普通中间件,而是把同一个异常继续交给链
  * 上的下一个错误处理器;若后面再没有错误处理器,则落到框架默认的 500 响应兜底。借此
  * 可以串联多个错误处理器,实现分级 / 兜底的错误处理。
+ *
+ * 第一个参数是基类 `Exception`,**按异常子类型分发需自行 `match`**;不认识的类型应交给
+ * `next(...)` 继续向后传,而非一律吞掉:
+ * ```
+ * app.useError({ err, _, res, next =>
+ *     match (err) {
+ *         case he: HttpException => res.status(he.status).send(he.message) // 已知:映射状态码
+ *         case _: MyDomainException => res.status(422).send("domain error") // 自定义业务异常
+ *         case _ => next(err) // 不认识 → 交给下一个错误处理器 / 默认 500 兜底
+ *     }
+ * })
+ * ```
  */
 public type ErrorHandler = (Exception, HttpRequest, HttpResponse, Next) -> Unit
 

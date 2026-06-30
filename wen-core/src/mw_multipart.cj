@@ -71,6 +71,20 @@ public class UploadedFile {
  * (框架默认会回 413,用户也可通过错误处理中间件自定义);`fileFilter` 返回 false
  * 时该文件**静默丢弃**(不计入 `req.files` 也不算超额),这与 multer 的语义一致——
  * 「过滤」是业务策略,「超额」才是协议错误。
+ *
+ * `fileFilter` 的两种拒绝姿态:
+ * ```
+ * // 1) 返回 false:静默跳过这个文件,请求继续(其余字段/文件照常解析)。
+ * MultipartOptions(fileFilter: {_, filename, ctype =>
+ *     ctype.startsWith("image/") && filename.toAsciiLower().endsWith(".png")
+ * })
+ * // 2) 在过滤器里抛异常:整个请求按错误中止 —— 异常沿中间件链传播,交由错误处理器
+ * //    决定状态码(如抛 BadRequestException 回 400)。适合"出现非法文件即拒收"的场景。
+ * MultipartOptions(fileFilter: {_, filename, _ =>
+ *     if (filename.contains("..")) { throw BadRequestException() }
+ *     true
+ * })
+ * ```
  */
 public class MultipartOptions {
     public let maxFileSize: Int64 // 单文件最大字节数;≤ 0 表示不限

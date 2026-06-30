@@ -56,7 +56,10 @@ class Segment {
  * 编译成段序列,支持参数捕获(`:name`)、可选段(`:name?`)、参数约束(`:id(\d+)`)、
  * 尾部通配。匹配成功时把捕获到的参数填入 `req.params`,失败则返回 false。
  *
- * 内部由 [[Router]] 使用,通常应用代码不直接构造。
+ * **internal-use(1.x)**:本类是路由的内部实现细节,声明为 public 仅因 [[Router]] 跨文件
+ * 需要引用它;应用代码不应直接构造或依赖它,其 API 在 1.0 后不保证稳定,后续会视用户
+ * 反馈再决定是否收窄可见性。需要路径匹配能力请通过 [[Router]] / [[Application]] 的路由
+ * 注册接口使用。
  */
 public class PathPattern {
     let segments: ArrayList<Segment>
