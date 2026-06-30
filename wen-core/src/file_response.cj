@@ -333,6 +333,13 @@ func applyCharsetIfSet(res: HttpResponse): Unit {
 // 与 toHexLower 自身的头插 O(n²) 叠加成本可观。改为单一 ArrayList<UInt8>,3 段
 // hex 直接写入同一 buffer,最后 String.fromUtf8 一次成串。
 func computeETag(data: Array<UInt8>): String {
+    // P2-6:空内容的强 ETag 会退化成固定的 `"0-0-0"`(size=h1=h2=0),不同的空资源彼此
+    // 碰撞。空体改发**弱 ETag** `W/"0-0-0"`:弱校验语义本就是「可能不唯一」,既诚实表达这点,
+    // 又避免它被当作 Range 子区间检索的强校验器(RFC 7232 §2.1)。注意 [[etag]] 中间件对空体
+    // 直接跳过(不发 ETag),故此分支主要覆盖「空文件经 sendFile」的场景。非空内容仍发强 ETag。
+    if (data.size == 0) {
+        return "W/\"0-0-0\""
+    }
     var h1: Int64 = 0
     var h2: Int64 = 0
     for (b in data) {
@@ -426,6 +433,8 @@ func parseRange(header: String, total: Int64): RangeResult {
     } catch (_: Exception) {
         return RangeIgnore
     }
+    // P2-5:start 落在内容长度之外即「范围不可满足」,显式回 416(RangeUnsatisfiable),
+    // 不依赖后面的 end<start 兜底 —— 路径清晰,且覆盖 "start-"(省略 end)的越界写法。
     if (start >= total) {
         return RangeUnsatisfiable
     }

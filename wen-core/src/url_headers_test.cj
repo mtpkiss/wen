@@ -365,6 +365,20 @@ class HeadersSentTest {
         @Assert(v == "Accept")
     }
 
+    // P2-7:已有 Vary 内部含大小写重复(如直接 set 的 "Accept, ACCEPT"),vary() 追加时应把
+    // 它们收敛成单个(保留首现大小写),不残留重复;新字段照常追加。
+    @TestCase
+    func testVaryCollapsesExistingInternalDuplicates(): Unit {
+        let res = HttpResponse()
+        res.set("Vary", "Accept, ACCEPT")
+        res.vary("Origin")
+        let v = match (res.get("Vary")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(v == "Accept, Origin")
+    }
+
     // res.format 自动加 Vary: Accept,与已有 Vary 合并时不破坏既有值。
     @TestCase
     func testFormatAppendsVaryAccept(): Unit {

@@ -263,9 +263,11 @@ public class HttpRequest {
     }
 
     // 判断客户端的 Accept 请求头是否接受类型 `t`(`t` 可为简写或完整 MIME 类型)。
-    // 缺少 Accept 头时视为接受任何类型(返回 true)。否则按内容协商规则判断:把 `t`
-    // 展开成完整 MIME、剥掉参数部分,在 Accept 条目中查找匹配并要求其质量值 q > 0
-    // (即某项写成 "application/json;q=0" 时,该类型被明确拒绝,返回 false)。
+    // **缺少 Accept 头时视为接受任何类型 —— 等价于 `Accept: */*`,返回 true**;依据
+    // RFC 7231 §5.3.2「a request without any Accept header field implies that the user
+    // agent will accept any media type」。空 Accept 头(解析后无条目)同样按此默认。否则
+    // 按内容协商规则判断:把 `t` 展开成完整 MIME、剥掉参数部分,在 Accept 条目中查找匹配
+    // 并要求其质量值 q > 0(即某项写成 "application/json;q=0" 时,该类型被明确拒绝,返回 false)。
     public func accepts(t: String): Bool {
         match (this.header("accept")) {
             case None => return true

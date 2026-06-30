@@ -51,6 +51,18 @@ class FileResponseTest {
         remove(path)
     }
 
+    // 空内容的 ETag 应是弱校验 W/"0-0-0":强 ETag 对空体会退化成固定的 "0-0-0"(长度与
+    // 两段哈希全为 0),不同的空资源彼此碰撞;弱 ETag 如实表达"可能不唯一",也避免被当作
+    // Range 子区间检索的强校验器。非空内容仍是强 ETag(带引号、无 W/ 前缀)。
+    @TestCase
+    func testComputeETagEmptyBodyIsWeak(): Unit {
+        let emptyTag = computeETag(Array<UInt8>())
+        @Assert(emptyTag == "W/\"0-0-0\"")
+        let nonEmptyTag = computeETag("hello".toArray())
+        @Assert(!nonEmptyTag.startsWith("W/"))
+        @Assert(nonEmptyTag.startsWith("\""))
+    }
+
     // Range: bytes=2-5 应回 206,只发第 2..5 字节,并带正确的 Content-Range。
     @TestCase
     func testSendFileRange206(): Unit {

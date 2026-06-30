@@ -481,34 +481,39 @@ public class HttpResponse {
         let want = field.toAsciiLower()
         match (this.get("Vary")) {
             case Some(v) =>
-                // 拆分已有值,trim 每部分,转为小写用于比较。
-                let existingParts = ArrayList<String>() // 原始大小写
-                let normalized = ArrayList<String>() // 小写,用于比较
+                // P2-7:拆已有值,trim + **大小写无关去重**——不仅挡住与新字段重复,也收敛
+                // 已有值彼此之间的重复(如直接 `set("Vary", "Accept, ACCEPT")` 进来的形态会
+                // 被合并成首次出现的那个)。原始大小写保留(P1-5 的取舍:HTTP 字段名大小写不
+                // 敏感,但输出不强行改写用户写法)。因可能收敛已有重复,这里总是重写 Vary。
+                let parts = ArrayList<String>() // 去重后,保留首现的原始大小写
+                let lowers = ArrayList<String>() // 对应小写,供比较
                 var seen = false
                 for (part in v.split(",")) {
                     let trimmed = part.trimAscii()
-                    if (!trimmed.isEmpty()) {
-                        let lower = trimmed.toAsciiLower()
-                        existingParts.add(trimmed)
-                        normalized.add(lower)
-                        if (lower == want) {
-                            seen = true
-                        }
+                    if (trimmed.isEmpty()) {
+                        continue
+                    }
+                    let lower = trimmed.toAsciiLower()
+                    if (lower == want) {
+                        seen = true
+                    }
+                    if (!lowers.contains(lower)) {
+                        parts.add(trimmed)
+                        lowers.add(lower)
                     }
                 }
                 if (!seen) {
-                    // 新字段用传入的 field 原样。
-                    existingParts.add(field)
-                    // 拼接:统一 ", " 分隔。
-                    var joined = ""
-                    for (i in 0..existingParts.size) {
-                        if (i > 0) {
-                            joined += ", "
-                        }
-                        joined += existingParts[i]
-                    }
-                    this.set("Vary", joined)
+                    parts.add(field) // 新字段用传入的原样
                 }
+                // 拼接:统一 ", " 分隔。
+                var joined = ""
+                for (i in 0..parts.size) {
+                    if (i > 0) {
+                        joined += ", "
+                    }
+                    joined += parts[i]
+                }
+                this.set("Vary", joined)
             case None => this.set("Vary", field)
         }
         return this
