@@ -67,11 +67,11 @@ class SocketConnection <: ResponseConnection {
 public class HttpServer {
     let app: Application
 
-    // 服务器可调参数。**1.0 锁定决定(P0-L)**:这 4 个字段降为同包可见(去 public),
-    // 用户配置统一走 Application(app.maxBodySize / app.readTimeoutMs / app.maxConnections
-    // / app.maxHeaderBytes)— 单一入口,避免 double-source 锁死("到底 Application
-    // 上设的值与 HttpServer 上设的值哪个生效")。Application.buildServer() 在 listen()
-    // 启动前把 4 个值一次性拷到这里,运行期不再可写。
+    // 服务器可调参数。这 4 个字段为同包可见(非 public),用户配置统一走 Application
+    // (app.maxBodySize / app.readTimeoutMs / app.maxConnections / app.maxHeaderBytes)—
+    // 单一入口,避免出现两处来源("到底 Application 上设的值与 HttpServer 上设的值哪个
+    // 生效")。Application.buildServer() 在 listen() 启动前把 4 个值一次性拷到这里,
+    // 运行期不再可写。
     //
     // 允许接收的请求体最大字节数(默认 1 MiB = 1048576 字节)。超过此值会抛出
     // PayloadTooLargeException,从而拒绝过大的请求体,防止单个请求耗尽内存。
@@ -170,12 +170,12 @@ public class HttpServer {
                 slots.release()
                 break
             }
-            // P2-1:shutdown 的顺序是「先置 shutdownRequested 再 close serverSocket」,
-            // 配合上面循环顶部 + acquire 后的双检查,把"还会接受新连接"的窗口收敛到极窄
-            // 一条。即便 shutdown 恰好落在双检查之后、accept() 返回之前(窄竞态),这条已
-            // accept 的连接也不漏:它照常计入 inflight、由下方 finally 走 drain 记账;且
-            // 因 shutdownRequested 此刻已 true,handleConnection 的 keep-alive 判定
-            // (`&& !shutdownRequested`)会直接给它 Connection: close,处理完即关,不复用。
+            // shutdown 的顺序是「先置 shutdownRequested 再 close serverSocket」,配合上面
+            // 循环顶部 + acquire 后的双检查,把"还会接受新连接"的窗口收敛到极窄一条。即便
+            // shutdown 恰好落在双检查之后、accept() 返回之前(窄竞态),这条已 accept 的连接
+            // 也不漏:它照常计入 inflight、由下方 finally 走 drain 记账;且因 shutdownRequested
+            // 此刻已 true,handleConnection 的 keep-alive 判定(`&& !shutdownRequested`)会
+            // 直接给它 Connection: close,处理完即关,不复用。
             inflight.fetchAdd(1)
             spawn {
                 try {
@@ -232,8 +232,8 @@ public class HttpServer {
         }
         // watchdog:正常 drain 路径(inflight==0)也会 signalDrainOnce,所以这里把
         // 总 timeoutMs 切成多段 sleep,每段后 check drainSignaled — 一旦 drain 已通知
-        // 就立即退出,而不是傻等满超时(P1-I:消除 watchdog 协程泄漏)。100ms 片段
-        // 在最坏情况下让 watchdog 延迟退出 < 100ms,对资源占用可忽略。
+        // 就立即退出,而不是傻等满超时,从而不让 watchdog 协程泄漏。100ms 片段在最坏
+        // 情况下让 watchdog 延迟退出 < 100ms,对资源占用可忽略。
         spawn {
             let slice: Int64 = 100
             var remaining = timeoutMs
@@ -291,7 +291,7 @@ public class HttpServer {
                     responseStarted = true
                 }
                 if (!res.finished) {
-                    // P0-3:server 兜底 404 对 HEAD 也必须 suppress body。
+                    // server 兜底 404 对 HEAD 也必须 suppress body。
                     if (req.method == HttpMethod.HEAD) {
                         res.suppressBody = true
                     }
@@ -339,9 +339,9 @@ public class HttpServer {
     // 默认处理完即关闭；而请求里显式的 Connection 报文头优先级最高，可覆盖默认
     // 行为——含 "close" 则关闭，含 "keep-alive" 则保持。
     func shouldKeepAlive(req: HttpRequest): Bool {
-        // P2-4:keep-alive 判定是纯读操作,正常不抛;但万一 header 取值 / 版本串解析在
-        // 畸形输入下抛异常,兜底默认 close(false)更稳 —— 宁可少复用一条连接,也不让
-        // 一次判定异常顺着 handleConnection 升级成连接级 500。
+        // keep-alive 判定是纯读操作,正常不抛;但万一 header 取值 / 版本串解析在畸形
+        // 输入下抛异常,兜底默认 close(false)更稳 —— 宁可少复用一条连接,也不让一次
+        // 判定异常顺着 handleConnection 升级成连接级 500。
         try {
             match (req.header("connection")) {
                 case Some(v) =>
@@ -354,7 +354,7 @@ public class HttpServer {
                     }
                 case None => ()
             }
-            // P1-1:精确匹配 "HTTP/1.1",不能用 contains("1.1") 子串 — 客户端发
+            // 精确匹配 "HTTP/1.1",不能用 contains("1.1") 子串 — 客户端发
             // "HTTP/2.1.1" 等含 1.1 子串的版本不应被当作 HTTP/1.1 默认 keep-alive。
             return req.httpVersion.trimAscii() == "HTTP/1.1"
         } catch (_: Exception) {
@@ -366,7 +366,7 @@ public class HttpServer {
         try {
             let res = HttpResponse()
             res.status(code)
-            // P0-D:HttpException 携带的响应头(如 Retry-After / WWW-Authenticate /
+            // HttpException 携带的响应头(如 Retry-After / WWW-Authenticate /
             // Allow)在底层写错误时也要套上。普通 catch(_)路径传空 map 即可。
             for ((k, v) in headers) {
                 res.set(k, v)
@@ -476,8 +476,8 @@ public class HttpServer {
                 throw BadRequestException()
             }
         }
-        // P1-1:HTTP 版本必须严格 ^HTTP/\d+\.\d+$;早先未校验,客户端发 "xx1.1"
-        // 或 "HTTP-1.1" 都被吞下,与上游代理对版本的解读分歧形成走私利用面。
+        // HTTP 版本必须严格 ^HTTP/\d+\.\d+$;否则客户端发 "xx1.1" 或 "HTTP-1.1"
+        // 会被吞下,与上游代理对版本的解读分歧形成走私利用面。
         if (!isValidHttpVersion(version)) {
             throw BadRequestException()
         }
@@ -535,8 +535,8 @@ public class HttpServer {
                 if (nameLow == "content-type" && req.headers.get(nameLow).isSome()) {
                     throw BadRequestException()
                 }
-                // P1-2:同理,RFC 7230 §5.4 要求每条请求**有且仅有一个** Host 头。
-                // 之前 Host 走通用合并路径(`h1, h2`),vhost 分发场景里攻击者可借
+                // 同理,RFC 7230 §5.4 要求每条请求**有且仅有一个** Host 头。若 Host 走
+                // 通用合并路径(`h1, h2`),vhost 分发场景里攻击者可借
                 // `Host: real\r\nHost: evil` 让代理 / wen 看到不同 vhost — 走私利用面。
                 if (nameLow == "host" && req.headers.get(nameLow).isSome()) {
                     throw BadRequestException()
@@ -731,9 +731,8 @@ public class HttpServer {
 // cookie 合并到一行,故逐条输出)+ 终止空行。serializeResponse 与流式响应的 StreamWriter.begin
 // 共用它,避免两处重复拼装。
 //
-// Perf-1:用 ArrayList<UInt8> 流式追加替代 `head += "..."` 的 O(n²) 字符串拼接。
-// 100 头 → 旧实现约 100KB 中间拷贝、1000 头 → 约 10MB。两个调用方原本都立刻
-// `.toArray()`,改返字节后省一次 String 中转。
+// 用 ArrayList<UInt8> 流式追加而非 `head += "..."` 的字符串拼接,避免 O(n²) 中间拷贝
+// (1000 头约需 10MB);两个调用方都立刻 `.toArray()`,返字节比返 String 少一次中转。
 //
 // 安全兜底:所有键、值、Set-Cookie 行进入序列化前再次过 checkHeaderSafe;即使有人绕过
 // HttpResponse 的 API、直接往 res.headers 写入了含 CR/LF/NUL 的值,这里也会拒绝(抛异常,
@@ -816,9 +815,9 @@ class ConnReader {
     // 对端关闭连接（read 返回 0，EOF）、读超时，或发生其它异常——这些情况都
     // 被统一当作"没有更多数据可读"处理，由调用方决定如何收尾。返回 true 表示
     // 成功读到了至少一个字节。
-    // **P2-E 已知约束**:EOF / 超时 / IO 异常折叠成同一返回值 false,server 层无法
-    // 区分"正常关闭""慢速攻击触发上限""对端 reset"。生产观察 timeout 命中率 / reset
-    // 频率需要在反代层(nginx 等)做,wen 1.0 不引入 onConnectionError hook。
+    // 已知约束:EOF / 超时 / IO 异常折叠成同一返回值 false,server 层无法区分"正常
+    // 关闭""慢速攻击触发上限""对端 reset"。生产观察 timeout 命中率 / reset 频率需要
+    // 在反代层(nginx 等)做,框架不引入 onConnectionError hook。
     func fill(): Bool {
         try {
             let n = sock.read(tmp)
@@ -974,10 +973,10 @@ class ConnReader {
     // 字节，再以 CRLF 收尾；如此重复，直到出现大小为 0 的"结束块"。
     func readChunked(headerSectionEnd: Int64): ?Array<UInt8> {
         let body = ArrayList<UInt8>()
-        // P1-3:headerSection 先取出来再立刻 dropFront — 之后循环里每完成一个 chunk
-        // 都可以触发物理 compact,buf 不会无限膨胀。早先实现把 pos 单调推进、末尾才
-        // dropFront,攻击者用 1 字节 chunk 流可让单条连接 buf 物理 size 远超 maxBodySize
-        // (后者只算 body 累积字节,不看 buf 的物理 size)。
+        // headerSection 先取出来再立刻 dropFront — 之后循环里每完成一个 chunk 都触发
+        // 物理 compact,buf 不会无限膨胀。否则 pos 单调推进、末尾才 dropFront 时,攻击者
+        // 用 1 字节 chunk 流可让单条连接 buf 物理 size 远超 maxBodySize(后者只算 body
+        // 累积字节,不看 buf 的物理 size)。
         let headerSection = sliceList(0, headerSectionEnd)
         dropFront(headerSectionEnd)
         var pos: Int64 = 0
@@ -1004,9 +1003,9 @@ class ConnReader {
             pos = lineEnd + 2
             if (size == 0) {
                 // 读到大小为 0 的结束块,RFC 7230 §4.1.2 之后是 trailer-part:零或多个
-                // header-field 行,最后一行是空行结束。早先实现只消费 size=0 后的紧跟
-                // CRLF,把"可能存在的 trailer 字段"留在 buf 里 — 残留字节被下一次
-                // readMessage 当作下一个请求的开头解析,构成请求走私(round3 P1-12)。
+                // header-field 行,最后一行是空行结束。若只消费 size=0 后紧跟的 CRLF,把
+                // 可能存在的 trailer 字段留在 buf 里,残留字节会被下一次 readMessage 当作
+                // 下一个请求的开头解析,构成请求走私。
                 //
                 // 修复:循环读取行直到看到空行为止。trailer 字段不解析(本实现不支持),
                 // 但必须 drain 干净;trailer 累计字节有 maxHeaderBytes 上限,防 DoS。
@@ -1055,8 +1054,8 @@ class ConnReader {
                 i += 1
             }
             pos += size + 2
-            // P1-3:每完成一个 chunk 触发一次 dropFront,让 dropFront 的摊销 compact
-            // 在小 chunk 流上正常工作 — pos 推进过 maxHeaderBytes 阈值就会做物理压缩。
+            // 每完成一个 chunk 触发一次 dropFront,让摊销 compact 在小 chunk 流上正常
+            // 工作 — pos 推进过 maxHeaderBytes 阈值就会做物理压缩。
             dropFront(pos)
             pos = 0
         }
@@ -1200,9 +1199,9 @@ func headerIsChunked(headerText: String): Bool {
     return anyChunked
 }
 
-// P1-1:严格校验请求行 HTTP 版本格式:必须形如 HTTP/<digits>.<digits>。早先用
-// contains("1.1") 子串匹配 / 不校验格式,客户端发 "HTTP/2.1.1" 或 "xx1.1" 会被
-// 当成 1.1,与上游代理对版本的解读分歧形成走私利用面。
+// 严格校验请求行 HTTP 版本格式:必须形如 HTTP/<digits>.<digits>。用 contains("1.1")
+// 子串匹配或不校验格式时,客户端发 "HTTP/2.1.1" 或 "xx1.1" 会被当成 1.1,与上游代理
+// 对版本的解读分歧形成走私利用面。
 func isValidHttpVersion(s: String): Bool {
     if (!s.startsWith("HTTP/")) {
         return false
@@ -1280,7 +1279,7 @@ func parseHexLen(s: String): Int64 {
 // 把查询字符串（如 "a=1&b=2"）解析进 into 这个映射表：先按 "&" 拆成若干
 // 键值对，再按第一个 "=" 把每对拆成键与值，并分别做 URL 解码（百分号编码与
 // '+' 还原）。空串直接返回；空的键值对片段会被跳过。
-// **P2-C 单值语义**:同名键后写覆盖前写(`?tag=a&tag=b` → 只留 `b`)。这是
+// 单值语义:同名键后写覆盖前写(`?tag=a&tag=b` → 只留 `b`)。这是
 // HashMap 的写入语义,**与 Express 数组形式不同**。需要多值时,业务请自己解析
 // req.url 的查询串部分,或通过额外 API(暂未提供 queryAll)。
 func parseQuery(qs: String, into: HashMap<String, String>): Unit {
@@ -1331,7 +1330,7 @@ func parseInt(s: String): Int64 {
  * 字符串。这样一来,一个跨多字节的 UTF-8 序列(例如 `%E4%B8%AD` 对应汉字"中")能
  * 被完整地重新拼接,而不会因为"每解出一个字节就单独转成字符"而被拆坏、产生乱码。
  *
- * **可见性(P0-J)**:benchmark 子项目用它做 URL 解码基准测试。
+ * 可见性:benchmark 子项目用它做 URL 解码基准测试。
  */
 public func urlDecode(s: String): String {
     let bytes = s.toArray()

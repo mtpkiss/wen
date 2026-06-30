@@ -436,7 +436,7 @@ class RouterTest {
         @Assert(capturedId[0] == "42") // 参数透传
     }
 
-    // P2-29:直接命中的 HEAD 路由,处理器即便手写了正文,响应也不应带 body(HTTP 契约要求
+    // 直接命中的 HEAD 路由,处理器即便手写了正文,响应也不应带 body(HTTP 契约要求
     // HEAD 永不带正文),但 Content-Length 要反映该正文长度。验证不再只靠 GET 回退路径抹正文。
     @TestCase
     func testDirectHeadRouteSuppressesBody(): Unit {
@@ -456,7 +456,7 @@ class RouterTest {
         @Assert(cl == "9")
     }
 
-    // P2-26:挂载前缀恰好"消尽"请求路径、且请求带尾斜杠,strict routing 下子路由仍应正确
+    // 挂载前缀恰好"消尽"请求路径、且请求带尾斜杠,strict routing 下子路由仍应正确
     // 匹配。mount "/api",子路由 get("/");请求 "/api/" → stripMountPath 段数相等返回 "/",
     // strict 下匹配根路由成功(锁住该边界组合的行为)。
     @TestCase

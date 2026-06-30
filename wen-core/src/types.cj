@@ -19,10 +19,10 @@ public type Next = () -> Unit
  * Express 的 `(req, res, next)` 完全对应。统一成一种类型,调度器才能用同一套
  * 逻辑串联它们。也接受 [[Handler]],框架自动用一个包装器补上被忽略的 next。
  *
- * **同步执行契约 (P0-K 1.0 锁定)**:Middleware 当前是同步的——函数返回前,当前
- * 层被视为"未完成"(下一层不会自动推进,必须显式调 next())。仓颉的协程模型成
- * 熟前,Middleware 没有 async/await 等价。若用户有重 IO,建议在中间件内
- * `spawn { ... }` 自行调度,不要让框架主调度等。
+ * **同步执行契约**:Middleware 当前是同步的——函数返回前,当前层被视为"未完成"
+ * (下一层不会自动推进,必须显式调 next())。仓颉的协程模型成熟前,Middleware 没有
+ * async/await 等价。若用户有重 IO,建议在中间件内 `spawn { ... }` 自行调度,不要让
+ * 框架主调度等。
  *
  * 1.x 内**可**平行加 `AsyncMiddleware = (...) -> Future<Unit>` 等别名而不破坏
  * Middleware;但**不会**把 Middleware 改名为 SyncMiddleware,以避免现有应用的

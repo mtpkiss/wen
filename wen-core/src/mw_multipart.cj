@@ -271,16 +271,16 @@ func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, s
                 return
             }
             seenDisposition = true
-            // P1-12:解析参数串(如 form-data; name="x"; filename="y")使用 quote-aware
-            // splitter — `v.split(";")` 不识别引号内的分号,合法 `name="a; b"` 会被切坏成
-            // `"a` 与 ` b"`,unquote 得 `"a`。同款 splitter 也供 extractBoundary 复用。
+            // 解析参数串(如 form-data; name="x"; filename="y")用 quote-aware splitter —
+            // `v.split(";")` 不识别引号内的分号,合法 `name="a; b"` 会被切坏成 `"a` 与 ` b"`,
+            // unquote 得 `"a`。同款 splitter 也供 extractBoundary 复用。
             for (paramRaw in splitParamsQuoteAware(v)) {
                 let (pk, pv) = splitOnce(paramRaw.trimAscii(), "=")
                 let pkey = pk.trimAscii().toAsciiLower()
                 if (pkey == "name") {
                     name = unquote(pv.trimAscii())
                 } else if (pkey == "filename") {
-                    // P0-2:filename 归一为 basename 防路径遍历。客户端发
+                    // filename 归一为 basename 防路径遍历。客户端发
                     // `filename="../../../etc/passwd"` 时,业务若写
                     // `file.saveTo("uploads/" + file.filename)` 即被穿越;Windows 上
                     // 反斜杠 `..\..\` 同样命中。剥到 basename 之后业务拼路径才安全。
@@ -343,7 +343,7 @@ func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, s
         if (isFrameworkReservedAttribute(name)) {
             return
         }
-        // P2-3:同名文本字段「后写覆盖前写」—— req.attributes 是扁平 String→String 表,
+        // 同名文本字段「后写覆盖前写」—— req.attributes 是扁平 String→String 表,
         // 重复字段只保留最后一个值,与 multer/Express「同名字段聚合成数组」语义不同。保持
         // 扁平表是 API 简单性取舍(非缺陷):需要多值(如复选框组)的场景,请用不同字段名,
         // 或自行从原始 body 解析。
@@ -351,7 +351,7 @@ func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, s
     }
 }
 
-// P1-12:把 `;` 分隔的参数串切成片段,但 `"..."` 引号内的 `;` 被视为字面字符。
+// 把 `;` 分隔的参数串切成片段,但 `"..."` 引号内的 `;` 被视为字面字符。
 // 用于 Content-Disposition / Content-Type / boundary 等 RFC 2616 §3.6 风格参数列表的解析。
 // 不解释转义、不剥引号(交由 unquote 处理);只负责"在引号外按 ; 切片"。
 func splitParamsQuoteAware(s: String): Array<String> {
@@ -374,7 +374,7 @@ func splitParamsQuoteAware(s: String): Array<String> {
     return out.toArray()
 }
 
-// P0-2:把客户端给的 filename 归一为 basename — 剥掉 / 与 \ 的所有前缀段。
+// 把客户端给的 filename 归一为 basename — 剥掉 / 与 \ 的所有前缀段。
 // 既挡 POSIX 风 `../../../etc/passwd`,也挡 Windows 风 `..\..\evil.txt`;两套
 // 分隔符都看,避免 multipart 解析时被绕过。空串 / 仅分隔符返回空串。
 func basenameFilename(s: String): String {

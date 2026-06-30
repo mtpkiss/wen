@@ -43,13 +43,12 @@ public class JsonException <: Exception {
  * 就能严格保持成员的插入顺序,从而使序列化结果具有确定性(deterministic),并且
  * "解析 → 序列化"能可预期地保序往返(round-trip)。
  *
- * **1.0 锁定说明 / 兼容性**:用户应**优先用 [[asString]] / [[asInt]] / [[asObject]]
- * 等访问器**取值,而**不要直接对 match 分支做 fall-through**。本想把 enum 限同包可
- * 见(只暴露访问器 / 工厂),让未来加分支不破坏 SemVer——但
- * `public type ViewEngine = (String, JsonValue) -> String` 等公开类型契约要求用户必
- * 须持有 JsonValue,仓颉的 enum 公开则分支必公开,语言层面无法既保 public 又隐藏分
- * 支。最稳的退路是约定"用户应优先用访问器",使来日加 `JsonBigInt` 等分支时只破坏
- * match-fall-through 用户,不破坏访问器用户。
+ * **兼容性**:请**优先用 [[asString]] / [[asInt]] / [[asObject]] 等访问器**取值,
+ * 而不要直接对 match 分支做 fall-through。仓颉的公开 enum 必须公开其全部分支(且
+ * `public type ViewEngine = (String, JsonValue) -> String` 等公开契约要求用户持有
+ * JsonValue,无法把 enum 隐藏为同包可见),因此无法在语言层面既保 public 又隐藏分支。
+ * 约定"优先用访问器"后,将来新增 `JsonBigInt` 等分支时只会影响 match-fall-through
+ * 的用户,不影响访问器用户。
  */
 public enum JsonValue {
     | JsonNull
@@ -158,9 +157,9 @@ public enum JsonValue {
     // 完全一致，保证保序与确定性；数字分支直接原样吐出保留的词法字面量；字符串与
     // 键都经过 escapeJsonInto 做必要的转义后再用双引号包裹。
     //
-    // 实现要点：递归过程统一向同一个 ArrayList<UInt8> 字节缓冲追加，**不再做任何
-    // String 拼接**——历史实现里大量 `out += "..."` 在嵌套对象/长数组上会触发
-    // O(N²) 的中间字符串复制，字节缓冲方案改成线性 O(N) 一次性 fromUtf8。
+    // 实现要点：递归过程统一向同一个 ArrayList<UInt8> 字节缓冲追加、最后一次性
+    // fromUtf8，全程线性 O(N)；若改用 String 拼接，嵌套对象/长数组会因反复复制中间
+    // 字符串退化成 O(N²)。
     public func toJsonString(): String {
         let out = ArrayList<UInt8>()
         appendJsonInto(out)
@@ -330,10 +329,9 @@ public func parseJson(text: String): JsonValue {
 // 续字节（UTF-8 多字节字符的非首字节都 ≥ 0x80）自然落入"不转义"快路径，
 // 因此非 ASCII 文本不会触发慢路径。
 func escapeJsonInto(out: ArrayList<UInt8>, s: String): Unit {
-    // **P2-R 说明**:转义入口只覆盖 RFC 8259 §7 强制要求的字符集(`< 0x20` / `"` /
-    // `\`)。0x7F(DEL)在规范中是合法的、可以裸出现的 JSON 字符,某些消费方(终端 /
-    // 日志着色器)会把它当控制符,但**转义会破坏与其它符合 RFC 的解析器的字节兼容性**,
-    // 因此保持不转义。
+    // 转义入口只覆盖 RFC 8259 §7 强制要求的字符集(`< 0x20` / `"` / `\`)。0x7F(DEL)
+    // 在规范中是合法的、可以裸出现的 JSON 字符,某些消费方(终端 / 日志着色器)会把它
+    // 当控制符,但转义它会破坏与其它符合 RFC 的解析器的字节兼容性,因此保持不转义。
     let bytes = s.toArray()
     let n = bytes.size
     var firstEsc = -1
@@ -542,15 +540,15 @@ class JsonParser {
         if (lex.isEmpty() || lex == "-") {
             throw JsonException("invalid number at offset ${start}")
         }
-        // P2-O:RFC 8259 严格校验 — 拒绝前导零("00123"/"-0123")与裸小数点(".5"/"1.")。
-        // 早先实现只按词法切段、整段塞进 JsonNumber,会让序列化往返把非法 JSON 当合法吐出。
+        // RFC 8259 严格校验 — 拒绝前导零("00123"/"-0123")与裸小数点(".5"/"1.")。
+        // 否则只按词法切段塞进 JsonNumber,会让序列化往返把非法 JSON 当合法吐出。
         if (!isStrictJsonNumber(lex)) {
             throw JsonException("invalid number lexeme '${lex}' at offset ${start}")
         }
         return JsonNumber(lex)
     }
 
-    // P2-O:RFC 8259 §6 整数 / 小数 / 指数语法的严格校验:
+    // RFC 8259 §6 整数 / 小数 / 指数语法的严格校验:
     //   number = [ "-" ] int [ frac ] [ exp ]
     //   int    = "0" | "1"-"9" *DIGIT          (无前导零)
     //   frac   = "." 1*DIGIT                   (小数点后至少一位)
@@ -702,8 +700,8 @@ class JsonParser {
 
     // 读取并解析紧随其后的 4 位十六进制数字，返回其整数值（即一个 UTF-16 码元）。
     // 每字节先经 isHexByte 校验:非 hex 字符必须抛 JsonException,否则 hexVal 会把
-    // 它静默映射为 0,导致 "\uZZZZ" 被悄悄解析成 NUL 字符 — 是 JSON 字符串过滤
-    // 链的注入入口(P1-H)。不足 4 位(提前到达输入末尾)时同样抛"非法 unicode 转义"。
+    // 它静默映射为 0,导致 "\uZZZZ" 被悄悄解析成 NUL 字符 — 这是 JSON 字符串过滤
+    // 链的注入入口。不足 4 位(提前到达输入末尾)时同样抛"非法 unicode 转义"。
     func readHex4(): Int64 {
         var v = 0
         var i = 0

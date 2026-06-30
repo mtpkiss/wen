@@ -232,9 +232,8 @@ public class HttpRequest {
     // 匹配规则(对齐 Express / RFC 6838 §4.2.8 结构化语法后缀):
     //   1. 精确匹配:`isType("json")` 命中 `application/json`。
     //   2. 结构化后缀:`isType("json")` 也命中 `application/ld+json`、`application/vnd.api+json`。
-    // 早先实现用 contains 做子串包含,会把 `application/xmlrpc` 当成 xml(误判),
-    // 也会把 `application/json-patch+json` 当成 json(碰巧对,但理由不对);现在改成
-    // 严格 token 比对,只走精确名 + 后缀两条路径。
+    // 用严格 token 比对而非 contains 子串包含:后者会把 `application/xmlrpc` 误判成 xml,
+    // 故只走精确名 + 后缀两条路径。
     public func isType(t: String): Bool {
         let ct = match (this.header("content-type")) {
             case Some(v) => v.toAsciiLower()
@@ -733,10 +732,10 @@ public class HttpRequest {
         }
         let value = raw[0..idx]
         let sig = raw[(idx + 1)..raw.size]
-        // P1-8:始终遍历完所有候选(累积 OR),不早返 — 早先实现"主密钥命中立刻 return"
-        // 与"legacy 命中需先 hmac N 次 legacy"之间存在可观测时序差,攻击者反复请求即可
-        // 推断"自己 cookie 用的是主密钥还是 legacy",泄露轮换进度。把所有 HMAC 都算完
-        // 后再判定,密钥轮换状态对外不可观察。
+        // 安全:始终遍历完所有候选(累积 OR),不在主密钥命中时早返。否则"主密钥命中
+        // 立刻 return"与"legacy 命中需先 hmac N 次 legacy"之间存在可观测时序差,攻击者
+        // 反复请求即可推断自己 cookie 用的是主密钥还是 legacy,泄露轮换进度。把所有 HMAC
+        // 都算完后再判定,密钥轮换状态对外不可观察。
         let mainMatched = constantTimeEquals(sig, hmacSha256Hex(app.cookieSecret, value))
         var matched = mainMatched
         for (legacy in app.legacyCookieSecrets) {
@@ -812,9 +811,9 @@ public class HttpRequest {
                 }
             }
         } else if (mainType == "application/x-www-form-urlencoded") {
-            // form 字段不允许污染 framework-reserved 命名空间。早先直接 parseQuery 进
-            // attributes,攻击者 POST `authUser=admin&csrfToken=...` 即可覆盖框架内部
-            // 状态。round3 P1-10 / P1-B。
+            // 安全:form 字段不允许污染框架保留命名空间。若直接 parseQuery 进 attributes,
+            // 攻击者 POST `authUser=admin&csrfToken=...` 即可覆盖框架内部状态,故经
+            // parseFormBodyIntoAttributes 过滤保留键。
             parseFormBodyIntoAttributes(this.body, this.attributes)
         } else if (mainType == "multipart/form-data") {
             match (extractBoundary(ctRaw)) {
@@ -846,7 +845,7 @@ public class HttpRequest {
                 // **不**做隐式 urlDecode:RFC 6265 cookie-value 不要求 percent-encoding,
                 // res.cookie 写端从不编码,读端做 decode 是不对称的"防御"。这一不对称
                 // 会让 signed cookie 含 + / %XX 时 ensureCookies 把 "+" 解为空格 → 重算
-                // HMAC 与签名段不符 → signedCookie 永远返回 None,静默丢会话(P0-1)。
+                // HMAC 与签名段不符 → signedCookie 永远返回 None,静默丢会话。
                 var v = vRaw.trimAscii()
                 if (v.size >= 2 && v.startsWith("\"") && v.endsWith("\"")) {
                     v = v[1..(v.size - 1)]
@@ -890,7 +889,7 @@ func isJsonContentType(mainType: String): Bool {
 // 判断一个键名是否属于框架保留的 attribute 命名空间。这些名字被框架内置中间件
 // 用作内部状态字段(身份 / CSRF token / 原始方法 / 请求 ID / 文本 body 视图)。
 // 自动解析路径(urlencoded form / multipart 文本字段)不能写入这些键,否则攻击者
-// 经表单字段即可覆盖框架内部状态(round3 P1-10 / P1-B)。
+// 经表单字段即可覆盖框架内部状态。
 //
 // 注意:本拦截仅作用于"自动解析路径",不作用于用户显式调用 setAttribute(key, val)
 // — 后者是 API 使用者主动选择的信任边界。

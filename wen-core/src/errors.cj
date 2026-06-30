@@ -24,7 +24,7 @@ import std.collection.*
  * 本类,因此默认兜底用一条「HttpException → status」规则即可统一处理三者与用户自定义
  * 异常;仍可注册 [[ErrorHandler]] 完全接管,其优先于本兜底。
  *
- * **响应头(P0-D)**:可选 `headers` 字段携带本异常应附带的响应头。默认兜底在把
+ * 响应头:可选 `headers` 字段携带本异常应附带的响应头。默认兜底在把
  * exception 映射成响应时,会把这些头逐项 set 到 res 上。典型场景:
  *
  * - 429 Too Many Requests + `Retry-After: 60`

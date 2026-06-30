@@ -365,7 +365,7 @@ class HeadersSentTest {
         @Assert(v == "Accept")
     }
 
-    // P2-7:已有 Vary 内部含大小写重复(如直接 set 的 "Accept, ACCEPT"),vary() 追加时应把
+    // 已有 Vary 内部含大小写重复(如直接 set 的 "Accept, ACCEPT"),vary() 追加时应把
     // 它们收敛成单个(保留首现大小写),不残留重复;新字段照常追加。
     @TestCase
     func testVaryCollapsesExistingInternalDuplicates(): Unit {

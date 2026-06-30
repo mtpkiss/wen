@@ -89,7 +89,7 @@ func acceptMatch(full: String, items: ArrayList<AcceptItem>): (Float64, Int64, I
         }
         if (rank >= 0) {
             // 取更具体的;具体程度相同时取 q 更大的(并据此记录其在头中的位置)。
-            // **P2-P 说明**:rank 跨级比较时不看 q,所以 rank 高 q=0 可能覆盖 rank 低 q=1。
+            // 说明:rank 跨级比较时不看 q,所以 rank 高 q=0 可能覆盖 rank 低 q=1。
             // 这一不对称对**外部**调用方不可见 — request.cj 的 accepts/accepts([...]) 都
             // 额外用 `q > 0.0` 兜底,q=0 的候选不会被当作"匹配"。改成"rank 高 q=0 视为
             // rank=-1"会让代码绕弯,以"调用方兜底"的契约保留现状。

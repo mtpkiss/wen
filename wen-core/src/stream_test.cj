@@ -81,7 +81,7 @@ class StreamTest {
         @Assert(res.body.contains("data: secret-line"))
     }
 
-    // P1-14:无连接路径改字节缓冲 + 回调结束一次性刷出。多次写入必须按序完整拼接
+    // 无连接路径改字节缓冲 + 回调结束一次性刷出。多次写入必须按序完整拼接
     // (与旧的逐块 `res.body +=` 行为等价,但 O(n) 而非 O(n²))。
     @TestCase
     func testStreamMultiWriteConcatenatesInOrder(): Unit {
@@ -96,7 +96,7 @@ class StreamTest {
         @Assert(res.body == "alpha-beta-gamma")
     }
 
-    // P1-14:字节缓冲先合并、再整体 String.fromUtf8。跨 writeBytes 拆开的多字节码点
+    // 字节缓冲先合并、再整体 String.fromUtf8。跨 writeBytes 拆开的多字节码点
     // 应还原成完整字符 —— 旧的逐块 fromUtf8 会把半个码点解成替换字符。"中" 的 UTF-8
     // 是 3 字节 [0xE4,0xB8,0xAD]。
     @TestCase

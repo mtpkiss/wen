@@ -43,10 +43,10 @@ func reasonPhrase(code: Int64): String {
 // 如果字符串里根本不含 `sep`，则返回 (原串, "")，即 tail 为空串。
 // 由于只在“第一个”分隔符处切分，因此 tail 中即便再出现 `sep` 也会被原样保留，
 // 适合解析 "key=value"（value 里可能再含 "="）这类场景。
-// **可见性 (P0-J)**:P0-F 整体 internal 化后,splitOnce 与 base64Decode 被
-// wen_contrib(同 workspace 兄弟包)的 mw_auth / mw_method_override 直接调用,
-// 跨包 import 必须 public。其它"用户业务可自己实现"的 helper(reasonPhrase /
-// trimWs / listContains / lastIndexOfDot 等)继续保持 internal。
+// 可见性:helper 整体 internal 化后,splitOnce 与 base64Decode 被 wen_contrib
+//(同 workspace 兄弟包)的 mw_auth / mw_method_override 直接调用,跨包 import 必须
+// public。其它"用户业务可自己实现"的 helper(reasonPhrase / trimWs / listContains /
+// lastIndexOfDot 等)继续保持 internal。
 public func splitOnce(s: String, sep: String): (String, String) {
     let idx = s.indexOf(sep)
     match (idx) {
@@ -79,7 +79,7 @@ func listContains(list: ArrayList<String>, value: String): Bool {
 let B64_TABLE: Array<UInt8> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toArray()
 
 // 标准 base64 编码(带 "=" 填充)。
-// **可见性 (P0-J)**:wen_contrib 的 auth_test 用它做测试数据,故 public。
+// 可见性:wen_contrib 的 auth_test 用它做测试数据,故 public。
 public func base64Encode(data: Array<UInt8>): String {
     let out = ArrayList<UInt8>()
     let n = data.size
@@ -118,10 +118,10 @@ public func base64Encode(data: Array<UInt8>): String {
 // 其它字符(含空白 / 换行)、"=" 出现在非尾部、或长度不合法(有效字符数 mod 4 == 1、填充多于
 // 2)时,整体判废返回空数组。buf 始终掩到 24 位以免溢出。
 //
-// **P2-12**:旧实现「忽略非法字符继续解」过于宽容 —— 掺杂垃圾字符的畸形输入也能解出看似有效的
-// 字节序列,用于 HTTP Basic 凭据时给了攻击者构造歧义 user:pass 的空间。严格化后非标准输入一律
-// 判废;Basic 凭据是无空白的单 token,严格化不影响正常用例。
-// **可见性 (P0-J)**:见 splitOnce 注释,wen_contrib 的 mw_auth / auth_test 需要它。
+// 严格解码:非标准输入(掺杂非法字符、畸形填充)一律判废,而非「忽略非法字符继续解」。
+// 宽容解码会让畸形输入也解出看似有效的字节序列,用于 HTTP Basic 凭据时给了攻击者构造
+// 歧义 user:pass 的空间。Basic 凭据是无空白的单 token,严格化不影响正常用例。
+// 可见性:见 splitOnce 注释,wen_contrib 的 mw_auth / auth_test 需要它。
 public func base64Decode(s: String): Array<UInt8> {
     let chars = s.toArray()
     let out = ArrayList<UInt8>()
@@ -228,7 +228,7 @@ func lastIndexOfDot(s: String): Int64 {
 
 // 把一个路径按 "/" 拆分成若干非空的路径段，自动丢弃因前导/末尾/连续斜杠
 // 产生的空段。例如 "/a/b/" 会得到 ["a", "b"]。
-// **可见性 (P0-J)**:benchmark 子项目用它做路径切分基准测试。
+// 可见性:benchmark 子项目用它做路径切分基准测试。
 public func pathSegments(path: String): Array<String> {
     let raw = path.split("/")
     let parts = ArrayList<String>()

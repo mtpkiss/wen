@@ -116,7 +116,7 @@ class GracefulShutdownTest {
         }
         @Assert(listenDone.load())
 
-        // P1-2 核心断言:close 完成后 frozen 必须被复位,允许追加路由。
+        // 核心断言:close 完成后 frozen 必须被复位,允许追加路由。
         var afterCloseThrew = false
         try {
             app.get("/after", {_: HttpRequest, res: HttpResponse => res.send("ok2")})

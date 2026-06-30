@@ -35,9 +35,9 @@ public interface ResponseConnection {
 public class StreamWriter {
     let res: HttpResponse
     var started: Bool = false
-    // P1-14:无真实连接(单元测试)时,各次写入先攒进字节缓冲,待 stream 回调结束由
-    // flushSink 一次性落到 res.body —— 旧实现 `res.body += String.fromUtf8(data)` 每块都
-    // 重建整串,N 次写入退化成 O(n²),SSE 长流尤甚。有真实连接时 sink 恒空。
+    // 无真实连接(单元测试)时,各次写入先攒进字节缓冲,待 stream 回调结束由 flushSink
+    // 一次性落到 res.body。若改成每块都 `res.body += String.fromUtf8(data)` 会重建整串,
+    // N 次写入退化成 O(n²),SSE 长流尤甚。有真实连接时 sink 恒空。
     let sink = ArrayList<UInt8>()
 
     init(res: HttpResponse) {

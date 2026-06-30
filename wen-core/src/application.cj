@@ -9,7 +9,7 @@ import std.sync.*
 //
 // 警告闸门由 Application 实例字段 warnedWeakCookieSecret 承担(从前的包级
 // AtomicBool 会让同进程内多个 Application 共享标志位,跨实例的弱密钥警告漏报)。
-// **P2-N 设计取舍**:cookieSecret 为空 / 极短(< 32 字节)只发 stderr 警告,**不**阻断
+// 设计取舍:cookieSecret 为空 / 极短(< 32 字节)只发 stderr 警告,不阻断
 // 启动。理由:wen 1.0 没有"生产模式"开关(不引入 NODE_ENV 类全局环境变量耦合),
 // 一刀切抛异常会让开发场景里"先跑通逻辑、再补强密钥"的工作流卡住。生产部署侧应在
 // CI/CD 把 cookieSecret 强校验到至少 32 字节;wen 自身的反馈通道是启动日志里的警告行。
@@ -134,8 +134,8 @@ public class Application {
     func markFrozen(): Unit {
         // 在冻结之前把两项路由 settings 同步到 router,使后续 handle 路径无需再写
         // router 字段 — 多线程并发请求时即便都写同值也是数据竞争,索性一次写完锁定。
-        // P1-7:递归把设置下发到所有挂载的子 router,否则 sub 仍按默认行为
-        // (caseSensitive=false / strict=false),全局开关在 sub 内无效。
+        // 递归把设置下发到所有挂载的子 router,否则子路由仍按默认行为
+        // (caseSensitive=false / strict=false),全局开关在子路由内无效。
         router.propagateRoutingSettings(enabled("case sensitive routing"), enabled("strict routing"))
         frozen.store(true)
         router.freeze()
@@ -179,10 +179,10 @@ public class Application {
     // 可见，不会因为进入子路由就丢失）。实现上是把子路由包装成一个普通中间件，
     // 在其中调用 sub.handleAsMiddleware 来驱动子路由的匹配与执行。
     public func use(path: String, sub: Router): Application {
-        // P1-7:走 Router.use(path, Router) 重载,让 mountedSubRouters 把 sub 登记好,
-        // markFrozen 才能把 case sensitive / strict 设置递归下发。早先这里走的是
+        // 走 Router.use(path, Router) 重载,让 mountedSubRouters 把 sub 登记好,
+        // markFrozen 才能把 case sensitive / strict 设置递归下发。若改用
         // Router.use(path, Middleware) 重载(用 lambda 把 sub 包装成中间件),sub 引用
-        // 没进 mountedSubRouters,routing 设置在 sub 内永远是默认值。
+        // 不会进 mountedSubRouters,routing 设置在 sub 内将永远是默认值。
         router.use(path, sub)
         return this
     }
@@ -455,7 +455,7 @@ public class Application {
     // 中间件与路由。之所以把它设为 public,是为了能在「不真正开启网络套接字」的
     // 情况下直接构造 req/res 来测试整条处理链。
     //
-    // **生命周期契约(P0-D)**:每对 (req, res) 只能被 handle **一次**。原因:
+    // 生命周期契约:每对 (req, res) 只能被 handle **一次**。原因:
     //   1. `req.bodyParsed` / `req.cookiesParsed` 是一次性闸门 — 第二次调用时
     //      ensureBody / ensureCookies 直接跳过,即便 bodyBytes / headers 被替换;
     //   2. `req.res = res` 互相引用 — 第二次 handle 用不同的 res 时,前一次 dispatch
@@ -465,7 +465,7 @@ public class Application {
     //
     // 测试场景里**每条用例都要 new 一对** HttpRequest / HttpResponse,不要复用。
     // 同一个 req 用于"嵌套子派发"(如错误处理 / 视图渲染)由框架内部协调,用户调用
-    // app.handle 只该出现在最外层一次。round1 #38 / round3 P3-原P1-3。
+    // app.handle 只该出现在最外层一次。
     public func handle(req: HttpRequest, res: HttpResponse): Unit {
         req.app = Some(this)
         // 让请求与响应互相持有对方的引用(对应 Express 的 res.req / req.res):
@@ -476,7 +476,7 @@ public class Application {
         // 路由设置(case sensitive / strict)由 markFrozen() 在 listen 之前一次性写入
         // router,运行期不再修改 — 避免并发请求路径上的字段写竞争。
         // 未走 listen 的直接 handle(测试场景)下,这里兜底同步一次。
-        // P1-7:同样递归下发到子 router,与 markFrozen 一致。
+        // 同样递归下发到子 router,与 markFrozen 一致。
         if (!frozen.load()) {
             router.propagateRoutingSettings(enabled("case sensitive routing"), enabled("strict routing"))
         }

@@ -38,8 +38,8 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
     res.set("Accept-Ranges", "bytes")
     var etagValue = ""
     if (etag) {
-        // P1-11:若 caller 给了预算好的弱 ETag(static files 默认按 size + mtime 算),
-        // 直接用,不再对全文做多项式 hash — 大文件 / 高并发场景下能省下整次 I/O + CPU。
+        // 若 caller 给了预算好的弱 ETag(static files 默认按 size + mtime 算),直接用,
+        // 不再对全文做多项式 hash — 大文件 / 高并发场景下能省下整次 I/O + CPU。
         etagValue = match (precomputedETag) {
             case Some(t) => t
             case None => computeETag(data)
@@ -85,7 +85,7 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
         case None => match (effectiveLastModified) {
             case Some(lm) => match (req.header("if-modified-since")) {
                 case Some(ims) =>
-                    // **P2-Q 已知约束**:严格字符串等值匹配 — 客户端在头里发"小写 gmt /
+                    // 已知约束:严格字符串等值匹配 — 客户端在头里发"小写 gmt /
                     // 缺前导零 / 不同空白"等任意合规变体时无法命中 304。框架不内置完整
                     // HTTP-date 解析(代价不成比例);ETag 路径(If-None-Match)是首选的
                     // 强校验,如须放宽 IMS 校验请用反代缓存层。
@@ -142,7 +142,7 @@ func applyFileResponse(res: HttpResponse, data: Array<UInt8>, contentType: Strin
 //     字节不同,无法保证 byte-range 一致性。
 //   - HTTP-date 路径(不以 `"` 或 `W/` 开头):与当前 Last-Modified 字面相等比较。
 //     与 If-Modified-Since 同样使用 strict 字符串比较(见 applyFileResponse 的
-//     P2-Q 已知约束):框架不内置 HTTP-date 解析,如需放宽请走反代缓存层。
+//     已知约束):框架不内置 HTTP-date 解析,如需放宽请走反代缓存层。
 // 返回 true 表示"命中、可以走 Range";false 表示"不匹配,忽略 Range 改发 200 全文"。
 func ifRangeMatches(headerValue: String, currentETag: String, currentLastModified: ?String): Bool {
     let v = headerValue.trimAscii()
@@ -200,7 +200,7 @@ func httpDateForFile(path: String): ?String {
     }
 }
 
-// P1-11:基于文件 stat (size + mtime) 的弱 ETag。Express / serve-static 默认形式,
+// 基于文件 stat (size + mtime) 的弱 ETag。Express / serve-static 默认形式,
 // 完全避开"读全文 → 多项式 hash"路径,对 100 MB 文件高并发尤其有用。语义保留:同
 // 文件被改后,size 或 mtime 至少有一变,客户端缓存正确失效。同等 hash 强度的强 ETag
 // 只在二进制内容确实可能"size+mtime 不变但字节变了"的边缘场景(如 mmap 改写)才有
@@ -218,7 +218,7 @@ func weakETagFromStat(path: String): ?String {
 
 // 把一个(UTC)时间格式化为 RFC 1123 形式的 HTTP 日期,例如
 // "Fri, 12 Jun 2026 00:40:55 GMT"。星期与月份取其英文全名的前三个字母作为缩写。
-// **P2-D 可移植性兜底**:如果 std DayOfWeek / Month.toString() 未来变区域化(中文 /
+// 可移植性兜底:如果 std DayOfWeek / Month.toString() 未来变区域化(中文 /
 // 全小写等),先按 toString() 取前 3 个字节;命中已知英文集就采用;否则回退到固定 ASCII
 // 数组(按 enum 序号映射)。这样无论 std 如何演进,Date 头始终是 RFC 7231 要求的格式。
 func formatHttpDate(t: DateTime): String {
@@ -329,11 +329,10 @@ func applyCharsetIfSet(res: HttpResponse): Unit {
 // 多项式滚动哈希拼接以降低碰撞;中间量始终落在 Int64 安全范围内,不会溢出。
 // 不是加密级强度,但作为缓存校验「内容是否变化」足够。
 //
-// P1-13:旧实现 `"\"" + toHexLower(...) + "-" + ... + "\""` 多次中间字符串拷贝,
-// 与 toHexLower 自身的头插 O(n²) 叠加成本可观。改为单一 ArrayList<UInt8>,3 段
-// hex 直接写入同一 buffer,最后 String.fromUtf8 一次成串。
+// 用单一 ArrayList<UInt8> 把 3 段 hex 直接写入同一 buffer、最后 String.fromUtf8 一次
+// 成串,避免逐段字符串拼接的多次中间拷贝(叠加 toHexLower 的头插 O(n²) 成本可观)。
 func computeETag(data: Array<UInt8>): String {
-    // P2-6:空内容的强 ETag 会退化成固定的 `"0-0-0"`(size=h1=h2=0),不同的空资源彼此
+    // 空内容的强 ETag 会退化成固定的 `"0-0-0"`(size=h1=h2=0),不同的空资源彼此
     // 碰撞。空体改发**弱 ETag** `W/"0-0-0"`:弱校验语义本就是「可能不唯一」,既诚实表达这点,
     // 又避免它被当作 Range 子区间检索的强校验器(RFC 7232 §2.1)。注意 [[etag]] 中间件对空体
     // 直接跳过(不发 ETag),故此分支主要覆盖「空文件经 sendFile」的场景。非空内容仍发强 ETag。
@@ -433,7 +432,7 @@ func parseRange(header: String, total: Int64): RangeResult {
     } catch (_: Exception) {
         return RangeIgnore
     }
-    // P2-5:start 落在内容长度之外即「范围不可满足」,显式回 416(RangeUnsatisfiable),
+    // start 落在内容长度之外即「范围不可满足」,显式回 416(RangeUnsatisfiable),
     // 不依赖后面的 end<start 兜底 —— 路径清晰,且覆盖 "start-"(省略 end)的越界写法。
     if (start >= total) {
         return RangeUnsatisfiable
@@ -458,9 +457,8 @@ func parseRange(header: String, total: Int64): RangeResult {
 
 // 把一个非负整数转为小写十六进制字符串(0 返回 "0")。
 //
-// P1-13:旧实现 `s = digits[d..] + s` 每次都重建整段字符串(头插 O(n²))。改为
-// 走 appendHexLower:固定 16 字节栈临时 buf(Int64 hex 最多 16 位)倒序填,再
-// 顺序追加 — 整体 O(n) 且无中间字符串拷贝。
+// 走 appendHexLower:固定 16 字节临时 buf(Int64 hex 最多 16 位)倒序填、再顺序追加,
+// 整体 O(n) 且无中间字符串拷贝(逐位 `s = digits[d..] + s` 头插是 O(n²))。
 func toHexLower(value: Int64): String {
     let buf = ArrayList<UInt8>()
     appendHexLower(buf, value)

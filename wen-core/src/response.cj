@@ -20,8 +20,7 @@ public class HttpResponse {
     // 去重:`set("X-Foo", "a")` 后 `set("x-foo", "b")` 视为同一头(覆盖,而非双发)。
     //
     // 字段同包可见(buildHeadBlock 等需迭代),包外只能通过 set/get/append/remove/has
-    // 访问器读写 — 这是 1.0 锁定前把大小写一致性纳入 API 契约的关键决定(round2 P2-2
-    // / round3 P2-7 同名头大小写双发的根源)。
+    // 访问器读写 — 把大小写一致性纳入 API 契约,杜绝同名头大小写双发。
     let headers: HashMap<String, String>
     let headersLookup: HashMap<String, String>
     // 每个 Cookie 都需要一行独立的 Set-Cookie 响应头,而 headers 是"一个键对应
@@ -95,7 +94,7 @@ public class HttpResponse {
     }
 
     public func status(code: Int64): HttpResponse {
-        // P2-B:finished 后改 status 会让"状态码已改 + body 改不了"形成无意义的混乱响应。
+        // finished 后改 status 会让"状态码已改 + body 改不了"形成无意义的混乱响应。
         // 与 send/sendBytes/stream 同款警告并跳过,而非默默吞改。
         if (warnIfFinished("status")) {
             return this
@@ -227,7 +226,7 @@ public class HttpResponse {
         } else {
             value
         }
-        // P2-24:Set-Cookie 串用 StringBuilder 累积,免去逐属性 `+=` 的中间字符串拷贝
+        // Set-Cookie 串用 StringBuilder 累积,免去逐属性 `+=` 的中间字符串拷贝
         // (次热路径:每设一个 Cookie 调一次,属性最多七八段)。
         let sb = StringBuilder()
         sb.append(name)
@@ -312,7 +311,7 @@ public class HttpResponse {
                 stripped
         }
         if (!exists(p)) {
-            // P2-S:抛异常前清掉用户钩子(如 staticFiles 的 setHeaders)已写的头部 —
+            // 抛异常前清掉用户钩子(如 staticFiles 的 setHeaders)已写的头部 —
             // 默认错误处理会把 status 改成 500,残留的 "Content-Type: image/png" / Cache-Control
             // 等可能误导客户端缓存"500 + image/png"或继续按缓存策略持有错误响应。
             this.remove("Content-Type")
@@ -400,14 +399,14 @@ public class HttpResponse {
         writer.begin()
         // body 抛异常时,响应头已写出 — 不能再回一个 5xx 错误响应(客户端会把两份响应
         // 拼起来解析)。这里吞掉异常,只能依赖 hijacked=true 让上层关闭连接。
-        // P1-4:虽然不能写错误响应,但运营态要看得见 — stderr 打一行带 message,
-        // 与 warnIfFinished 同款风格。早先纯吞会让"SSE 莫名断流"问题完全无线索。
+        // 但运营态要看得见:stderr 打一行带 message(与 warnIfFinished 同款风格),
+        // 否则"SSE 莫名断流"问题完全无线索。
         try {
             body(writer)
         } catch (e: Exception) {
             eprintln("[wen] stream/sse body 抛异常: ${e.message}")
         }
-        // P1-14:无连接路径(单元测试)下,把 writer 攒下的字节一次性刷进 res.body。
+        // 无连接路径(单元测试)下,把 writer 攒下的字节一次性刷进 res.body。
         // 放在 try/catch 之后:即便回调中途抛异常,已写出的块也要落盘可见。
         writer.flushSink()
     }
@@ -481,10 +480,10 @@ public class HttpResponse {
         let want = field.toAsciiLower()
         match (this.get("Vary")) {
             case Some(v) =>
-                // P2-7:拆已有值,trim + **大小写无关去重**——不仅挡住与新字段重复,也收敛
-                // 已有值彼此之间的重复(如直接 `set("Vary", "Accept, ACCEPT")` 进来的形态会
-                // 被合并成首次出现的那个)。原始大小写保留(P1-5 的取舍:HTTP 字段名大小写不
-                // 敏感,但输出不强行改写用户写法)。因可能收敛已有重复,这里总是重写 Vary。
+                // 拆已有值,trim + 大小写无关去重——不仅挡住与新字段重复,也收敛已有值彼此
+                // 之间的重复(如直接 `set("Vary", "Accept, ACCEPT")` 进来的形态会被合并成
+                // 首次出现的那个)。保留原始大小写:HTTP 字段名大小写不敏感,但输出不强行改写
+                // 用户写法。因可能收敛已有重复,这里总是重写 Vary。
                 let parts = ArrayList<String>() // 去重后,保留首现的原始大小写
                 let lowers = ArrayList<String>() // 对应小写,供比较
                 var seen = false

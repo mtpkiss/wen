@@ -36,10 +36,9 @@ public class Session {
     public var isNew: Bool
     // regenerate() 标记:由中间件在 next() 返回后处理。
     var regenerateRequested: Bool = false
-    // P0-E:dirty 标志位 — set/remove 置 true。中间件结束时:
+    // dirty 标志位 — set/remove 置 true,用于避免"每请求无脑 save"的写放大。中间件结束时:
     //   - dirty=true → store.save(id, values)(写整张 hash)
     //   - dirty=false → store.touch(id)(仅刷新 lastAccess)
-    // 修 round2 P2-7 的"每请求无脑 save"写放大。
     var dirty: Bool = false
 
     init(id: String, values: HashMap<String, String>, isNew: Bool) {
@@ -93,7 +92,7 @@ public interface SessionStore {
     func destroy(id: String): Unit
     // 生成一个新的、唯一的会话 id。
     func newId(): String
-    // 仅刷新会话的"最近访问时间",不重写会话数据本体(P0-E)。中间件在 next()
+    // 仅刷新会话的"最近访问时间",不重写会话数据本体。中间件在 next()
     // 后处理无脏 sess.values 的请求时,只需 touch 而不必 save(),避免:
     //   1. 后端把整张 hash 重写一次(对 Redis 是一条 HSET + EXPIRE 而非整体 SET);
     //   2. 与并发请求的 save 竞争覆盖。
@@ -132,7 +131,7 @@ class SessionEntry {
  *
  * - `ttlSeconds`:**滑动**过期窗口,`>0` 时任何「上次访问后超过 N 秒」的会话被视为
  *   不存在,并在 `load` / `save` 时惰性清理。`-1` / `0` 表示永不过期。
- *   **精度(P1-3)**:过期判定走秒级时间戳(`toUnixTimeStamp().toSeconds()`,小数秒
+ *   **精度**:过期判定走秒级时间戳(`toUnixTimeStamp().toSeconds()`,小数秒
  *   直接截断),因此真实过期点相对 `lastAccess + ttlSeconds` 有最多 ±1 秒抖动 —— 例如
  *   `lastAccess` 落在某秒的 .9、`now` 落在下一秒的 .0,真实只过了 0.1 秒却已跨秒。会话
  *   过期可接受这点抖动;若需精确窗口(如限流计时),请勿复用本类 TTL,另接毫秒级时钟。
@@ -211,7 +210,7 @@ public class MemorySessionStore <: SessionStore {
         }
     }
 
-    // 仅刷新 lastAccess(P0-E)。比默认实现"load + save"省一次复制 + FIFO 写。
+    // 仅刷新 lastAccess。比默认实现"load + save"省一次复制 + FIFO 写。
     // 不存在的 id 静默忽略。
     public func touch(id: String): Unit {
         lock.lock()
@@ -241,7 +240,7 @@ public class MemorySessionStore <: SessionStore {
         }
     }
 
-    // P1-3:秒级粒度 —— 过期判定因此有最多 ±1 秒抖动,依据见类 cjdoc 中 `ttlSeconds` 的精度说明。
+    // 秒级粒度 —— 过期判定因此有最多 ±1 秒抖动,依据见类 cjdoc 中 `ttlSeconds` 的精度说明。
     private func nowSec(): Int64 {
         return DateTime.now().toUnixTimeStamp().toSeconds()
     }
@@ -311,11 +310,10 @@ public func session(store: SessionStore, cookieName!: String = "sid", path!: Str
             // 在内部迁移到新 id、并强制下发新 Cookie。**必须在 save 之前换 id**,
             // 否则数据会被以旧 id 重新存回,旧记录又复活。
             //
-            // P1-J:先暂存新 id 再 destroy 旧 id。早先实现是 destroy(old) -> newId(),
-            // newId() 若抛(如 Redis store 临时不可达)就只剩"旧已毁、新没生"的破窗,
-            // 上层若把异常吞了,sess 仍指向已不存在的旧 id,后续 save 把数据按旧 id 复活,
-            // 形成会话固定攻击的回归窗口。改成"先 newId、成功后再 destroy"是原子的:
-            // newId 抛则保留旧会话不变,异常自然向上传播。
+            // 先暂存新 id、成功后再 destroy 旧 id —— 这一步必须原子。若按 destroy(old) ->
+            // newId() 顺序,newId() 抛(如 Redis store 临时不可达)就只剩"旧已毁、新没生"的
+            // 破窗:上层吞了异常,sess 仍指向已不存在的旧 id,后续 save 按旧 id 复活数据,形成
+            // 会话固定攻击的回归窗口。先 newId、抛则保留旧会话不变,异常自然向上传播。
             if (sess.regenerateRequested) {
                 let newId = store.newId() // 先暂存:newId 抛即原子失败,sess 完全不变
                 store.destroy(sess.id) // sess.id 此刻仍是旧 id
@@ -326,8 +324,8 @@ public func session(store: SessionStore, cookieName!: String = "sid", path!: Str
             }
             // 请求处理完毕后回存会话:
             //   - 新会话 / 数据有改动 → save 写整张 hash
-            //   - 否则 → 只 touch 刷新 lastAccess,不重写数据(P0-E,修 round2 P2-7)
-            // P2-11 并发可见性:每个请求是「load → 改 sess.values → save」的读改写,跨请求**非
+            //   - 否则 → 只 touch 刷新 lastAccess,不重写数据
+            // 并发可见性:每个请求是「load → 改 sess.values → save」的读改写,跨请求**非
             // 原子**。同一会话的多个并发请求(多标签页 / 预取)各自基于自己 load 到的快照改动,
             // 后 save 者整张 hash 覆盖前者 —— last-writer-wins,中途的并发改动可能丢失。store 内
             // 单次 load / save / touch 各自原子(MemorySessionStore 用 Mutex 保护),但不构成跨

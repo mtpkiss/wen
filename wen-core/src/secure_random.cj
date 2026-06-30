@@ -137,7 +137,7 @@ func appendUInt64(buf: ArrayList<UInt8>, v: UInt64): Unit {
 }
 
 func appendInt64(buf: ArrayList<UInt8>, v: Int64): Unit {
-    // P2-M:直接 `UInt64(v: Int64)` 对负 v 会抛(系统时钟回拨到 1970 前 / Int64.Min 等
+    // 直接 `UInt64(v: Int64)` 对负 v 会抛(系统时钟回拨到 1970 前 / Int64.Min 等
     // 边界路径会触发)— 一旦失败,GLOBAL_SECURE_RANDOM 包级 init 抛异常,整个应用挂。
     // 用位模式重解释(等价 C 风格 `(uint64_t)i64`),所有 Int64 值都能安全编码 8 字节。
     var u: UInt64 = 0
