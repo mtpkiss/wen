@@ -403,4 +403,83 @@ class RouterTest {
         @Assert(captured.size == 1)
         @Assert(captured[0] == "/items/")
     }
+
+    // HEAD 回退应递归覆盖任意层级的子路由,并正确透传路径参数。三层嵌套:
+    // app(/api) → v1(/users) → users(GET /:id)。HEAD /api/users/42 无 HEAD 路由,
+    // 应回退到该 GET、捕获 :id=42、且响应不带正文。
+    @TestCase
+    func testHeadFallbackThreeLevelsAndParams(): Unit {
+        let app = wen()
+        let v1 = Router()
+        let users = Router()
+        let capturedId = ArrayList<String>()
+        users.get(
+            "/:id",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    capturedId.add(match (req.param("id")) {
+                        case Some(v) => v
+                        case None => "?"
+                    })
+                    res.send("user body")
+            }
+        )
+        v1.use("/users", users)
+        app.use("/api", v1)
+        let req = HttpRequest("HEAD", "/api/users/42")
+        req.path = "/api/users/42"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(res.suppressBody) // 不带正文
+        @Assert(capturedId.size == 1)
+        @Assert(capturedId[0] == "42") // 参数透传
+    }
+
+    // P2-29:直接命中的 HEAD 路由,处理器即便手写了正文,响应也不应带 body(HTTP 契约要求
+    // HEAD 永不带正文),但 Content-Length 要反映该正文长度。验证不再只靠 GET 回退路径抹正文。
+    @TestCase
+    func testDirectHeadRouteSuppressesBody(): Unit {
+        let app = wen()
+        app.head("/ping", {_: HttpRequest, res: HttpResponse => res.send("pong-body")})
+        let req = HttpRequest("HEAD", "/ping")
+        req.path = "/ping"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(res.suppressBody)
+        // "pong-body" = 9 字节;Content-Length 反映原应发送的正文长度。
+        let cl = match (res.get("Content-Length")) {
+            case Some(v) => v
+            case None => ""
+        }
+        @Assert(cl == "9")
+    }
+
+    // P2-26:挂载前缀恰好"消尽"请求路径、且请求带尾斜杠,strict routing 下子路由仍应正确
+    // 匹配。mount "/api",子路由 get("/");请求 "/api/" → stripMountPath 段数相等返回 "/",
+    // strict 下匹配根路由成功(锁住该边界组合的行为)。
+    @TestCase
+    func testMountExhaustedTrailingSlashStrict(): Unit {
+        let app = wen()
+        app.enable("strict routing")
+        let sub = Router()
+        let hit = ArrayList<String>()
+        sub.get(
+            "/",
+            {
+                req: HttpRequest, res: HttpResponse =>
+                    hit.add(req.path)
+                    res.send("root")
+            }
+        )
+        app.use("/api", sub)
+        let req = HttpRequest("GET", "/api/")
+        req.path = "/api/"
+        let res = HttpResponse()
+        app.handle(req, res)
+        @Assert(res.statusCode == 200)
+        @Assert(hit.size == 1)
+        @Assert(hit[0] == "/")
+    }
 }

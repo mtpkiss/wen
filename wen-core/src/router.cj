@@ -480,7 +480,11 @@ public class Router {
         add(None, "/", handler, true)
     }
 
-    // 挂载式中间件:只对路径处于 `path` 之下(以 path 为前缀)的请求执行。
+    // 挂载式中间件:只对路径处于 `path` 之下(以 `path` 为**前缀**)的请求执行 —— 是前缀
+    // 匹配而非精确匹配,故 `app.use("/api", mw)` 会命中 `/api`、`/api/users` 等。`path` 里可
+    // 含参数段(如 `app.use("/:lang", mw)`,按前缀匹配并捕获 `:lang`),但**不支持可选参数段**
+    // `:name?`:可选段长度不定,stripMountPath 无法稳定剥离挂载前缀,故 rejectOptionalInMountPath
+    // 在注册期直接抛异常(详见 P1-5 注释)。
     public func use(path: String, handler: Middleware): Unit {
         rejectOptionalInMountPath(path)
         add(None, path, handler, true)
@@ -504,6 +508,9 @@ public class Router {
     public func head(path: String, handler: Middleware): Unit {
         add(Some(HttpMethod.HEAD), path, handler, false)
     }
+    // 用户显式注册的 OPTIONS 处理器。**优先于框架的自动 OPTIONS 响应**:它作为普通路由在
+    // 链中先匹配并结束响应,从而走不到 dispatchTop 末尾 onExhausted 里那条「无匹配方法 → 自动
+    // 回 204 + Allow 头」的兜底。即只有当某路径没有用户 OPTIONS 处理器时,才由框架自动应答。
     public func options(path: String, handler: Middleware): Unit {
         add(Some(HttpMethod.OPTIONS), path, handler, false)
     }
@@ -644,19 +651,31 @@ public class Router {
             req.method = HttpMethod.GET
             dispatchTop(req, res)
             req.method = HttpMethod.HEAD
-            if (res.finished && !res.hijacked) {
-                let len = match (res.bodyBytes) {
-                    case Some(b) => b.size
-                    case None => res.body.toArray().size
-                }
-                res.set("Content-Length", len.toString())
-                res.body = ""
-                res.bodyBytes = None
-                res.suppressBody = true
-            }
+            suppressHeadBody(res)
             return
         }
         dispatchTop(req, res)
+        // P2-29:直接命中 HEAD 路由、或子路由处理器手写正文的情况,这里统一抹掉正文 ——
+        // 不再仅靠 GET-fallback 与 onExhausted 两条路径,任何 HEAD 处理都不会漏发正文。
+        if (isHead) {
+            suppressHeadBody(res)
+        }
+    }
+
+    // HEAD 响应永不带正文:把处理器已产出的正文长度写进 Content-Length(与同 URL 的 GET
+    // 完全一致),再清空正文并置 suppressBody,序列化时只发头部。仅在响应已 finished 且未被
+    // hijack(流式)时处理。幂等:重复调用安全(已清空再算 len 为 0,但常规只调一次)。
+    private func suppressHeadBody(res: HttpResponse): Unit {
+        if (res.finished && !res.hijacked) {
+            let len = match (res.bodyBytes) {
+                case Some(b) => b.size
+                case None => res.body.toArray().size
+            }
+            res.set("Content-Length", len.toString())
+            res.body = ""
+            res.bodyBytes = None
+            res.suppressBody = true
+        }
     }
 
     private func dispatchTop(req: HttpRequest, res: HttpResponse): Unit {
@@ -676,6 +695,8 @@ public class Router {
                 if (methods.isEmpty() && !hasAll) {
                     res.status(404).send("Cannot ${req.method} ${req.path}")
                 } else if (req.method == HttpMethod.OPTIONS) {
+                    // 自动 OPTIONS 应答:仅当没有用户显式 options(path) 处理器命中时才到这里
+                    // (用户处理器会在链中先结束响应,优先级更高)。回 204 + Allow 列方法。
                     res.set("Allow", allowHeader(req.path)).status(204).end()
                 } else {
                     res.set("Allow", allowHeader(req.path)).status(405).send("Method Not Allowed")
