@@ -1344,7 +1344,15 @@ public func urlDecode(s: String): String {
             // 或非 hex 字符(%GG)早先静默吞成 NUL 字节或保留 %,与代理对路径的
             // 解读会产生分歧,可被用于路径绕过 / 走私。一律原样保留剩余字节,让
             // 上层(如路径沙箱)按字面拦截。
-            if (i + 2 >= bytes.size || !isHexByte(bytes[i + 1]) || !isHexByte(bytes[i + 2])) {
+            // cjlint G.EXP.03:isHexByte 不放进 ||/&& 的右操作数(会被判作短路副作用);先在
+            // 边界内把两位的判定各自求值再组合。边界检查仍短路,绝不会越界访问 bytes[i+1/i+2]。
+            var validEscape = false
+            if (i + 2 < bytes.size) {
+                let hex1 = isHexByte(bytes[i + 1])
+                let hex2 = isHexByte(bytes[i + 2])
+                validEscape = hex1 && hex2
+            }
+            if (!validEscape) {
                 out.add(c)
                 i += 1
                 continue
