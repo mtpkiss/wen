@@ -114,16 +114,32 @@ public func base64Encode(data: Array<UInt8>): String {
     return String.fromUtf8(out.toArray())
 }
 
-// 标准 base64 解码:忽略 "="、空白与非法字符。buf 始终掩到 24 位以免溢出。
-// **可见性 (P0-J)**:见 splitOnce 注释,wen_contrib 的 mw_auth 需要它。
+// 严格标准 base64 解码(RFC 4648):只接受字母表字符 A-Za-z0-9+/ 与尾部 "=" 填充;遇到任何
+// 其它字符(含空白 / 换行)、"=" 出现在非尾部、或长度不合法(有效字符数 mod 4 == 1、填充多于
+// 2)时,整体判废返回空数组。buf 始终掩到 24 位以免溢出。
+//
+// **P2-12**:旧实现「忽略非法字符继续解」过于宽容 —— 掺杂垃圾字符的畸形输入也能解出看似有效的
+// 字节序列,用于 HTTP Basic 凭据时给了攻击者构造歧义 user:pass 的空间。严格化后非标准输入一律
+// 判废;Basic 凭据是无空白的单 token,严格化不影响正常用例。
+// **可见性 (P0-J)**:见 splitOnce 注释,wen_contrib 的 mw_auth / auth_test 需要它。
 public func base64Decode(s: String): Array<UInt8> {
+    let chars = s.toArray()
     let out = ArrayList<UInt8>()
     var buf = 0
     var bits = 0
-    for (c in s.toArray()) {
+    var pad = 0
+    for (c in chars) {
+        if (c == UInt8(61)) { // '=' 填充
+            pad += 1
+            continue
+        }
+        if (pad > 0) {
+            // 填充之后又出现数据字符 → 非法
+            return Array<UInt8>()
+        }
         let v = b64Val(c)
         if (v < 0) {
-            continue
+            return Array<UInt8>() // 非 base64 字母表字符 → 整体判废
         }
         buf = ((buf << 6) | v) & 0xFFFFFF
         bits += 6
@@ -131,6 +147,11 @@ public func base64Decode(s: String): Array<UInt8> {
             bits -= 8
             out.add(UInt8((buf >> bits) & 0xFF))
         }
+    }
+    // 有效(非填充)字符数 mod 4 == 1 无法构成完整字节;标准 base64 填充至多 2 个。
+    let dataChars = chars.size - pad
+    if (dataChars % 4 == 1 || pad > 2) {
+        return Array<UInt8>()
     }
     return out.toArray()
 }

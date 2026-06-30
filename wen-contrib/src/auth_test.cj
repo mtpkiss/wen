@@ -14,6 +14,25 @@ class AuthTest {
         @Assert(String.fromUtf8(base64Decode(base64Encode("你好 hi".toArray()))) == "你好 hi")
     }
 
+    // 严格 base64 解码:合法标准 base64(含 "=" 填充 / 无填充)正常解码;掺入非法字符、
+    // 填充错位或长度非法的畸形输入一律判废返回空数组 —— 杜绝旧的"忽略垃圾字符仍解出
+    // 看似有效 user:pass"的宽容行为(防 Basic 凭据被构造歧义解析)。
+    @TestCase
+    func testBase64DecodeRejectsMalformed(): Unit {
+        // 合法:带填充与不带填充都应正确解码。
+        @Assert(String.fromUtf8(base64Decode("YWRtaW4=")) == "admin")
+        @Assert(String.fromUtf8(base64Decode("YWRtaW46c2VjcmV0")) == "admin:secret")
+        // 含非法字符(空格 / '@' / 全非字母表)→ 判废返回空。
+        @Assert(base64Decode("YWRt aW4=").size == 0)
+        @Assert(base64Decode("YW@taW4=").size == 0)
+        @Assert(base64Decode("****").size == 0)
+        // "=" 出现在非尾部、或填充多于 2 个 → 判废。
+        @Assert(base64Decode("YW=taW4").size == 0)
+        @Assert(base64Decode("YQ===").size == 0)
+        // 有效字符数 mod 4 == 1(不足以构成一个字节)→ 判废。
+        @Assert(base64Decode("YWRtY").size == 0)
+    }
+
     // Basic 认证:正确凭据放行并设 authUser;错误/缺失回 401 + WWW-Authenticate。
     @TestCase
     func testBasicAuth(): Unit {

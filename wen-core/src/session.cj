@@ -323,6 +323,11 @@ public func session(store: SessionStore, cookieName!: String = "sid", path!: Str
             // 请求处理完毕后回存会话:
             //   - 新会话 / 数据有改动 → save 写整张 hash
             //   - 否则 → 只 touch 刷新 lastAccess,不重写数据(P0-E,修 round2 P2-7)
+            // P2-11 并发可见性:每个请求是「load → 改 sess.values → save」的读改写,跨请求**非
+            // 原子**。同一会话的多个并发请求(多标签页 / 预取)各自基于自己 load 到的快照改动,
+            // 后 save 者整张 hash 覆盖前者 —— last-writer-wins,中途的并发改动可能丢失。store 内
+            // 单次 load / save / touch 各自原子(MemorySessionStore 用 Mutex 保护),但不构成跨
+            // 请求的事务。需要并发安全的累加 / 计数,应落到业务存储的原子操作,而非 session values。
             if (sess.isNew || sess.dirty) {
                 store.save(sess.id, sess.values)
             } else {

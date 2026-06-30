@@ -18,6 +18,11 @@ import wen.*
  *   - Cross-Origin-Opener-Policy(coop)     : 隔离跨源窗口;会破坏 OAuth 弹窗等跨窗口通信。
  *   - Cross-Origin-Resource-Policy(corp)   : 取 same-origin 时会挡住别的站点加载你的资源(CDN / 嵌图)。
  *
+ * **生产环境强烈建议显式配置 `csp`**:CSP 是抵御 XSS 注入脚本执行的关键一层,默认空串 = 不发
+ * 该头 = 无此防护(返回页面仅靠转义自保)。建议先用 `Content-Security-Policy-Report-Only`(可在
+ * helmet 之后用普通中间件下发)观察、收敛白名单,再切到本参数的强制模式,避免「配错挡掉正常
+ * 资源」与「裸奔无 CSP」两个极端。
+ *
  * 定制:任意字符串参数传空串、或把布尔设为 false,即表示「不发送该头」。需要更细的策略时,
  * 也可在 helmet 之后再用普通中间件覆盖具体的头。
  */

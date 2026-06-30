@@ -26,6 +26,11 @@ public func cors(): Middleware {
 //                 注意:浏览器规范禁止 credentials 与 origin="*" 并用,此时应指定具体 origin(框架不强制校验)。
 //   maxAge        预检结果缓存秒数;>=0 时发 Access-Control-Max-Age。
 //   exposeHeaders 允许 JS 读取的响应头(默认空,不发 Access-Control-Expose-Headers)。
+//   reflectRequestHeaders 为 true 时,把预检请求里的 Access-Control-Request-Headers 原样反射到
+//                 Access-Control-Allow-Headers(而非用上面的 headers 默认值)。**部署须知 / 信任边界**:
+//                 这等于把「允许哪些请求头」的控制权完全交给调用方 —— 任何能通过预检的来源都能让
+//                 服务器声明接受其自定义头。**仅在你确知所有跨域调用方都可信(如自家前端)时开启**;
+//                 面向公开 / 不可信来源时应保持 false,并用 headers 显式列举白名单。默认 false。
 public func cors(origin: String, methods!: String = "GET, POST, PUT, DELETE, PATCH, OPTIONS",
     headers!: String = "Content-Type, Authorization", credentials!: Bool = false, maxAge!: Int64 = -1,
     exposeHeaders!: String = "", reflectRequestHeaders!: Bool = false): Middleware {

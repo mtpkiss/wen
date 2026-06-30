@@ -66,6 +66,12 @@ public func csrf(cookieName!: String = "_csrf", field!: String = "_csrf", signed
                             match (splitTokenAndIat(t)) {
                                 case Some((tok, iat)) =>
                                     let nowSec = DateTime.now().toUnixTimeStamp().toSeconds()
+                                    // P2-14:nowSec - iat 不会溢出。nowSec 是真实 Unix 秒(小正数,
+                                    // ~1.7e9);iat 由 splitTokenAndIat 严格解析,保证 ∈ [0, Int64.Max]
+                                    // (拒负数、拒溢出)。故差值落在 (Int64.Min, nowSec]:下界
+                                    // nowSec - Int64.Max > Int64.Min(因 nowSec ≥ 0),不会下溢。且 iat
+                                    // 取自**已验签** cookie(服务端在下方写入并随整体签名),客户端无法
+                                    // 伪造未来 iat,负差值(iat > now)不构成攻击面。
                                     if (nowSec - iat <= rotateAfterSeconds) {
                                         token = tok
                                     } else {
