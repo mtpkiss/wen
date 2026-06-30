@@ -66,7 +66,7 @@ public func csrf(cookieName!: String = "_csrf", field!: String = "_csrf", signed
                             match (splitTokenAndIat(t)) {
                                 case Some((tok, iat)) =>
                                     let nowSec = DateTime.now().toUnixTimeStamp().toSeconds()
-                                    // P2-14:nowSec - iat 不会溢出。nowSec 是真实 Unix 秒(小正数,
+                                    // nowSec - iat 不会溢出。nowSec 是真实 Unix 秒(小正数,
                                     // ~1.7e9);iat 由 splitTokenAndIat 严格解析,保证 ∈ [0, Int64.Max]
                                     // (拒负数、拒溢出)。故差值落在 (Int64.Min, nowSec]:下界
                                     // nowSec - Int64.Max > Int64.Min(因 nowSec ≥ 0),不会下溢。且 iat
@@ -135,7 +135,7 @@ func isCsrfSafeMethod(method: String): Bool {
 
 // 读取客户端回传的 token:依次尝试 X-CSRF-Token / X-XSRF-Token 头、查询串、表单字段;
 // 取第一个非空者。请求头与查询串优先,**最后**才尝试表单字段(req.attribute) —
-// P1-9:`req.attribute(field)` 会触发 ensureBody → multipart 解析。攻击者 POST 1 MiB
+// `req.attribute(field)` 会触发 ensureBody → multipart 解析。攻击者 POST 1 MiB
 // multipart 垃圾到必然被 csrf 403 的端点,在校验前已花光解析 CPU/内存。只有当客户端
 // 真带了 form/urlencoded 类型且没在头里/query 里给 token 时,才付出解析代价。
 func readCsrfToken(req: HttpRequest, field: String): ?String {
@@ -154,7 +154,7 @@ func readCsrfToken(req: HttpRequest, field: String): ?String {
             }
         case None => ()
     }
-    // P1-9:**只**在 Content-Type 是 application/x-www-form-urlencoded 时才读 form 字段。
+    // **只**在 Content-Type 是 application/x-www-form-urlencoded 时才读 form 字段。
     // multipart/form-data 故意被排除 — 它常承载大文件,csrf 校验前触发解析会被攻击者
     // 用 1 MiB+ 垃圾体放大成显著 CPU/内存开销。multipart 端点应通过 X-CSRF-Token 头
     // 回传 token(AJAX 标准做法)。其它 Content-Type 同理 — token 应走 header / query。

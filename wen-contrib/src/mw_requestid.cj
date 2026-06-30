@@ -80,8 +80,8 @@ func defaultRequestIdGen(): () -> String {
 }
 
 // 把 UInt64 转 16 位小写十六进制字符串(大端,固定宽度)。
-// 原本是 wen-core/src/session.cj 内的私有 helper;P0-J 把 mw_requestid 拆到
-// wen_contrib 后,这里 inline 一份避免把 toHex64 在 wen 主包提到 public。
+// 原本是 wen-core/src/session.cj 内的私有 helper;把 mw_requestid 拆到 wen_contrib
+// 后,这里 inline 一份避免把 toHex64 在 wen 主包提到 public。
 func toHex64(v: UInt64): String {
     let digits = "0123456789abcdef"
     var s = ""

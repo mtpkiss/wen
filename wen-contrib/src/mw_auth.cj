@@ -23,7 +23,7 @@ public func basicAuth(verify: (String, String) -> Bool, realm!: String = "Restri
         req: HttpRequest, res: HttpResponse, next: Next => match (authScheme(req, "Basic ")) {
             case Some(b64) =>
                 let decoded = String.fromUtf8(base64Decode(b64))
-                // 安全:base64Decode 已是严格解码(P2-12)—— 掺非法字符 / 畸形填充的输入直接
+                // 安全:base64Decode 已是严格解码 —— 掺非法字符 / 畸形填充的输入直接
                 // 判废成空串。再叠一层防御:RFC 7617 要求 Basic 凭据形如 "user:pass",故强制
                 // 要求解码结果非空且包含 ":";否则按未提供凭据返回 401。
                 if (decoded.isEmpty() || !decoded.contains(":")) {
@@ -83,7 +83,7 @@ func escapeQuotedString(s: String): String {
     let bytes = s.toArray()
     let out = ArrayList<UInt8>()
     for (b in bytes) {
-        // P2-L:含 CR / LF / NUL 的 realm(来自配置 / i18n 等外部源)会让
+        // 安全:含 CR / LF / NUL 的 realm(来自配置 / i18n 等外部源)会让
         // checkHeaderSafe 抛异常 → 401 路径变 500,认证 UX 破坏。CR/LF/NUL 替换成 "_",
         // 比抛异常更稳:realm 是说明文字,字符替换不影响认证语义。
         if (b == UInt8(13) || b == UInt8(10) || b == UInt8(0)) {

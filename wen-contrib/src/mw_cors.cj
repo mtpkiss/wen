@@ -42,14 +42,14 @@ public func cors(origin: String, methods!: String = "GET, POST, PUT, DELETE, PAT
     }
     return {
         req: HttpRequest, res: HttpResponse, next: Next =>
-            // P1-L:Vary: Origin 总是发,无论 origin 是 "*" 还是具体值。原因:CDN /
+            // Vary: Origin 总是发,无论 origin 是 "*" 还是具体值。原因:CDN /
             // 反代缓存层会按响应内容缓存,如果不告知"这个响应随 Origin 头不同而不同",
             // 同一 URL 在 A 站点的 CORS 响应可能被发给 B 站点,跨域策略形同虚设。
             // 即使 origin="*" 也建议发,以便后续切换到精确 origin 时缓存能自动 invalidate。
             res.vary("Origin")
             res.set("Access-Control-Allow-Origin", origin)
             res.set("Access-Control-Allow-Methods", methods)
-            // P1-10:reflectRequestHeaders=true 时,把预检的
+            // reflectRequestHeaders=true 时,把预检的
             // Access-Control-Request-Headers 原样反射到 Allow-Headers,避免默认值
             // ("Content-Type, Authorization") 漏掉客户端实际需要的自定义头(浏览器
             // 拒绝实际请求 → "已配 CORS"假象)。注意:开启反射等于把客户端控制权交给
