@@ -170,6 +170,12 @@ public class HttpServer {
                 slots.release()
                 break
             }
+            // P2-1:shutdown 的顺序是「先置 shutdownRequested 再 close serverSocket」,
+            // 配合上面循环顶部 + acquire 后的双检查,把"还会接受新连接"的窗口收敛到极窄
+            // 一条。即便 shutdown 恰好落在双检查之后、accept() 返回之前(窄竞态),这条已
+            // accept 的连接也不漏:它照常计入 inflight、由下方 finally 走 drain 记账;且
+            // 因 shutdownRequested 此刻已 true,handleConnection 的 keep-alive 判定
+            // (`&& !shutdownRequested`)会直接给它 Connection: close,处理完即关,不复用。
             inflight.fetchAdd(1)
             spawn {
                 try {
@@ -333,20 +339,27 @@ public class HttpServer {
     // 默认处理完即关闭；而请求里显式的 Connection 报文头优先级最高，可覆盖默认
     // 行为——含 "close" 则关闭，含 "keep-alive" 则保持。
     func shouldKeepAlive(req: HttpRequest): Bool {
-        match (req.header("connection")) {
-            case Some(v) =>
-                let lv = v.toAsciiLower()
-                if (lv.contains("close")) {
-                    return false
-                }
-                if (lv.contains("keep-alive")) {
-                    return true
-                }
-            case None => ()
+        // P2-4:keep-alive 判定是纯读操作,正常不抛;但万一 header 取值 / 版本串解析在
+        // 畸形输入下抛异常,兜底默认 close(false)更稳 —— 宁可少复用一条连接,也不让
+        // 一次判定异常顺着 handleConnection 升级成连接级 500。
+        try {
+            match (req.header("connection")) {
+                case Some(v) =>
+                    let lv = v.toAsciiLower()
+                    if (lv.contains("close")) {
+                        return false
+                    }
+                    if (lv.contains("keep-alive")) {
+                        return true
+                    }
+                case None => ()
+            }
+            // P1-1:精确匹配 "HTTP/1.1",不能用 contains("1.1") 子串 — 客户端发
+            // "HTTP/2.1.1" 等含 1.1 子串的版本不应被当作 HTTP/1.1 默认 keep-alive。
+            return req.httpVersion.trimAscii() == "HTTP/1.1"
+        } catch (_: Exception) {
+            return false
         }
-        // P1-1:精确匹配 "HTTP/1.1",不能用 contains("1.1") 子串 — 客户端发
-        // "HTTP/2.1.1" 等含 1.1 子串的版本不应被当作 HTTP/1.1 默认 keep-alive。
-        return req.httpVersion.trimAscii() == "HTTP/1.1"
     }
 
     func writeError(client: TcpSocket, code: Int64, message: String, headers: HashMap<String, String>): Unit {
@@ -434,7 +447,10 @@ public class HttpServer {
                 afterMethod = rest
             case None => throw BadRequestException()
         }
-        if (method.isEmpty() || !isTokenString(method)) {
+        // isTokenString 先求值(纯函数,空串返回 false),避免它落在 `||` 右操作数里被
+        // cjlint G.EXP.03(短路右操作数含副作用)拦为 MANDATORY 违规 —— 语义不变。
+        let methodIsToken = isTokenString(method)
+        if (method.isEmpty() || !methodIsToken) {
             // 方法名必须为 RFC 7230 token(字母/数字/部分符号);非 token 字符抛 400。
             throw BadRequestException()
         }
@@ -496,7 +512,9 @@ public class HttpServer {
                 }
                 let (key, value) = splitOnce(line, ":")
                 let nameLow = key.toAsciiLower().trimAscii()
-                if (nameLow.isEmpty() || !isTokenString(nameLow)) {
+                // 同上:isTokenString 先求值,避开 cjlint G.EXP.03 短路副作用告警。
+                let nameIsToken = isTokenString(nameLow)
+                if (nameLow.isEmpty() || !nameIsToken) {
                     // 头名必须是 token;含空格/控制字符的"Hos:t example"会被切出非法 key。
                     throw BadRequestException()
                 }

@@ -329,6 +329,10 @@ func parsePart(req: HttpRequest, body: Array<UInt8>, start: Int64, end: Int64, s
         if (isFrameworkReservedAttribute(name)) {
             return
         }
+        // P2-3:同名文本字段「后写覆盖前写」—— req.attributes 是扁平 String→String 表,
+        // 重复字段只保留最后一个值,与 multer/Express「同名字段聚合成数组」语义不同。保持
+        // 扁平表是 API 简单性取舍(非缺陷):需要多值(如复选框组)的场景,请用不同字段名,
+        // 或自行从原始 body 解析。
         req.attributes[name] = String.fromUtf8(content)
     }
 }
